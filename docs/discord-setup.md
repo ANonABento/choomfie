@@ -52,7 +52,7 @@ Choomfie Discord: logged in as Choomfie#1234
 
 ## 6. Owner & Access
 
-The bot **auto-detects the owner** — whoever created the bot in the Discord developer portal is automatically set as the owner. This happens during `./install.sh`, `/choomfie:configure`, or as a startup fallback. No manual configuration needed.
+The bot **auto-detects the owner** — whoever created the bot in the Discord developer portal is automatically set as the owner. This happens during `./install.sh` or as a startup fallback. No manual configuration needed.
 
 The owner gets:
 - Full access to all tools (Bash, file ops, etc.)
