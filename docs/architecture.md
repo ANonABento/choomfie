@@ -34,10 +34,13 @@ Choomfie is a Claude Code Channels plugin — an MCP server that Claude Code spa
 
 1. User sends message on Discord (channel or DM)
 2. discord.js client receives it
-3. Server checks sender against allowlist
-4. Attachments downloaded to `~/.claude/channels/choomfie/inbox/`
-5. Server emits `notifications/claude/channel` with content + metadata
-6. Claude Code receives it as a `<channel>` tag in context
+3. **Trigger check:** DMs always pass; servers require `@mention` or reply to bot
+4. **Allowlist check:** sender must be on allowlist (or bootstrap mode if empty)
+5. **Rate limit check:** 5 second cooldown per user
+6. `@mention` stripped from message text for clean forwarding
+7. Attachments downloaded to `~/.claude/channels/choomfie/inbox/`
+8. Server emits `notifications/claude/channel` with content + metadata
+9. Claude Code receives it as a `<channel>` tag in context
 
 ### Outbound (Claude → Discord)
 

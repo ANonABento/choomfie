@@ -59,11 +59,17 @@ Choomfie Discord: logged in as Choomfie#1234
 
 ## 7. Test
 
-In your Discord server:
+In your Discord server (`@mention` required in servers):
 ```
-hey choomfie, what's up?
-remember my name is Ben
-what do you know about me?
+@Mahiro hey, what's up?
+@Mahiro remember my name is Ben
+@Mahiro what do you know about me?
+```
+
+In DMs (no mention needed):
+```
+hey, what's up?
+what's your status?
 ```
 
 ## Always-On Setup (tmux)

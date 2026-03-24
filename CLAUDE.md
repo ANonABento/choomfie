@@ -51,3 +51,7 @@ Status: choomfie_status
 - DMs require Partials.Channel + Partials.Message in discord.js
 - Images downloaded to `~/.claude/channels/choomfie/inbox/`
 - GitHub integration shells out to `gh` CLI
+- Servers: only responds when @mentioned or replied to (not every message)
+- DMs: always responds
+- Rate limit: 5 second cooldown per user
+- @mentions stripped from message before forwarding to Claude

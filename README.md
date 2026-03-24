@@ -30,6 +30,9 @@ Choomfie is a [Claude Code Channels](https://code.claude.com/docs/en/channels) p
 - Full status/config dashboard from Discord
 
 **Security**
+- Mention/reply trigger — only responds when `@mentioned` or replied to in servers
+- DMs always respond (private conversation)
+- Rate limiting (5 second cooldown per user)
 - Pairing codes + allowlist for access control
 - Permission relay for tool approvals
 
@@ -96,15 +99,21 @@ claude --dangerously-load-development-channels server:choomfie
 
 ### On Discord
 
-Just talk naturally:
+In servers, `@mention` the bot or reply to its messages:
 
 ```
-what files are in my project?
-remember my name is Ben
-remind me in 2 hours to check the deploy
-what PRs need review?
-be more sarcastic
+@Mahiro what files are in my project?
+@Mahiro remember my name is Ben
+@Mahiro remind me in 2 hours to check the deploy
+@Mahiro what PRs need review?
+```
+
+In DMs, just talk naturally — no mention needed:
+
+```
 what's your status?
+be more sarcastic
+what do you know about me?
 ```
 
 ### In Claude Code Terminal
