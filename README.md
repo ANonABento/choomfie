@@ -15,9 +15,12 @@ Built on top of Anthropic's official [Channels](https://code.claude.com/docs/en/
 - **Discord bridge** — chat with Claude Code from Discord
 - **Persistent memory** — Letta-inspired two-tier memory (core + archival) in SQLite
 - **Self-editing memory** — Claude proactively saves user preferences and context
+- **Conversation summaries** — auto-archive conversation context to archival memory
+- **Reminders** — "remind me in 30 minutes to check the deploy"
+- **Thread creation** — auto-create Discord threads for long conversations
 - **Permission relay** — approve/deny tool use from Discord DMs
 - **Access control** — pairing codes + allowlist for security
-- **Plugin skills** — `/ryuji:configure`, `/ryuji:access`, `/ryuji:memory`
+- **Plugin skills** — `/ryuji:configure`, `/ryuji:access`, `/ryuji:memory`, `/ryuji:status`
 
 ## Prerequisites
 
@@ -56,6 +59,8 @@ Just message in any channel the bot is in (or DM it):
 hey ryuji, what's in my project directory?
 remember that I prefer TypeScript
 what do you know about me?
+remind me in 30 minutes to check the deploy
+what reminders do I have?
 ```
 
 ### Skills (in Claude Code terminal)
@@ -69,6 +74,7 @@ what do you know about me?
 | `/ryuji:access policy allowlist` | Restrict to allowlisted users |
 | `/ryuji:memory list` | Show core memories |
 | `/ryuji:memory search <query>` | Search archival memory |
+| `/ryuji:status` | Show full config overview and stats |
 
 ### Memory Tools (used by Claude automatically)
 
@@ -80,6 +86,12 @@ Claude can call these during any session:
 | `search_memory` | Search archival memory |
 | `list_memories` | List all core memories |
 | `delete_memory` | Remove a core memory |
+| `save_conversation_summary` | Archive a conversation summary |
+| `memory_stats` | Memory counts and stats |
+| `set_reminder` | Schedule a reminder message |
+| `list_reminders` | Show active reminders |
+| `cancel_reminder` | Cancel a reminder by ID |
+| `create_thread` | Create a Discord thread |
 
 ### Permission Relay
 

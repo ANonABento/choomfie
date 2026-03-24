@@ -1,6 +1,6 @@
 # Roadmap
 
-## Phase 1: Foundation (Current)
+## Phase 1: Foundation (Done)
 
 - [x] MCP channel server (server.ts)
 - [x] Discord bridge via discord.js
@@ -11,22 +11,24 @@
 - [x] Plugin skills (/ryuji:configure, /ryuji:access, /ryuji:memory)
 - [x] Plugin packaging (.claude-plugin, .mcp.json)
 - [x] Documentation
-- [ ] Install dependencies and test locally
-- [ ] Test with real Discord bot + Claude Code Channels
+- [x] Install dependencies and test locally
+- [x] Test with real Discord bot + Claude Code Channels
 
-## Phase 2: Smart Memory
+## Phase 2: Smart Memory (Done)
 
-- [ ] Conversation summarization → auto-archive to archival memory
+- [x] Conversation summarization → auto-archive to archival memory
+- [x] Memory stats tool (count, size, oldest/newest)
 - [ ] Cross-session recall — auto-search archival when context seems relevant
 - [ ] Vector embeddings for semantic archival search
 - [ ] Memory decay — auto-archive stale core memories
-- [ ] Memory stats tool (count, size, oldest/newest)
 
-## Phase 3: More Tools
+## Phase 3: More Tools (Partial)
 
+- [x] `set_reminder` — schedule a message for later (with background checker)
+- [x] `list_reminders` / `cancel_reminder` — manage reminders
+- [x] `create_thread` — create Discord threads for long conversations
+- [x] `/ryuji:status` — config overview skill
 - [ ] `browse_url` — fetch and summarize web pages
-- [ ] `set_reminder` — schedule a message for later
-- [ ] `create_thread` — create Discord threads for long conversations
 - [ ] `pin_message` — pin important messages
 - [ ] `search_discord` — search channel history
 
