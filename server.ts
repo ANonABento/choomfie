@@ -228,12 +228,30 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "fetch_messages",
-      description: "Fetch recent messages from a Discord channel.",
+      description: "Fetch recent messages from a Discord channel with optional filters.",
       inputSchema: {
         type: "object" as const,
         properties: {
           chat_id: { type: "string" },
           limit: { type: "number", description: "Number of messages (default 20, max 100)" },
+          before: { type: "string", description: "Fetch messages before this message ID" },
+          after: { type: "string", description: "Fetch messages after this message ID" },
+          user_id: { type: "string", description: "Filter to only show messages from this user ID" },
+        },
+        required: ["chat_id"],
+      },
+    },
+    {
+      name: "search_messages",
+      description: "Search channel history for messages by user, keyword, or both. Paginates through up to 500 messages.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          chat_id: { type: "string", description: "Channel ID to search" },
+          user_id: { type: "string", description: "Filter by Discord user ID" },
+          keyword: { type: "string", description: "Search for messages containing this text (case-insensitive)" },
+          max_results: { type: "number", description: "Max results to return (default 10, max 50)" },
+          max_scan: { type: "number", description: "Max messages to scan (default 500, max 1000)" },
         },
         required: ["chat_id"],
       },
@@ -498,12 +516,62 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const channel = await discord.channels.fetch(args.chat_id as string);
       if (!channel?.isTextBased()) return err("Channel not found");
       const limit = Math.min((args.limit as number) || 20, 100);
-      const messages = await (channel as TextChannel).messages.fetch({ limit });
+      const fetchOpts: Record<string, unknown> = { limit };
+      if (args.before) fetchOpts.before = args.before as string;
+      if (args.after) fetchOpts.after = args.after as string;
+
+      let messages = await (channel as TextChannel).messages.fetch(fetchOpts);
+
+      // Client-side user filter
+      if (args.user_id) {
+        messages = messages.filter((m) => m.author.id === (args.user_id as string));
+      }
+
       const formatted = messages
         .reverse()
-        .map((m) => `[${m.author.username}] ${m.content}`)
+        .map((m) => `[${m.author.username} ${m.createdAt.toISOString()}] ${m.content}`)
         .join("\n");
-      return text(formatted || "(no messages)");
+      return text(formatted || "(no messages matching filters)");
+    }
+
+    case "search_messages": {
+      const channel = await discord.channels.fetch(args.chat_id as string);
+      if (!channel?.isTextBased()) return err("Channel not found");
+
+      const maxResults = Math.min((args.max_results as number) || 10, 50);
+      const maxScan = Math.min((args.max_scan as number) || 500, 1000);
+      const userId = args.user_id as string | undefined;
+      const keyword = (args.keyword as string | undefined)?.toLowerCase();
+
+      const results: string[] = [];
+      let lastId: string | undefined;
+      let scanned = 0;
+
+      while (results.length < maxResults && scanned < maxScan) {
+        const fetchOpts: Record<string, unknown> = { limit: 100 };
+        if (lastId) fetchOpts.before = lastId;
+
+        const batch = await (channel as TextChannel).messages.fetch(fetchOpts);
+        if (batch.size === 0) break;
+
+        for (const [, msg] of batch) {
+          scanned++;
+          const matchesUser = !userId || msg.author.id === userId;
+          const matchesKeyword = !keyword || msg.content.toLowerCase().includes(keyword);
+
+          if (matchesUser && matchesKeyword) {
+            results.push(`[${msg.author.username} ${msg.createdAt.toISOString()}] ${msg.content}`);
+            if (results.length >= maxResults) break;
+          }
+        }
+
+        lastId = batch.last()?.id;
+      }
+
+      if (results.length === 0) {
+        return text(`No messages found (scanned ${scanned} messages).`);
+      }
+      return text(`Found ${results.length} messages (scanned ${scanned}):\n${results.join("\n")}`);
     }
 
     case "create_thread": {
