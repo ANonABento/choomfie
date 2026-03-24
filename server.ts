@@ -571,6 +571,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         "## Access & Security",
         `  Policy: ${allowedUsers.size > 0 ? "allowlist" : "open (bootstrap mode — accepting all users)"}`,
         `  Allowed users: ${allowedUsers.size > 0 ? [...allowedUsers].join(", ") : "none (accepting all)"}`,
+        `  Trigger (DMs): always respond`,
+        `  Trigger (servers): @mention or reply to bot only`,
+        `  Rate limit: 1 message per 5 seconds per user`,
         `  Permission relay: enabled (tool approvals via DM)`,
         `  How to change: /choomfie:access in Claude Code terminal`,
         "",
@@ -804,12 +807,25 @@ discord.once(Events.ClientReady, (c) => {
   checkReminders(); // Run immediately on startup
 });
 
+// Rate limiting: per-user cooldown (5 seconds)
+const RATE_LIMIT_MS = 5_000;
+const lastMessageTime = new Map<string, number>();
+
+function isRateLimited(userId: string): boolean {
+  const now = Date.now();
+  const last = lastMessageTime.get(userId) || 0;
+  if (now - last < RATE_LIMIT_MS) return true;
+  lastMessageTime.set(userId, now);
+  return false;
+}
+
 discord.on(Events.MessageCreate, async (message: Message) => {
   if (message.author.bot) return;
 
   const userId = message.author.id;
+  const isDM = !message.guild;
 
-  // Handle permission replies before anything else
+  // Handle permission replies before anything else (no rate limit)
   const permMatch = PERMISSION_REPLY_RE.exec(message.content);
   if (permMatch && allowedUsers.has(userId)) {
     mcp.notification({
@@ -825,8 +841,8 @@ discord.on(Events.MessageCreate, async (message: Message) => {
     return;
   }
 
-  // Handle pairing requests (DMs only)
-  if (message.content.startsWith("!pair") && !message.guild) {
+  // Handle pairing requests (DMs only, no rate limit)
+  if (message.content.startsWith("!pair") && isDM) {
     const code = generatePairingCode();
     pendingPairings.set(code, {
       userId,
@@ -839,11 +855,29 @@ discord.on(Events.MessageCreate, async (message: Message) => {
     return;
   }
 
+  // --- Trigger rules ---
+  // DMs: always respond
+  // Servers: only when @mentioned or replying to the bot
+  if (!isDM) {
+    const isMentioned = message.mentions.has(discord.user!.id);
+    const isReplyToBot =
+      message.reference?.messageId &&
+      (await message.channel.messages
+        .fetch(message.reference.messageId)
+        .then((m) => m.author.id === discord.user!.id)
+        .catch(() => false));
+
+    if (!isMentioned && !isReplyToBot) return;
+  }
+
   // Only forward messages from allowlisted users
   if (!allowedUsers.has(userId)) {
     // If no users are allowlisted yet, accept from anyone (bootstrap mode)
     if (allowedUsers.size > 0) return;
   }
+
+  // Rate limit check
+  if (isRateLimited(userId)) return;
 
   // Build metadata
   const meta: Record<string, string> = {
@@ -883,11 +917,16 @@ discord.on(Events.MessageCreate, async (message: Message) => {
     meta.attachments = descriptions.join("; ");
   }
 
+  // Strip bot @mention from the message so Claude sees clean text
+  const cleanContent = message.content
+    .replace(new RegExp(`<@!?${discord.user!.id}>`, "g"), "")
+    .trim();
+
   // Forward to Claude Code
   mcp.notification({
     method: "notifications/claude/channel",
     params: {
-      content: message.content,
+      content: cleanContent || "(empty message — user may have just mentioned you)",
       meta,
     },
   });
