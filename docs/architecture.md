@@ -73,7 +73,7 @@ Choomfie is a Claude Code Channels plugin — an MCP server that Claude Code spa
 
 ### Owner Auto-Detection
 
-**Primary (setup):** During `/choomfie:configure`, after saving the token, curls the Discord API to fetch the app owner's user ID and writes it to `access.json`.
+**Primary (setup):** During `./install.sh` or `/choomfie:configure`, after saving the token, curls the Discord API to fetch the app owner's user ID and writes it to `access.json`.
 
 **Fallback (startup):** If no owner is set when the bot boots (e.g. setup was skipped or failed), fetches the app owner via `client.application.fetch()` and persists it.
 

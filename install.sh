@@ -56,6 +56,24 @@ else
   if [ -n "$token" ]; then
     echo "DISCORD_TOKEN=$token" > "$ENV_FILE"
     echo "[3/5] Token saved to $ENV_FILE"
+
+    # Auto-detect owner from Discord application info
+    echo "  Detecting bot owner..."
+    APP_JSON=$(curl -s -H "Authorization: Bot $token" https://discord.com/api/v10/oauth2/applications/@me 2>/dev/null || true)
+    OWNER_ID=$(echo "$APP_JSON" | grep -o '"owner"[^}]*"id"[^"]*"[^"]*"' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+    if [ -n "$OWNER_ID" ]; then
+      cat > "$DATA_DIR/access.json" <<EOJSON
+{
+  "policy": "allowlist",
+  "owner": "$OWNER_ID",
+  "allowed": ["$OWNER_ID"]
+}
+EOJSON
+      echo "  Owner auto-detected: $OWNER_ID"
+    else
+      echo "  Could not detect owner — set manually with '/choomfie:access owner <USER_ID>'"
+    fi
   else
     echo "[3/5] Skipped — run '/choomfie:configure <token>' later in Claude Code"
   fi
@@ -116,6 +134,8 @@ echo "Start Choomfie:"
 echo "  choomfie          # normal mode"
 echo "  choomfie --tmux   # background mode (survives terminal close)"
 echo ""
-echo "First time? Pair your Discord account:"
-echo "  1. DM the bot '!pair' on Discord"
+echo "Owner is auto-detected from your Discord app — no pairing needed!"
+echo ""
+echo "To add other users:"
+echo "  1. They DM the bot '!pair' on Discord"
 echo "  2. Run '/choomfie:access pair <code>' in the Claude Code session"
