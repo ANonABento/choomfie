@@ -1,0 +1,107 @@
+/**
+ * Memory store — Letta-inspired self-editing memory.
+ *
+ * Two tiers:
+ *   - Core memory: always in context (user profile, preferences, active goals)
+ *   - Archival memory: searchable long-term storage (past conversations, learnings)
+ */
+
+import Database from "better-sqlite3";
+import { resolve } from "path";
+
+const DB_PATH = resolve(import.meta.dirname, "../../ryuji.db");
+
+export interface CoreMemory {
+  key: string;
+  value: string;
+  updatedAt: string;
+}
+
+export interface ArchivalMemory {
+  id: number;
+  content: string;
+  tags: string;
+  createdAt: string;
+}
+
+export class MemoryStore {
+  private db: Database.Database;
+
+  constructor(dbPath: string = DB_PATH) {
+    this.db = new Database(dbPath);
+    this.init();
+  }
+
+  private init() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS core_memory (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS archival_memory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content TEXT NOT NULL,
+        tags TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+    `);
+  }
+
+  // --- Core memory (always loaded into context) ---
+
+  getCoreMemory(): CoreMemory[] {
+    return this.db
+      .prepare("SELECT key, value, updated_at as updatedAt FROM core_memory")
+      .all() as CoreMemory[];
+  }
+
+  setCoreMemory(key: string, value: string) {
+    this.db
+      .prepare(
+        `INSERT INTO core_memory (key, value, updated_at)
+         VALUES (?, ?, datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')`
+      )
+      .run(key, value, value);
+  }
+
+  deleteCoreMemory(key: string) {
+    this.db.prepare("DELETE FROM core_memory WHERE key = ?").run(key);
+  }
+
+  // --- Archival memory (searchable long-term) ---
+
+  addArchival(content: string, tags: string = "") {
+    this.db
+      .prepare("INSERT INTO archival_memory (content, tags) VALUES (?, ?)")
+      .run(content, tags);
+  }
+
+  searchArchival(query: string, limit: number = 10): ArchivalMemory[] {
+    return this.db
+      .prepare(
+        `SELECT id, content, tags, created_at as createdAt
+         FROM archival_memory
+         WHERE content LIKE ?
+         ORDER BY created_at DESC
+         LIMIT ?`
+      )
+      .all(`%${query}%`, limit) as ArchivalMemory[];
+  }
+
+  // --- Build context string for agent ---
+
+  buildMemoryContext(): string {
+    const core = this.getCoreMemory();
+    if (core.length === 0) return "";
+
+    const lines = core.map((m) => `- ${m.key}: ${m.value}`);
+    return `## Memory\n${lines.join("\n")}`;
+  }
+
+  close() {
+    this.db.close();
+  }
+}
