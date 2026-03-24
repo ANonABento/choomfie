@@ -4,9 +4,11 @@
  * Two tiers:
  *   - Core memory: always in context (user profile, preferences, active goals)
  *   - Archival memory: searchable long-term storage (past conversations, learnings)
+ *
+ * Uses Bun's built-in SQLite (bun:sqlite).
  */
 
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 
 export interface CoreMemory {
   key: string;
@@ -22,10 +24,11 @@ export interface ArchivalMemory {
 }
 
 export class MemoryStore {
-  private db: Database.Database;
+  private db: Database;
 
   constructor(dbPath: string) {
-    this.db = new Database(dbPath);
+    this.db = new Database(dbPath, { create: true });
+    this.db.exec("PRAGMA journal_mode = WAL");
     this.init();
   }
 
@@ -48,33 +51,33 @@ export class MemoryStore {
 
   getCoreMemory(): CoreMemory[] {
     return this.db
-      .prepare("SELECT key, value, updated_at as updatedAt FROM core_memory")
+      .query("SELECT key, value, updated_at as updatedAt FROM core_memory")
       .all() as CoreMemory[];
   }
 
   setCoreMemory(key: string, value: string) {
     this.db
-      .prepare(
+      .query(
         `INSERT INTO core_memory (key, value, updated_at)
-         VALUES (?, ?, datetime('now'))
-         ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')`
+         VALUES (?1, ?2, datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')`
       )
-      .run(key, value, value);
+      .run(key, value);
   }
 
   deleteCoreMemory(key: string) {
-    this.db.prepare("DELETE FROM core_memory WHERE key = ?").run(key);
+    this.db.query("DELETE FROM core_memory WHERE key = ?").run(key);
   }
 
   addArchival(content: string, tags: string = "") {
     this.db
-      .prepare("INSERT INTO archival_memory (content, tags) VALUES (?, ?)")
+      .query("INSERT INTO archival_memory (content, tags) VALUES (?, ?)")
       .run(content, tags);
   }
 
   searchArchival(query: string, limit: number = 10): ArchivalMemory[] {
     return this.db
-      .prepare(
+      .query(
         `SELECT id, content, tags, created_at as createdAt
          FROM archival_memory
          WHERE content LIKE ?
