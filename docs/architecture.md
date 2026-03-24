@@ -67,9 +67,17 @@ Choomfie is a Claude Code Channels plugin — an MCP server that Claude Code spa
 
 1. Claude needs to run a tool (Bash, Write, etc.)
 2. Claude Code sends permission request to the channel
-3. server.ts DMs it to all allowlisted users
-4. User replies `yes xxxxx` or `no xxxxx`
+3. server.ts DMs it to the owner only (or all allowlisted if no owner set)
+4. Owner replies `yes xxxxx` or `no xxxxx`
 5. Verdict forwarded back to Claude Code
+
+### Owner Auto-Detection
+
+1. On startup, if no owner is set in `access.json`
+2. Fetches Discord application info via `client.application.fetch()`
+3. Grabs the app owner's user ID (whoever created the bot in Discord dev portal)
+4. Saves to `access.json` as owner + adds to allowlist
+5. Zero config — just set the token and the rest is automatic
 
 ## State Locations
 

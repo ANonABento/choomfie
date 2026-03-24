@@ -16,19 +16,24 @@ The access file is at `~/.claude/channels/choomfie/access.json` with format:
 ```json
 {
   "policy": "allowlist",
+  "owner": "discord_user_id_of_owner",
   "allowed": ["discord_user_id_1", "discord_user_id_2"]
 }
 ```
 
+The `owner` field designates which user has full control (can trigger dangerous tools like Bash, file operations, etc). All other allowlisted users can only chat, use memory, and set reminders — they cannot trigger system tools. The first user to pair automatically becomes the owner if no owner is set.
+
 Handle $ARGUMENTS:
 
-**`pair <CODE>`** — Approve a pending pairing. The user DMs the Discord bot `!pair`, gets a 5-letter code, then runs this command. Look up the code, add the user ID to the allowlist, and save.
+**`pair <CODE>`** — Approve a pending pairing. The user DMs the Discord bot `!pair`, gets a 5-letter code, then runs this command. Look up the code, add the user ID to the allowlist, and save. If no `owner` field exists yet, set this user as owner.
 
-**`list`** — Show all allowed user IDs.
+**`list`** — Show all allowed user IDs and indicate which is the owner.
 
 **`add <USER_ID>`** — Add a Discord user ID to the allowlist.
 
-**`remove <USER_ID>`** — Remove a Discord user ID from the allowlist.
+**`remove <USER_ID>`** — Remove a Discord user ID from the allowlist. Cannot remove the owner.
+
+**`owner <USER_ID>`** — Transfer ownership to another allowlisted user.
 
 **`policy allowlist`** — Only allowlisted users can message (recommended).
 

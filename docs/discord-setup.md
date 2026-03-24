@@ -50,12 +50,22 @@ You should see in stderr:
 Choomfie Discord: logged in as Choomfie#1234
 ```
 
-## 6. Pair Your Discord Account
+## 6. Owner & Access
 
-1. DM the bot `!pair` on Discord
-2. You'll get a 5-letter pairing code
+The bot **auto-detects the owner** on startup — whoever created the bot in the Discord developer portal is automatically set as the owner. No manual configuration needed.
+
+The owner gets:
+- Full access to all tools (Bash, file ops, etc.)
+- Permission relay — tool approval requests sent via DM
+- Ability to approve/deny with `yes <code>` or `no <code>`
+
+To add other users:
+1. They DM the bot `!pair` on Discord
+2. They get a 5-letter pairing code
 3. In Claude Code: `/choomfie:access pair <code>`
 4. Lock down: `/choomfie:access policy allowlist`
+
+Other users get chat, memory, and reminder access only (no system tools).
 
 ## 7. Test
 

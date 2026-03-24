@@ -47,6 +47,8 @@ Status: choomfie_status
 
 ## Key Details
 
+- Owner auto-detected from Discord application info on startup (whoever created the bot in Discord dev portal)
+- Permission relay: owner receives tool approval requests via DM, replies `yes/no <code>` to approve/deny
 - State lives in `~/.claude/channels/choomfie/` (token, access list, database, inbox)
 - Personality loaded from core memory (key: "personality") at startup
 - Console output goes to stderr (stdout is MCP stdio transport)
