@@ -1015,26 +1015,23 @@ discord.once(Events.ClientReady, async (c) => {
   console.error(`Choomfie Discord: logged in as ${c.user.tag}`);
   startedAt = Date.now();
 
-  // Auto-detect owner from Discord application info
+  // Fallback: auto-detect owner if not set during setup
   if (!ownerUserId) {
     try {
       const app = await c.application.fetch();
       const appOwner = app.owner;
       if (appOwner) {
-        const detectedId = "id" in appOwner ? appOwner.id : appOwner.id;
-        ownerUserId = detectedId;
-        allowedUsers.add(detectedId);
-        // Persist to access.json
-        const accessData = {
+        ownerUserId = appOwner.id;
+        allowedUsers.add(appOwner.id);
+        await Bun.write(accessPath, JSON.stringify({
           policy: "allowlist",
-          owner: detectedId,
+          owner: appOwner.id,
           allowed: [...allowedUsers],
-        };
-        await Bun.write(accessPath, JSON.stringify(accessData, null, 2));
-        console.error(`Choomfie: auto-detected owner from Discord app: ${detectedId}`);
+        }, null, 2));
+        console.error(`Choomfie: auto-detected owner from Discord app: ${appOwner.id}`);
       }
-    } catch (err) {
-      console.error(`Choomfie: failed to auto-detect owner:`, err);
+    } catch {
+      console.error("Choomfie: no owner set — run /choomfie:access owner <USER_ID>");
     }
   }
 
