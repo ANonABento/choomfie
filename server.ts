@@ -18,6 +18,7 @@ import {
   Events,
   GatewayIntentBits,
   ChannelType,
+  Partials,
   type Message,
   type TextChannel,
   type ThreadChannel,
@@ -788,6 +789,10 @@ const discord = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages,
+  ],
+  partials: [
+    Partials.Channel,  // Required for DM support
+    Partials.Message,
   ],
 });
 
