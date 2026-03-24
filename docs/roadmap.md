@@ -18,23 +18,26 @@
 
 - [x] Conversation summarization → auto-archive to archival memory
 - [x] Memory stats tool (count, size, oldest/newest)
+- [x] Configurable personality via core memory (key: "personality")
 - [ ] Cross-session recall — auto-search archival when context seems relevant
 - [ ] Vector embeddings for semantic archival search
 - [ ] Memory decay — auto-archive stale core memories
 
-## Phase 3: More Tools (Partial)
+## Phase 3: Tools & Integration (Done)
 
-- [x] `set_reminder` — schedule a message for later (with background checker)
-- [x] `list_reminders` / `cancel_reminder` — manage reminders
-- [x] `create_thread` — create Discord threads for long conversations
+- [x] `set_reminder` / `list_reminders` / `cancel_reminder` — scheduled messages
+- [x] `create_thread` — Discord threads for long conversations
+- [x] `pin_message` / `unpin_message` — pin important messages
+- [x] `check_github` — PRs, issues, notifications via gh CLI
+- [x] Image support — download and read inbound attachments
+- [x] DM mode — private conversations, is_dm flag in meta
 - [x] `/ryuji:status` — config overview skill
 - [ ] `browse_url` — fetch and summarize web pages
-- [ ] `pin_message` — pin important messages
 - [ ] `search_discord` — search channel history
 
 ## Phase 4: Personality & Character
 
-- [ ] Configurable personality via core memory
+- [x] Configurable personality via core memory
 - [ ] Mood/tone adaptation based on conversation
 - [ ] Custom system prompt templates
 - [ ] Avatar/presence management
@@ -46,7 +49,15 @@
 - [ ] Webhook channel (generic HTTP inbound)
 - [ ] Web UI channel
 
-## Phase 6: Autonomy
+## Phase 6: Voice
+
+- [ ] Discord voice channel integration
+- [ ] Speech-to-text (STT) for voice input
+- [ ] Text-to-speech (TTS) for voice output
+- [ ] Wake word detection
+- [ ] Voice activity detection (VAD)
+
+## Phase 7: Autonomy
 
 - [ ] Background tasks — agent works while you're away
 - [ ] Cron scheduling via Claude Code's `/schedule` feature
@@ -55,7 +66,6 @@
 
 ## Non-Goals (For Now)
 
-- **Voice** — adds complexity, Discord voice API is different
 - **Multi-user isolation** — Ryuji is a personal assistant
 - **Custom model training** — use Claude as-is
 - **Standalone mode** — Channels plugin is the path, not a separate bot

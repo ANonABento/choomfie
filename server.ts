@@ -23,6 +23,11 @@ import {
   type ThreadChannel,
 } from "discord.js";
 import { MemoryStore } from "./lib/memory.ts";
+import { mkdir } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Config
@@ -97,8 +102,12 @@ async function checkReminders() {
 // MCP Server
 // ---------------------------------------------------------------------------
 
+// Build personality from core memory or use default
+const personalityMemory = memory.getCoreMemory().find((m) => m.key === "personality");
+const personality = personalityMemory?.value || "Be concise, helpful, and casual.";
+
 const mcp = new Server(
-  { name: "ryuji", version: "0.2.0" },
+  { name: "ryuji", version: "0.3.0" },
   {
     capabilities: {
       tools: {},
@@ -108,21 +117,31 @@ const mcp = new Server(
       },
     },
     instructions: [
-      "You are Ryuji, a personal AI assistant with persistent memory. Be concise, helpful, and casual.",
+      `You are Ryuji, a personal AI assistant with persistent memory. ${personality}`,
       "",
       "The sender reads Discord, not this session. Anything you want them to see must go through the reply tool — your transcript output never reaches their chat.",
       "",
-      'Messages from Discord arrive as <channel source="ryuji" chat_id="..." message_id="..." user="..." user_id="..." ts="...">.',
+      'Messages from Discord arrive as <channel source="ryuji" chat_id="..." message_id="..." user="..." user_id="..." ts="..." is_dm="true|false">.',
       "Reply with the reply tool — pass chat_id back. Use reply_to only when replying to an earlier message.",
+      'If is_dm="true", this is a private DM conversation.',
       "",
       "reply accepts file paths (files: ['/abs/path.png']) for attachments.",
       "Use react to add emoji reactions. Use edit_message for interim progress updates — edits don't trigger push notifications.",
+      "Use pin_message to pin important messages in a channel.",
+      "",
+      "## Personality",
+      "Your personality can be changed by the user. If they say something like 'be more sarcastic' or 'talk like a pirate',",
+      "save it with save_memory using key='personality'. It takes effect on next session restart.",
+      `Current personality: ${personality}`,
       "",
       "## Memory",
       "You have persistent memory tools. Use save_memory to remember important facts about the user.",
       "Use search_memory to recall past context. Use list_memories to see what you know.",
       "Proactively save useful information — preferences, project context, personal details the user shares.",
       "After meaningful conversations, use save_conversation_summary to archive a summary for future recall.",
+      "",
+      "## Images",
+      'If a message has attachment_count and attachments attributes, the user sent files. Use the file_path attribute to Read the file.',
       "",
       "## Reminders",
       "Use set_reminder when the user asks to be reminded of something. Parse natural time expressions:",
@@ -135,6 +154,9 @@ const mcp = new Server(
       "## Threads",
       "For long or complex conversations, use create_thread to move the discussion into a Discord thread.",
       "This keeps channels clean and groups related messages together.",
+      "",
+      "## GitHub",
+      "Use check_github to check PRs, issues, or notifications. The user has the gh CLI installed.",
       "",
       memory.buildMemoryContext(),
       "",
@@ -223,6 +245,52 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           name: { type: "string", description: "Thread name (max 100 chars)" },
         },
         required: ["chat_id", "message_id", "name"],
+      },
+    },
+
+    {
+      name: "pin_message",
+      description: "Pin a message in a Discord channel.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          chat_id: { type: "string" },
+          message_id: { type: "string" },
+        },
+        required: ["chat_id", "message_id"],
+      },
+    },
+    {
+      name: "unpin_message",
+      description: "Unpin a message in a Discord channel.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          chat_id: { type: "string" },
+          message_id: { type: "string" },
+        },
+        required: ["chat_id", "message_id"],
+      },
+    },
+
+    // --- GitHub tools ---
+    {
+      name: "check_github",
+      description: "Check GitHub PRs, issues, or notifications using the gh CLI.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          command: {
+            type: "string",
+            enum: ["prs", "issues", "notifications", "pr_status"],
+            description: "What to check: prs (open PRs), issues (open issues), notifications, pr_status (current branch PR)",
+          },
+          repo: {
+            type: "string",
+            description: "Repository in owner/repo format (optional, defaults to current repo)",
+          },
+        },
+        required: ["command"],
       },
     },
 
@@ -436,6 +504,54 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text(`Thread created: ${thread.name} (id: ${thread.id})`);
     }
 
+    case "pin_message": {
+      const channel = await discord.channels.fetch(args.chat_id as string);
+      if (!channel?.isTextBased()) return err("Channel not found");
+      const pinMsg = await (channel as TextChannel).messages.fetch(args.message_id as string);
+      await pinMsg.pin();
+      return text("pinned");
+    }
+
+    case "unpin_message": {
+      const channel = await discord.channels.fetch(args.chat_id as string);
+      if (!channel?.isTextBased()) return err("Channel not found");
+      const unpinMsg = await (channel as TextChannel).messages.fetch(args.message_id as string);
+      await unpinMsg.unpin();
+      return text("unpinned");
+    }
+
+    // --- GitHub tools ---
+    case "check_github": {
+      const repo = args.repo ? ["-R", args.repo as string] : [];
+      let ghArgs: string[] = [];
+
+      switch (args.command) {
+        case "prs":
+          ghArgs = ["pr", "list", "--state=open", "--limit=10", ...repo];
+          break;
+        case "issues":
+          ghArgs = ["issue", "list", "--state=open", "--limit=10", ...repo];
+          break;
+        case "notifications":
+          ghArgs = ["api", "/notifications", "--jq", ".[].subject.title"];
+          break;
+        case "pr_status":
+          ghArgs = ["pr", "status", ...repo];
+          break;
+        default:
+          return err(`Unknown GitHub command: ${args.command}`);
+      }
+
+      try {
+        const { stdout, stderr } = await execFileAsync("gh", ghArgs, {
+          timeout: 15_000,
+        });
+        return text(stdout.trim() || stderr.trim() || "(no results)");
+      } catch (e: any) {
+        return err(`GitHub CLI error: ${e.message}`);
+      }
+    }
+
     // --- Memory tools ---
     case "save_memory": {
       const memType = (args.type as string) || "core";
@@ -625,18 +741,50 @@ discord.on(Events.MessageCreate, async (message: Message) => {
     if (allowedUsers.size > 0) return;
   }
 
+  // Build metadata
+  const meta: Record<string, string> = {
+    chat_id: message.channelId,
+    message_id: message.id,
+    user: message.author.username,
+    user_id: userId,
+    ts: message.createdAt.toISOString(),
+    is_dm: message.guild ? "false" : "true",
+  };
+
+  // Handle image/file attachments
+  if (message.attachments.size > 0) {
+    meta.attachment_count = String(message.attachments.size);
+    const descriptions: string[] = [];
+    const downloadDir = `${DATA_DIR}/inbox`;
+    await mkdir(downloadDir, { recursive: true });
+
+    for (const [, attachment] of message.attachments) {
+      descriptions.push(
+        `${attachment.name} (${attachment.contentType || "unknown"}, ${Math.round((attachment.size || 0) / 1024)}KB)`
+      );
+
+      // Download the first attachment for Claude to read
+      if (descriptions.length === 1) {
+        try {
+          const response = await fetch(attachment.url);
+          const buffer = await response.arrayBuffer();
+          const filePath = `${downloadDir}/${Date.now()}_${attachment.name}`;
+          await Bun.write(filePath, buffer);
+          meta.file_path = filePath;
+        } catch {
+          // Download failed, Claude will just see the description
+        }
+      }
+    }
+    meta.attachments = descriptions.join("; ");
+  }
+
   // Forward to Claude Code
   mcp.notification({
     method: "notifications/claude/channel",
     params: {
       content: message.content,
-      meta: {
-        chat_id: message.channelId,
-        message_id: message.id,
-        user: message.author.username,
-        user_id: userId,
-        ts: message.createdAt.toISOString(),
-      },
+      meta,
     },
   });
 });

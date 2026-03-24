@@ -18,6 +18,11 @@ Built on top of Anthropic's official [Channels](https://code.claude.com/docs/en/
 - **Conversation summaries** — auto-archive conversation context to archival memory
 - **Reminders** — "remind me in 30 minutes to check the deploy"
 - **Thread creation** — auto-create Discord threads for long conversations
+- **Configurable personality** — "be more sarcastic" changes behavior via memory
+- **Image support** — send/receive images on Discord
+- **DM mode** — private conversations without any prefix
+- **GitHub integration** — check PRs, issues, notifications via `gh` CLI
+- **Pin messages** — pin/unpin important messages
 - **Permission relay** — approve/deny tool use from Discord DMs
 - **Access control** — pairing codes + allowlist for security
 - **Plugin skills** — `/ryuji:configure`, `/ryuji:access`, `/ryuji:memory`, `/ryuji:status`
@@ -53,15 +58,19 @@ claude --channels plugin:ryuji
 
 ### From Discord
 
-Just message in any channel the bot is in (or DM it):
+Just message in any channel the bot is in (or DM it — no prefix needed):
 
 ```
 hey ryuji, what's in my project directory?
 remember that I prefer TypeScript
 what do you know about me?
 remind me in 30 minutes to check the deploy
-what reminders do I have?
+be more sarcastic (changes personality)
+what PRs need review?
+pin that
 ```
+
+Send images too — Ryuji downloads and reads them.
 
 ### Skills (in Claude Code terminal)
 
@@ -92,6 +101,8 @@ Claude can call these during any session:
 | `list_reminders` | Show active reminders |
 | `cancel_reminder` | Cancel a reminder by ID |
 | `create_thread` | Create a Discord thread |
+| `pin_message` / `unpin_message` | Pin/unpin Discord messages |
+| `check_github` | Check PRs, issues, notifications via `gh` CLI |
 
 ### Permission Relay
 
