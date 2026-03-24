@@ -32,10 +32,10 @@ if [ ${#missing[@]} -gt 0 ]; then
   exit 1
 fi
 
-echo "[1/5] Prerequisites OK (claude, bun)"
+echo "[1/6] Prerequisites OK (claude, bun)"
 
 # --- Install dependencies ---
-echo "[2/5] Installing dependencies..."
+echo "[2/6] Installing dependencies..."
 (cd "$CHOOMFIE_DIR" && bun install --no-summary)
 
 # --- Discord token ---
@@ -43,7 +43,7 @@ mkdir -p "$DATA_DIR"
 ENV_FILE="$DATA_DIR/.env"
 
 if [ -f "$ENV_FILE" ] && grep -q "DISCORD_TOKEN=" "$ENV_FILE"; then
-  echo "[3/5] Discord token already configured"
+  echo "[3/6] Discord token already configured"
 else
   echo ""
   echo "You need a Discord bot token. If you don't have one yet:"
@@ -55,33 +55,42 @@ else
   read -rp "Paste your Discord bot token (or press Enter to skip): " token
   if [ -n "$token" ]; then
     echo "DISCORD_TOKEN=$token" > "$ENV_FILE"
-    echo "[3/5] Token saved to $ENV_FILE"
+    echo "[3/6] Token saved to $ENV_FILE"
+  else
+    echo "[3/6] Skipped — run '/choomfie:configure <token>' later in Claude Code"
+  fi
+fi
 
-    # Auto-detect owner from Discord application info
-    echo "  Detecting bot owner..."
-    APP_JSON=$(curl -s -H "Authorization: Bot $token" https://discord.com/api/v10/oauth2/applications/@me 2>/dev/null || true)
-    OWNER_ID=$(echo "$APP_JSON" | grep -o '"owner"[^}]*"id"[^"]*"[^"]*"' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+# --- Detect owner ---
+echo "[4/6] Detecting bot owner..."
 
-    if [ -n "$OWNER_ID" ]; then
-      cat > "$DATA_DIR/access.json" <<EOJSON
+if [ -f "$DATA_DIR/access.json" ] && grep -q '"owner"' "$DATA_DIR/access.json"; then
+  EXISTING_OWNER=$(grep -o '"owner"[[:space:]]*:[[:space:]]*"[^"]*"' "$DATA_DIR/access.json" | cut -d'"' -f4)
+  echo "  Owner already set: $EXISTING_OWNER"
+elif [ -f "$ENV_FILE" ] && grep -q "DISCORD_TOKEN=" "$ENV_FILE"; then
+  TOKEN=$(grep "DISCORD_TOKEN=" "$ENV_FILE" | cut -d'=' -f2-)
+  APP_JSON=$(curl -s -H "Authorization: Bot $TOKEN" https://discord.com/api/v10/oauth2/applications/@me 2>/dev/null || true)
+  OWNER_ID=$(echo "$APP_JSON" | grep -o '"owner"[^}]*"id"[^"]*"[^"]*"' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+  if [ -n "$OWNER_ID" ]; then
+    cat > "$DATA_DIR/access.json" <<EOJSON
 {
   "policy": "allowlist",
   "owner": "$OWNER_ID",
   "allowed": ["$OWNER_ID"]
 }
 EOJSON
-      echo "  Owner auto-detected: $OWNER_ID"
-    else
-      echo "  Could not detect owner — set manually with '/choomfie:access owner <USER_ID>'"
-    fi
+    echo "  Owner auto-detected: $OWNER_ID"
   else
-    echo "[3/5] Skipped — run '/choomfie:configure <token>' later in Claude Code"
+    echo "  Could not detect owner — set manually with '/choomfie:access owner <USER_ID>'"
   fi
+else
+  echo "  No token configured — skipping owner detection"
 fi
 
 # --- Register MCP server ---
 CLAUDE_CONFIG="$HOME/.claude.json"
-echo "[4/5] Registering MCP server..."
+echo "[5/6] Registering MCP server..."
 
 if [ -f "$CLAUDE_CONFIG" ]; then
   if grep -q '"choomfie"' "$CLAUDE_CONFIG"; then
@@ -104,7 +113,7 @@ else
 fi
 
 # --- Install choomfie command ---
-echo "[5/5] Installing 'choomfie' command..."
+echo "[6/6] Installing 'choomfie' command..."
 mkdir -p "$BIN_DIR"
 chmod +x "$CHOOMFIE_DIR/bin/choomfie"
 ln -sf "$CHOOMFIE_DIR/bin/choomfie" "$BIN_DIR/choomfie"
@@ -133,9 +142,3 @@ echo ""
 echo "Start Choomfie:"
 echo "  choomfie          # normal mode"
 echo "  choomfie --tmux   # background mode (survives terminal close)"
-echo ""
-echo "Owner is auto-detected from your Discord app — no pairing needed!"
-echo ""
-echo "To add other users:"
-echo "  1. They DM the bot '!pair' on Discord"
-echo "  2. Run '/choomfie:access pair <code>' in the Claude Code session"
