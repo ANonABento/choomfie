@@ -13,7 +13,11 @@ async function run(args: string[]): Promise<string> {
     stderr: "pipe",
   });
   const output = await new Response(proc.stdout).text();
-  await proc.exited;
+  const exitCode = await proc.exited;
+  if (exitCode !== 0 && !output.trim()) {
+    const stderr = await new Response(proc.stderr).text();
+    throw new Error(`yt-dlp failed (exit ${exitCode}): ${stderr.slice(0, 200)}`);
+  }
   return output.trim();
 }
 
@@ -38,9 +42,7 @@ export const ytdlpProvider: YouTubeProvider = {
           const data = JSON.parse(line);
           return {
             title: data.title || "Unknown",
-            url: data.url
-              ? `https://www.youtube.com/watch?v=${data.id || data.url}`
-              : `https://www.youtube.com/watch?v=${data.id}`,
+            url: `https://www.youtube.com/watch?v=${data.id}`,
             channel: data.channel || data.uploader || "Unknown",
             duration: formatDuration(data.duration),
             views: data.view_count
@@ -58,26 +60,42 @@ export const ytdlpProvider: YouTubeProvider = {
 
   async getTranscript(videoUrl: string): Promise<TranscriptSegment[]> {
     try {
-      // Get auto-generated or manual subtitles
-      const output = await run([
+      // Extract video ID for temp file naming
+      const idMatch = videoUrl.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+      const videoId = idMatch?.[1] || "unknown";
+      const outPath = `/tmp/yt-transcript-${videoId}`;
+
+      // Download subtitles
+      await run([
         videoUrl,
         "--write-auto-subs",
         "--write-subs",
-        "--sub-langs", "en,ja",
+        "--sub-langs", "en.*,ja",
         "--skip-download",
         "--sub-format", "json3",
-        "--output", "/tmp/yt-transcript-%(id)s",
-        "--print", "after_move:filepath",
+        "--output", outPath,
       ]);
 
-      // Read the subtitle file
-      const subFiles = await Bun.file("/tmp/").text().catch(() => "");
-
-      // Fallback: use --get-description for basic content
-      const desc = await run([videoUrl, "--get-description"]);
-      if (desc) {
-        return [{ text: desc }];
+      // Try to read the subtitle file (json3 format)
+      const subGlob = new Bun.Glob(`${outPath}*.json3`);
+      for await (const file of subGlob.scan("/")) {
+        try {
+          const content = await Bun.file(`/${file}`).json();
+          const events = content.events || [];
+          return events
+            .filter((e: any) => e.segs)
+            .map((e: any) => ({
+              text: e.segs.map((s: any) => s.utf8).join(""),
+              start: e.tStartMs ? e.tStartMs / 1000 : undefined,
+              duration: e.dDurationMs ? e.dDurationMs / 1000 : undefined,
+            }))
+            .filter((s: TranscriptSegment) => s.text.trim());
+        } catch {}
       }
+
+      // Fallback: get video description
+      const desc = await run([videoUrl, "--get-description"]).catch(() => "");
+      if (desc) return [{ text: desc }];
       return [];
     } catch {
       return [];
@@ -111,7 +129,7 @@ export const ytdlpProvider: YouTubeProvider = {
 };
 
 function formatDuration(seconds?: number): string {
-  if (!seconds) return "?";
+  if (seconds == null) return "?";
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}:${String(s).padStart(2, "0")}`;

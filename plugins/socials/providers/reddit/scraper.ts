@@ -52,11 +52,12 @@ export const redditScraperProvider: RedditProvider = {
     postUrl: string,
     limit: number = 10
   ): Promise<RedditComment[]> {
-    // Normalize URL to end with .json
-    const jsonUrl = postUrl.replace(/\/?$/, ".json");
-    const fullUrl = jsonUrl.startsWith("http")
-      ? jsonUrl
-      : `${REDDIT_BASE}${jsonUrl}`;
+    // Normalize URL: strip query params, ensure .json suffix
+    let cleanUrl = postUrl.split("?")[0].replace(/\/+$/, "");
+    if (!cleanUrl.endsWith(".json")) cleanUrl += ".json";
+    const fullUrl = cleanUrl.startsWith("http")
+      ? cleanUrl
+      : `${REDDIT_BASE}${cleanUrl}`;
 
     const response = await fetch(`${fullUrl}?limit=${limit}`, {
       headers: HEADERS,

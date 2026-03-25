@@ -18,9 +18,9 @@ async function getClient() {
   const username = process.env.REDDIT_USERNAME;
   const password = process.env.REDDIT_PASSWORD;
 
-  if (!clientId || !clientSecret) {
+  if (!clientId || !clientSecret || !username || !password) {
     throw new Error(
-      "REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET not set. Register at reddit.com/prefs/apps"
+      "Reddit API requires REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME, REDDIT_PASSWORD in .env"
     );
   }
 
@@ -29,8 +29,8 @@ async function getClient() {
     userAgent: "choomfie-bot/1.0",
     clientId,
     clientSecret,
-    username: username || "",
-    password: password || "",
+    username,
+    password,
   });
 
   return snoowrap;
@@ -85,10 +85,7 @@ export const redditApiProvider: RedditProvider = {
     const match = postUrl.match(/comments\/([a-z0-9]+)/);
     if (!match) throw new Error("Invalid Reddit post URL");
 
-    const submission = await client.getSubmission(match[1]).expandReplies({
-      limit,
-      depth: 1,
-    });
+    const submission = await client.getSubmission(match[1]).fetch();
 
     return submission.comments.slice(0, limit).map((c: any) => ({
       author: c.author?.name || "[deleted]",
