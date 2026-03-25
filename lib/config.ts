@@ -11,12 +11,18 @@ export interface Persona {
   personality: string;
 }
 
+export interface VoiceConfig {
+  stt: string;
+  tts: string;
+}
+
 export interface Config {
   activePersona: string;
   personas: Record<string, Persona>;
   rateLimitMs: number;
   autoSummarize: boolean;
   plugins: string[];
+  voice: VoiceConfig;
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -31,6 +37,7 @@ const DEFAULT_CONFIG: Config = {
   rateLimitMs: 5000,
   autoSummarize: true,
   plugins: [],
+  voice: { stt: "groq", tts: "elevenlabs" },
 };
 
 export class ConfigManager {
@@ -121,6 +128,12 @@ export class ConfigManager {
   setAutoSummarize(enabled: boolean) {
     this.config.autoSummarize = enabled;
     this.save();
+  }
+
+  // --- Voice ---
+
+  getVoiceConfig(): VoiceConfig {
+    return this.config.voice || { stt: "groq", tts: "elevenlabs" };
   }
 
   // --- Plugins ---
