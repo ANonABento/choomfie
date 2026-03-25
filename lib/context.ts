@@ -46,11 +46,12 @@ export async function createContext(): Promise<{
   const config = new ConfigManager(DATA_DIR);
 
   const ctx: AppContext = {
-    // discord and mcp are set after creation (circular dep)
+    // discord, mcp, plugins are set after creation
     discord: null as any,
     mcp: null as any,
     memory,
     config,
+    plugins: [],
     allowedUsers,
     ownerUserId,
     pendingPairings: new Map(),

@@ -16,6 +16,7 @@ export interface Config {
   personas: Record<string, Persona>;
   rateLimitMs: number;
   autoSummarize: boolean;
+  plugins: string[];
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -29,6 +30,7 @@ const DEFAULT_CONFIG: Config = {
   },
   rateLimitMs: 5000,
   autoSummarize: true,
+  plugins: [],
 };
 
 export class ConfigManager {
@@ -118,6 +120,17 @@ export class ConfigManager {
 
   setAutoSummarize(enabled: boolean) {
     this.config.autoSummarize = enabled;
+    this.save();
+  }
+
+  // --- Plugins ---
+
+  getEnabledPlugins(): string[] {
+    return this.config.plugins || [];
+  }
+
+  setEnabledPlugins(names: string[]) {
+    this.config.plugins = names;
     this.save();
   }
 

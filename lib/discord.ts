@@ -31,12 +31,16 @@ function generatePairingCode(): string {
 }
 
 export function createDiscordClient(ctx: AppContext): Client {
+  // Merge core intents with plugin intents
+  const pluginIntents = ctx.plugins.flatMap((p) => p.intents ?? []);
+
   const discord = new Client({
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
       GatewayIntentBits.DirectMessages,
+      ...pluginIntents,
     ],
     partials: [
       Partials.Channel, // Required for DM support
@@ -102,10 +106,33 @@ export function createDiscordClient(ctx: AppContext): Client {
     };
     setInterval(cleanInbox, 60 * 60 * 1000);
     cleanInbox(); // Run on startup
+
+    // Initialize plugins
+    for (const plugin of ctx.plugins) {
+      if (plugin.init) {
+        try {
+          await plugin.init(ctx);
+          console.error(`Plugin initialized: ${plugin.name}`);
+        } catch (e) {
+          console.error(`Plugin ${plugin.name} init failed: ${e}`);
+        }
+      }
+    }
   });
 
   discord.on(Events.MessageCreate, async (message: Message) => {
     if (message.author.bot) return;
+
+    // Plugin message hooks (run before default handler)
+    for (const plugin of ctx.plugins) {
+      if (plugin.onMessage) {
+        try {
+          await plugin.onMessage(message, ctx);
+        } catch (e) {
+          console.error(`Plugin ${plugin.name} onMessage error: ${e}`);
+        }
+      }
+    }
 
     const userId = message.author.id;
     const isDM = !message.guild;

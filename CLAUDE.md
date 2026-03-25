@@ -35,6 +35,8 @@ lib/
     reminder-tools.ts          # set/list/cancel reminder
     github-tools.ts            # check_github
     status-tools.ts            # choomfie_status
+  plugins.ts                   # Plugin loader (discovers + loads from plugins/)
+plugins/                       # Plugin directory (each plugin = subdirectory)
 .claude-plugin/plugin.json     # Plugin metadata
 .mcp.json                      # How Claude Code spawns the server
 skills/
@@ -48,7 +50,18 @@ skills/
 
 Shared state flows through a single `AppContext` object (defined in `lib/types.ts`).
 Tools colocate their JSON schema definition + handler in one file as `ToolDef[]` arrays.
-New features (voice, language learning, etc.) add tools by exporting a `ToolDef[]` and registering in `lib/tools/index.ts`.
+
+### Plugin System
+
+Plugins live in `plugins/<name>/index.ts` and export a `Plugin` interface:
+- `tools` — ToolDef[] (auto-registered into MCP)
+- `instructions` — string[] (appended to system prompt)
+- `intents` — extra Discord gateway intents
+- `init(ctx)` — called after Discord ready
+- `onMessage(msg, ctx)` — hook into every message
+- `destroy()` — cleanup on shutdown
+
+Enable plugins in `config.json`: `"plugins": ["voice", "image-gen"]`
 
 ## How It Works
 

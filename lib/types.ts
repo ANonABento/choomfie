@@ -2,7 +2,7 @@
  * Shared types for Choomfie modules.
  */
 
-import type { Client } from "discord.js";
+import type { Client, GatewayIntentBits, Message } from "discord.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { MemoryStore } from "./memory.ts";
 import type { ConfigManager } from "./config.ts";
@@ -12,6 +12,7 @@ export interface AppContext {
   mcp: Server;
   memory: MemoryStore;
   config: ConfigManager;
+  plugins: Plugin[];
   allowedUsers: Set<string>;
   ownerUserId: string | null;
   pendingPairings: Map<
@@ -29,6 +30,25 @@ export interface AppContext {
   DATA_DIR: string;
   CHANNELS_DIR: string;
   accessPath: string;
+}
+
+export interface Plugin {
+  /** Unique identifier, e.g. "voice", "language-learning" */
+  name: string;
+  /** Tools this plugin provides */
+  tools?: ToolDef[];
+  /** Lines to append to the MCP system prompt */
+  instructions?: string[];
+  /** Additional Discord gateway intents this plugin needs */
+  intents?: GatewayIntentBits[];
+  /** Tool names from this plugin that non-owner users may call */
+  userTools?: string[];
+  /** Called once after Discord is ready */
+  init?(ctx: AppContext): Promise<void>;
+  /** Called on every Discord MessageCreate (before default handler) */
+  onMessage?(message: Message, ctx: AppContext): Promise<void>;
+  /** Cleanup on shutdown */
+  destroy?(): Promise<void>;
 }
 
 export interface ToolResult {
