@@ -7,14 +7,25 @@
  *   3. Register in providers/index.ts
  */
 
+export interface ProviderStatus {
+  available: boolean;
+  reason: string;
+  install?: string;
+  type: "local" | "api" | "free";
+}
+
 export interface STTProvider {
   name: string;
   /** Transcribe a WAV audio buffer to text */
   transcribe(audio: Buffer, language?: string): Promise<string>;
+  /** Check if this provider's dependencies are available */
+  detect(): Promise<ProviderStatus>;
 }
 
 export interface TTSProvider {
   name: string;
   /** Synthesize text to PCM audio buffer (48kHz, 16-bit, mono) */
   synthesize(text: string, language?: string): Promise<Buffer>;
+  /** Check if this provider's dependencies are available */
+  detect(): Promise<ProviderStatus>;
 }

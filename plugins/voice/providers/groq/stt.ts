@@ -12,6 +12,16 @@ const API_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
 export const groqSTT: STTProvider = {
   name: "groq",
 
+  async detect() {
+    const hasKey = !!process.env.GROQ_API_KEY;
+    return {
+      available: hasKey,
+      reason: hasKey ? "GROQ_API_KEY set" : "GROQ_API_KEY not set",
+      install: hasKey ? undefined : "Add GROQ_API_KEY to .env (free at console.groq.com)",
+      type: "api" as const,
+    };
+  },
+
   async transcribe(audio: Buffer, language?: string): Promise<string> {
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) {

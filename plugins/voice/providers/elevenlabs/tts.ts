@@ -14,6 +14,16 @@ const API_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 export const elevenlabsTTS: TTSProvider = {
   name: "elevenlabs",
 
+  async detect() {
+    const hasKey = !!process.env.ELEVENLABS_API_KEY;
+    return {
+      available: hasKey,
+      reason: hasKey ? "ELEVENLABS_API_KEY set" : "ELEVENLABS_API_KEY not set",
+      install: hasKey ? undefined : "Add ELEVENLABS_API_KEY to .env (paid, elevenlabs.io)",
+      type: "api" as const,
+    };
+  },
+
   async synthesize(text: string, language: string = "en"): Promise<Buffer> {
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) {

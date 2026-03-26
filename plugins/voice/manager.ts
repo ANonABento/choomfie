@@ -32,14 +32,14 @@ interface GuildVoice {
 
 export class VoiceManager {
   private guilds = new Map<string, GuildVoice>();
-  private ctx: AppContext;
-  private stt: STTProvider;
-  private tts: TTSProvider;
+  private stt!: STTProvider;
+  private tts!: TTSProvider;
 
-  constructor(ctx: AppContext) {
-    this.ctx = ctx;
-    this.stt = getSTTProvider(ctx.config);
-    this.tts = getTTSProvider(ctx.config);
+  constructor(private ctx: AppContext) {}
+
+  async init() {
+    this.stt = await getSTTProvider(this.ctx.config);
+    this.tts = await getTTSProvider(this.ctx.config);
     console.error(
       `Voice providers: STT=${this.stt.name}, TTS=${this.tts.name}`
     );

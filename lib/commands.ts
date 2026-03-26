@@ -12,6 +12,8 @@ import {
   EmbedBuilder,
   MessageFlags,
 } from "discord.js";
+import { readdirSync, existsSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { VERSION } from "./version.ts";
 import { registerCommand } from "./interactions.ts";
 import { formatDuration, fromSQLiteDatetime } from "./time.ts";
@@ -218,6 +220,15 @@ registerCommand("help", {
           inline: false,
         },
         {
+          name: "Plugins",
+          value: [
+            "`/plugins` — list available plugins",
+            "`/plugins enable:<name>` — enable a plugin",
+            "`/plugins disable:<name>` — disable a plugin",
+          ].join("\n"),
+          inline: false,
+        },
+        {
           name: "Other",
           value: [
             "`/github <check>` — PRs, issues, notifications",
@@ -381,5 +392,118 @@ registerCommand("savememory", {
   handler: async (interaction, ctx) => {
     if (await requireOwner(interaction, ctx)) return;
     await interaction.showModal(buildMemoryModal());
+  },
+});
+
+// /plugins — list, enable, disable plugins (owner only)
+registerCommand("plugins", {
+  data: new SlashCommandBuilder()
+    .setName("plugins")
+    .setDescription("Manage plugins (owner only)")
+    .addStringOption((o) =>
+      o
+        .setName("action")
+        .setDescription("Action to perform (omit to list)")
+        .addChoices(
+          { name: "enable", value: "enable" },
+          { name: "disable", value: "disable" }
+        )
+    )
+    .addStringOption((o) =>
+      o.setName("name").setDescription("Plugin name (e.g. voice, socials, language-learning)")
+    )
+    .toJSON(),
+  handler: async (interaction, ctx) => {
+    if (await requireOwner(interaction, ctx)) return;
+
+    const action = interaction.options.getString("action");
+    const name = interaction.options.getString("name");
+
+    // Discover available plugins by scanning plugins/ directory
+    const projectRoot = join(dirname(new URL(import.meta.url).pathname), "..");
+    const pluginsDir = join(projectRoot, "plugins");
+
+    const available: string[] = [];
+    if (existsSync(pluginsDir)) {
+      for (const entry of readdirSync(pluginsDir, { withFileTypes: true })) {
+        if (entry.isDirectory() && existsSync(join(pluginsDir, entry.name, "index.ts"))) {
+          available.push(entry.name);
+        }
+      }
+    }
+
+    const enabled = ctx.config.getEnabledPlugins();
+
+    if (!action) {
+      // List plugins with tool counts for active ones
+      const lines = available.map((p) => {
+        const active = enabled.includes(p);
+        const loadedPlugin = ctx.plugins.find((pl) => pl.name === p);
+        const toolCount = loadedPlugin?.tools?.length;
+        const tools = toolCount ? ` · ${toolCount} tools` : "";
+        const status = active
+          ? loadedPlugin ? `🟢 active${tools}` : "🟡 enabled (restart needed)"
+          : "⚪ disabled";
+        return `${active ? "→ " : "  "}\`${p}\` — ${status}`;
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle("Plugins")
+        .setDescription(lines.join("\n") || "No plugins found.")
+        .setFooter({ text: `/plugins action:enable name:<plugin> to enable` });
+
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    if (!name) {
+      await interaction.reply({
+        content: `Specify a plugin name: ${available.map((p) => `\`${p}\``).join(", ")}`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (!available.includes(name)) {
+      await interaction.reply({
+        content: `Plugin "${name}" not found. Available: ${available.map((p) => `\`${p}\``).join(", ")}`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (action === "enable") {
+      if (enabled.includes(name)) {
+        await interaction.reply({
+          content: `\`${name}\` is already enabled.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      ctx.config.setEnabledPlugins([...enabled, name]);
+      const embed = new EmbedBuilder()
+        .setColor(0x57f287)
+        .setTitle(`Plugin Enabled: ${name}`)
+        .setDescription("Restart to activate.")
+        .setFooter({ text: `Enabled: ${[...enabled, name].join(", ")}` });
+      await interaction.reply({ embeds: [embed] });
+    } else {
+      if (!enabled.includes(name)) {
+        await interaction.reply({
+          content: `\`${name}\` is already disabled.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      const remaining = enabled.filter((p) => p !== name);
+      ctx.config.setEnabledPlugins(remaining);
+      const embed = new EmbedBuilder()
+        .setColor(0xed4245)
+        .setTitle(`Plugin Disabled: ${name}`)
+        .setDescription("Restart to deactivate.")
+        .setFooter({ text: remaining.length ? `Enabled: ${remaining.join(", ")}` : "No plugins enabled" });
+      await interaction.reply({ embeds: [embed] });
+    }
   },
 });

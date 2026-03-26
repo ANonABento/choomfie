@@ -13,6 +13,16 @@ const API_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 export const elevenlabsSTT: STTProvider = {
   name: "elevenlabs",
 
+  async detect() {
+    const hasKey = !!process.env.ELEVENLABS_API_KEY;
+    return {
+      available: hasKey,
+      reason: hasKey ? "ELEVENLABS_API_KEY set" : "ELEVENLABS_API_KEY not set",
+      install: hasKey ? undefined : "Add ELEVENLABS_API_KEY to .env (paid, elevenlabs.io)",
+      type: "api" as const,
+    };
+  },
+
   async transcribe(audio: Buffer, language?: string): Promise<string> {
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) {

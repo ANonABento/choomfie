@@ -76,7 +76,7 @@ Plugins live in `plugins/<name>/index.ts` and export a `Plugin` interface:
 - `onInteraction(interaction, ctx)` — hook into every interaction (buttons/commands/modals)
 - `destroy()` — cleanup on shutdown
 
-Enable plugins in `config.json`: `"plugins": ["voice", "image-gen"]`
+Enable plugins via `/plugins` command from Discord, or in `config.json`: `"plugins": ["voice", "socials"]`
 
 ## How It Works
 
@@ -114,6 +114,7 @@ Defined in `lib/commands.ts`, deployed via `scripts/deploy-commands.ts`:
 - `/status` — bot status embed with uptime, persona, stats (ephemeral)
 - `/persona [switch]` — list or switch personas
 - `/newpersona` — opens a modal form to create a persona (key, name, personality)
+- `/plugins [action] [name]` — list, enable, or disable plugins (owner only, restart needed)
 - `/help` — show all commands and capabilities
 
 Deploy: `bun scripts/deploy-commands.ts` (guild, instant) or `--global` (up to 1hr propagation).
@@ -220,7 +221,7 @@ Runtime-configurable settings — changes take effect immediately, no restart ne
   "autoSummarize": true,
   "plugins": [],
   "personas": { ... },
-  "voice": { "stt": "groq", "tts": "elevenlabs" }
+  "voice": { "stt": "auto", "tts": "auto" }
 }
 ```
 

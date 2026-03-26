@@ -1,10 +1,11 @@
 /**
  * Voice plugin — Discord voice channel support.
  *
- * Phase 1: Groq Whisper (free STT) + ElevenLabs (TTS)
- * Phase 2: local whisper.cpp + VOICEVOX/Edge TTS fallbacks
+ * Providers (auto-detected or configurable):
+ *   STT: whisper (local), groq (free API), elevenlabs (paid)
+ *   TTS: kokoro (local), edge-tts (free), elevenlabs (paid)
  *
- * Flow: User speaks → Opus → PCM → WAV → Groq STT → Claude → ElevenLabs TTS → Opus → Discord
+ * Flow: User speaks → Opus → PCM → WAV → STT → Claude → TTS → Opus → Discord
  */
 
 import { GatewayIntentBits } from "discord.js";
@@ -25,16 +26,17 @@ const voicePlugin: Plugin = {
     "## Voice",
     "You can join Discord voice channels and have voice conversations.",
     "Use `join_voice` with a channel ID to join. Use `leave_voice` to disconnect.",
-    "Use `speak` to say something in the voice channel (ElevenLabs TTS).",
-    "When users speak in VC, their speech is automatically transcribed and sent to you.",
+    "Use `speak` to say something in the voice channel (TTS).",
+    "When users speak in VC, their speech is automatically transcribed (STT) and sent to you.",
     "You can respond by using the `speak` tool — your response will be spoken aloud.",
-    "Voice supports English and Japanese.",
+    "STT/TTS providers are auto-detected or configurable in config.json.",
   ],
 
   userTools: ["join_voice", "leave_voice", "speak"],
 
   async init(ctx) {
     manager = new VoiceManager(ctx);
+    await manager.init();
     // Make manager accessible to tools via a module-level ref
     setVoiceManager(manager);
     console.error("Voice plugin initialized");

@@ -2,7 +2,7 @@
 
 Discord voice channel support with swappable STT/TTS providers.
 
-> Last updated: 2026-03-25
+> Last updated: 2026-03-26
 
 ---
 
@@ -10,22 +10,24 @@ Discord voice channel support with swappable STT/TTS providers.
 
 The voice plugin lets Choomfie join Discord voice channels, listen to users speak, transcribe their speech, and respond with text-to-speech. It uses a provider architecture so STT and TTS backends can be swapped with a single config change.
 
-### Current Providers
+### Providers
 
-| Provider | Type | Cost | Languages | Notes |
-|----------|------|------|-----------|-------|
-| **Groq Whisper** | STT | Free | 50+ (incl. JP) | 30 req/min, 14,400 req/day, 25MB/req |
-| **ElevenLabs Scribe** | STT | Credits (~$0.40/hr) | 90+ (incl. JP) | Higher accuracy (3.5% vs 8.4% WER) |
-| **ElevenLabs** | TTS | Credits | 70+ (incl. JP) | Streaming, multiple models, voice cloning |
+| Provider | Type | Cost | Install | Notes |
+|----------|------|------|---------|-------|
+| **whisper** | STT | Free (local) | `brew install whisper-cpp` | Apple Silicon optimized, ~0.5s |
+| **groq** | STT | Free (API) | `GROQ_API_KEY` in .env | 30 req/min, 14,400 req/day |
+| **elevenlabs** | STT/TTS | Paid | `ELEVENLABS_API_KEY` in .env | Highest quality, voice cloning |
+| **kokoro** | TTS | Free (local) | `pip install kokoro-onnx soundfile` | High quality neural TTS, ~150ms |
+| **edge-tts** | TTS | Free | `pip install edge-tts` | Microsoft voices, 300+ voices, no key |
 
-### Planned Providers
+### Auto-Detection
 
-| Provider | Type | Cost | Notes |
-|----------|------|------|-------|
-| whisper.cpp | STT | Free (local) | Apple Silicon optimized |
-| VOICEVOX | TTS | Free (local) | Cute Japanese voices, ~2GB download |
-| Edge TTS | TTS | Free | Microsoft voices, zero setup |
-| Kokoro | TTS | Free (local) | 54 voices, fast |
+Set `"stt": "auto"` or `"tts": "auto"` (the default) and the factory picks the best available provider:
+
+- **STT priority:** whisper (local) → groq (free API) → elevenlabs (paid)
+- **TTS priority:** kokoro (local) → edge-tts (free) → elevenlabs (paid)
+
+Each provider has a `detect()` method that checks for installed binaries, Python modules, or API keys.
 
 ---
 
@@ -43,51 +45,54 @@ ffmpeg is also required:
 brew install ffmpeg
 ```
 
-### 2. Get API keys
+### 2. Install a provider
 
-**Groq (free STT):**
-1. Go to [console.groq.com](https://console.groq.com)
-2. Sign up / log in
-3. Go to API Keys → Create API Key
-4. Copy the key
-
-**ElevenLabs (TTS):**
-1. Go to [elevenlabs.io](https://elevenlabs.io)
-2. Sign up / log in
-3. Go to Profile + API Key
-4. Copy the key
-
-### 3. Add keys to .env
-
-Edit `~/.claude/plugins/data/choomfie-inline/.env`:
-
-```
-DISCORD_TOKEN=<your-discord-token>
-GROQ_API_KEY=<your-groq-key>
-ELEVENLABS_API_KEY=<your-elevenlabs-key>
+**Free local setup (no API keys!):**
+```bash
+brew install whisper-cpp    # STT
+pip install edge-tts        # TTS (easiest)
+# or: pip install kokoro-onnx soundfile   # TTS (best quality, ~300MB model)
 ```
 
-Optional voice overrides:
-```
-ELEVENLABS_VOICE_EN=<voice-id-for-english>
-ELEVENLABS_VOICE_JA=<voice-id-for-japanese>
-```
+**Free API setup:**
+- Get a free Groq key at [console.groq.com](https://console.groq.com)
+- Add `GROQ_API_KEY=<key>` to `~/.claude/plugins/data/choomfie-inline/.env`
 
-### 4. Enable the plugin
+**Paid (highest quality):**
+- Get an ElevenLabs key at [elevenlabs.io](https://elevenlabs.io)
+- Add `ELEVENLABS_API_KEY=<key>` to `~/.claude/plugins/data/choomfie-inline/.env`
+
+### 3. Enable the plugin
+
+**From Discord (easiest):**
+```
+/plugins action:enable name:voice
+```
+Then restart.
+
+**Or edit config.json manually:**
 
 Edit `~/.claude/plugins/data/choomfie-inline/config.json`:
 
 ```json
 {
+  "plugins": ["voice"]
+}
+```
+
+Providers auto-detect by default. To pin specific ones:
+
+```json
+{
   "plugins": ["voice"],
   "voice": {
-    "stt": "groq",
-    "tts": "elevenlabs"
+    "stt": "whisper",
+    "tts": "edge-tts"
   }
 }
 ```
 
-### 5. Restart the bot
+### 4. Restart the bot
 
 Restart Choomfie (`choomfie` or `claude --plugin-dir /path/to/choomfie`).
 
@@ -145,15 +150,14 @@ plugins/voice/
   tools.ts                    — MCP tools (join, leave, speak)
   manager.ts                  — Voice connections + audio pipeline
   providers/
-    types.ts                  — STTProvider + TTSProvider interfaces
-    index.ts                  — Provider factory (picks from config)
-    groq/
-      index.ts                — Exports STT provider
-      stt.ts                  — Groq Whisper implementation
-    elevenlabs/
-      index.ts                — Exports STT + TTS providers
-      stt.ts                  — ElevenLabs Scribe implementation
-      tts.ts                  — ElevenLabs TTS implementation
+    types.ts                  — STTProvider + TTSProvider + ProviderStatus interfaces
+    index.ts                  — Provider factory (auto-detect + config)
+    detect.ts                 — Shared detection utils (checkBinary, checkPythonModule)
+    groq/                     — Groq Whisper STT (free API)
+    elevenlabs/               — ElevenLabs STT + TTS (paid API)
+    whisper/                  — whisper.cpp STT (free local)
+    edge-tts/                 — Microsoft Edge TTS (free online)
+    kokoro/                   — Kokoro neural TTS (free local)
 ```
 
 ### Interfaces
@@ -161,14 +165,23 @@ plugins/voice/
 ```typescript
 // providers/types.ts
 
+interface ProviderStatus {
+  available: boolean;
+  reason: string;
+  install?: string;
+  type: "local" | "api" | "free";
+}
+
 interface STTProvider {
   name: string;
   transcribe(audio: Buffer, language?: string): Promise<string>;
+  detect(): Promise<ProviderStatus>;
 }
 
 interface TTSProvider {
   name: string;
   synthesize(text: string, language?: string): Promise<Buffer>;
+  detect(): Promise<ProviderStatus>;
 }
 ```
 
@@ -189,72 +202,69 @@ Provider selection in `config.json`:
 ```json
 {
   "voice": {
-    "stt": "groq",          // or "elevenlabs"
-    "tts": "elevenlabs"     // or future: "voicevox", "edge-tts", "kokoro"
+    "stt": "auto",          // or "whisper", "groq", "elevenlabs"
+    "tts": "auto"           // or "kokoro", "edge-tts", "elevenlabs"
   }
 }
 ```
+
+Default is `"auto"` — the factory runs `detect()` on each provider in priority order and picks the first available.
 
 ---
 
 ## Adding a New Provider
 
-### Example: Adding Edge TTS
+### Example: Adding a New TTS Provider
 
-#### 1. Create the provider directory
-
-```
-plugins/voice/providers/edge-tts/
-  index.ts
-  tts.ts
-```
-
-#### 2. Implement the interface
+#### 1. Create the provider
 
 ```typescript
-// providers/edge-tts/tts.ts
+// providers/my-tts/tts.ts
 import type { TTSProvider } from "../types.ts";
+import { checkBinary } from "../detect.ts";
 
-export const edgeTTS: TTSProvider = {
-  name: "edge-tts",
+export const myTTS: TTSProvider = {
+  name: "my-tts",
+
+  async detect() {
+    const has = await checkBinary("my-tts-cli");
+    return {
+      available: has,
+      reason: has ? "my-tts-cli installed" : "my-tts-cli not found",
+      install: has ? undefined : "pip install my-tts",
+      type: "local" as const,
+    };
+  },
 
   async synthesize(text: string, language: string = "en"): Promise<Buffer> {
-    // Implementation here
-    // Must return PCM audio buffer (48kHz)
+    // Must return PCM audio buffer (48kHz, 16-bit, mono)
   },
 };
 ```
 
 ```typescript
-// providers/edge-tts/index.ts
-export { edgeTTS } from "./tts.ts";
+// providers/my-tts/index.ts
+export { myTTS } from "./tts.ts";
 ```
 
-#### 3. Register in the factory
+#### 2. Register in the factory
 
 Edit `providers/index.ts`:
 
 ```typescript
-import { edgeTTS } from "./edge-tts/index.ts";
+import { myTTS } from "./my-tts/index.ts";
 
-const ttsProviders: Record<string, TTSProvider> = {
-  elevenlabs: elevenlabsTTS,
-  "edge-tts": edgeTTS,       // ← add this line
-};
+const ttsProviders = { ..., "my-tts": myTTS };
+// Add to ttsPriority if it should be auto-detected
 ```
 
-#### 4. Use it
+#### 3. Use it
 
 ```json
-{
-  "voice": {
-    "stt": "groq",
-    "tts": "edge-tts"
-  }
-}
+{ "voice": { "tts": "my-tts" } }
 ```
 
-That's it. The manager doesn't change — it calls `this.tts.synthesize()` regardless of which provider is behind it.
+Or just install the dependency and let `"auto"` pick it up.
 
 ---
 
@@ -266,6 +276,9 @@ That's it. The manager doesn't change — it calls `this.tts.synthesize()` regar
 | `ELEVENLABS_API_KEY` | If using ElevenLabs | — | ElevenLabs API key |
 | `ELEVENLABS_VOICE_EN` | No | `21m00Tcm4TlvDq8ikWAM` (Rachel) | English voice ID |
 | `ELEVENLABS_VOICE_JA` | No | Same as EN | Japanese voice ID |
+| `WHISPER_MODEL` | No | `ggml-base.en` | whisper.cpp model (use `ggml-small` for multilingual) |
+| `EDGE_TTS_VOICE` | No | Per-language defaults | Override Edge TTS voice |
+| `KOKORO_VOICE` | No | `af_heart` | Kokoro voice (af_heart, af_sky, am_adam, etc.) |
 
 ### Finding ElevenLabs Voice IDs
 
