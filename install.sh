@@ -36,10 +36,10 @@ if [ ${#missing[@]} -gt 0 ]; then
   exit 1
 fi
 
-echo "[1/5] Prerequisites OK (claude, bun)"
+echo "[1/6] Prerequisites OK (claude, bun)"
 
 # --- Install dependencies ---
-echo "[2/5] Installing dependencies..."
+echo "[2/6] Installing dependencies..."
 (cd "$CHOOMFIE_DIR" && bun install --no-summary)
 
 # --- Discord token ---
@@ -47,7 +47,7 @@ mkdir -p "$DATA_DIR"
 ENV_FILE="$DATA_DIR/.env"
 
 if [ -f "$ENV_FILE" ] && grep -q "DISCORD_TOKEN=" "$ENV_FILE"; then
-  echo "[3/5] Discord token already configured"
+  echo "[3/6] Discord token already configured"
 else
   echo ""
   echo "You need a Discord bot token. If you don't have one yet:"
@@ -60,14 +60,14 @@ else
   if [ -n "$token" ]; then
     echo "DISCORD_TOKEN=$token" > "$ENV_FILE"
     chmod 600 "$ENV_FILE"
-    echo "[3/5] Token saved"
+    echo "[3/6] Token saved"
   else
-    echo "[3/5] Skipped — run '/choomfie:configure <token>' later in Claude Code"
+    echo "[3/6] Skipped — run '/choomfie:configure <token>' later in Claude Code"
   fi
 fi
 
 # --- Detect owner ---
-echo "[4/5] Detecting bot owner..."
+echo "[4/6] Detecting bot owner..."
 
 if [ -f "$DATA_DIR/access.json" ] && grep -q '"owner"' "$DATA_DIR/access.json"; then
   EXISTING_OWNER=$(grep -o '"owner"[[:space:]]*:[[:space:]]*"[^"]*"' "$DATA_DIR/access.json" | cut -d'"' -f4)
@@ -94,8 +94,16 @@ else
   echo "  No token configured — skipping owner detection"
 fi
 
+# --- Deploy slash commands ---
+if [ -f "$ENV_FILE" ] && grep -q "DISCORD_TOKEN=" "$ENV_FILE"; then
+  echo "[5/6] Deploying slash commands to Discord..."
+  (cd "$CHOOMFIE_DIR" && bun scripts/deploy-commands.ts 2>/dev/null) && echo "  Slash commands deployed" || echo "  Skipped — deploy later with: bun scripts/deploy-commands.ts"
+else
+  echo "[5/6] Skipped slash command deploy — no token configured"
+fi
+
 # --- Install choomfie command ---
-echo "[5/5] Installing 'choomfie' command..."
+echo "[6/6] Installing 'choomfie' command..."
 mkdir -p "$BIN_DIR"
 chmod +x "$CHOOMFIE_DIR/bin/choomfie"
 ln -sf "$CHOOMFIE_DIR/bin/choomfie" "$BIN_DIR/choomfie"
