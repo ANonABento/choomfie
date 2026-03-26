@@ -2,7 +2,7 @@
  * Shared types for Choomfie modules.
  */
 
-import type { Client, GatewayIntentBits, Message } from "discord.js";
+import type { Client, GatewayIntentBits, Interaction, Message } from "discord.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { MemoryStore } from "./memory.ts";
 import type { ConfigManager } from "./config.ts";
@@ -49,6 +49,8 @@ export interface Plugin {
   init?(ctx: AppContext): Promise<void>;
   /** Called on every Discord MessageCreate (before default handler) */
   onMessage?(message: Message, ctx: AppContext): Promise<void>;
+  /** Called on every Discord InteractionCreate (before default handler) */
+  onInteraction?(interaction: Interaction, ctx: AppContext): Promise<void>;
   /** Cleanup on shutdown */
   destroy?(): Promise<void>;
 }

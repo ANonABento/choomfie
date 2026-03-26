@@ -7,6 +7,9 @@ import type { TextChannel } from "discord.js";
 import type { AppContext } from "./types.ts";
 import type { Reminder } from "./memory.ts";
 import { dateToSQLite } from "./time.ts";
+import { buildReminderButtons } from "./interactions.ts";
+
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 /** Parse simple cron patterns into next due date */
 function getNextCronDate(cron: string, fromDate: Date): Date | null {
@@ -91,16 +94,9 @@ export class ReminderScheduler {
   scheduleReminder(reminder: Reminder) {
     // Clear any existing timer for this ID
     this.clearTimer(reminder.id);
-
-    const dueMs = new Date(reminder.dueAt).getTime();
-    const delayMs = Math.max(0, dueMs - Date.now());
-
-    const timer = setTimeout(() => {
-      this.timers.delete(reminder.id);
-      this.fireReminder(reminder);
-    }, delayMs);
-
-    this.timers.set(reminder.id, timer);
+    this.setLongTimeout(this.timers, reminder.id, new Date(reminder.dueAt).getTime(), () => {
+      void this.fireReminder(reminder);
+    });
   }
 
   /** Schedule a nag ping for a fired reminder */
@@ -109,14 +105,33 @@ export class ReminderScheduler {
 
     this.clearNagTimer(reminder.id);
 
-    const delayMs = reminder.nagInterval * 60_000; // nagInterval is in minutes
+    const targetMs = Date.now() + reminder.nagInterval * 60_000;
+    this.setLongTimeout(this.nagTimers, reminder.id, targetMs, () => {
+      void this.fireNag(reminder);
+    });
+  }
+
+  private setLongTimeout(
+    timers: Map<number, ReturnType<typeof setTimeout>>,
+    id: number,
+    targetMs: number,
+    onElapsed: () => void
+  ) {
+    const remainingMs = targetMs - Date.now();
+    const delayMs = Math.max(0, Math.min(remainingMs, MAX_TIMEOUT_MS));
 
     const timer = setTimeout(() => {
-      this.nagTimers.delete(reminder.id);
-      this.fireNag(reminder);
+      timers.delete(id);
+
+      if (targetMs > Date.now()) {
+        this.setLongTimeout(timers, id, targetMs, onElapsed);
+        return;
+      }
+
+      onElapsed();
     }, delayMs);
 
-    this.nagTimers.set(reminder.id, timer);
+    timers.set(id, timer);
   }
 
   /** Fire a due reminder */
@@ -126,7 +141,10 @@ export class ReminderScheduler {
     try {
       const channel = await this.ctx.discord.channels.fetch(reminder.chatId);
       if (channel?.isTextBased()) {
-        await (channel as TextChannel).send(formatReminderMessage(reminder, false));
+        await (channel as TextChannel).send({
+          content: formatReminderMessage(reminder, false),
+          components: [buildReminderButtons(reminder.id)],
+        });
       }
     } catch {
       // Channel not accessible — still mark as fired
@@ -176,7 +194,10 @@ export class ReminderScheduler {
     try {
       const channel = await this.ctx.discord.channels.fetch(current.chatId);
       if (channel?.isTextBased()) {
-        await (channel as TextChannel).send(formatReminderMessage(current, true));
+        await (channel as TextChannel).send({
+          content: formatReminderMessage(current, true),
+          components: [buildReminderButtons(current.id)],
+        });
       }
     } catch {
       // Channel not accessible

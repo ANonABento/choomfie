@@ -10,6 +10,8 @@ import {
   type Message,
 } from "discord.js";
 import { mkdir, readdir, stat, unlink } from "node:fs/promises";
+import { basename } from "node:path";
+import { handleInteraction } from "./interactions.ts";
 import type { AppContext } from "./types.ts";
 import { saveAccess } from "./context.ts";
 import { ReminderScheduler } from "./reminders.ts";
@@ -22,6 +24,12 @@ import {
 } from "./conversation.ts";
 
 const PERMISSION_REPLY_RE = /^\s*(y|yes|n|no)\s+([a-km-z]{5})\s*$/i;
+
+function sanitizeAttachmentName(name?: string | null): string {
+  const safeBase = basename(name || "attachment");
+  const sanitized = safeBase.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return sanitized || "attachment";
+}
 
 function generatePairingCode(): string {
   const chars = "abcdefghjkmnopqrstuvwxyz"; // no 'i' or 'l'
@@ -75,7 +83,6 @@ export function createDiscordClient(ctx: AppContext): Client {
     }
 
     // Initialize timer-based reminder scheduler
-    ctx.reminderScheduler = new ReminderScheduler();
     ctx.reminderScheduler.init(ctx);
 
     // Start inbox cleanup (every hour, delete files older than 24h)
@@ -262,8 +269,10 @@ export function createDiscordClient(ctx: AppContext): Client {
 
         try {
           const response = await fetch(attachment.url);
+          if (!response.ok) throw new Error(`download failed: ${response.status}`);
           const buffer = await response.arrayBuffer();
-          const filePath = `${downloadDir}/${Date.now()}_${attachment.name}`;
+          const safeName = sanitizeAttachmentName(attachment.name);
+          const filePath = `${downloadDir}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeName}`;
           await Bun.write(filePath, buffer);
           filePaths.push(filePath);
         } catch {
@@ -295,6 +304,11 @@ export function createDiscordClient(ctx: AppContext): Client {
         meta,
       },
     });
+  });
+
+  // Handle interactions (buttons, slash commands, modals)
+  discord.on(Events.InteractionCreate, async (interaction) => {
+    await handleInteraction(interaction, ctx);
   });
 
   return discord;

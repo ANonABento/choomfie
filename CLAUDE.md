@@ -21,7 +21,8 @@ lib/
   types.ts                     # AppContext, ToolDef, text/err helpers
   context.ts                   # Env/config loading, creates AppContext
   mcp-server.ts                # MCP Server creation, instructions, tool registration
-  discord.ts                   # Discord client, Ready handler, MessageCreate
+  discord.ts                   # Discord client, Ready, MessageCreate, InteractionCreate
+  interactions.ts              # Interaction router (buttons, slash commands, modals)
   conversation.ts              # Channel activation, rate limiting, uptime
   permissions.ts               # Permission relay (tool approval via DM)
   reminders.ts                 # ReminderScheduler — timer-based (setTimeout per reminder)
@@ -75,7 +76,18 @@ Enable plugins in `config.json`: `"plugins": ["voice", "image-gen"]`
 4. Incoming messages → MCP notifications → Claude Code
 5. Claude calls MCP tools (reply, save_memory, etc.) → server.ts → Discord/SQLite
 6. Reminders use precise setTimeout timers — each reminder gets its own timer that fires exactly when due (zero polling overhead)
-7. On shutdown (SIGINT/SIGTERM/SIGHUP/stdin close): destroys Discord client, cleans up plugins/reminders/memory, removes PID file
+7. Discord interactions (buttons, slash commands, modals) are handled directly via `lib/interactions.ts` — no Claude roundtrip, instant response
+8. On shutdown (SIGINT/SIGTERM/SIGHUP/stdin close): destroys Discord client, cleans up plugins/reminders/memory, removes PID file
+
+### Interaction System
+
+Discord interactions (buttons, slash commands, modals) are handled by `lib/interactions.ts`:
+- **InteractionCreate** event registered in `lib/discord.ts`, routes to `handleInteraction()`
+- Plugin hook: `onInteraction?(interaction, ctx)` in the Plugin interface
+- Button customId format: `prefix:action:data` (e.g. `reminder:ack:42`, `reminder:snooze:42:1h`)
+- Button handlers registered via `registerButtonHandler(prefix, handler)`
+- All interactions bypass Claude — handled directly for instant response (<100ms vs ~5s)
+- Key constraint: Discord requires response within 3 seconds; use `deferReply()` for async work
 
 ## Tools (26)
 
@@ -120,6 +132,7 @@ Features:
 - **Snooze:** `snooze_reminder` reschedules a fired reminder (non-recurring only; recurring auto-acks)
 - **Categories:** optional label for grouping (e.g. "work", "personal")
 - **History:** `list_reminders` with `include_history=true` shows fired reminders
+- **Buttons:** reminder notifications include interactive buttons (Done, Snooze 30m/1h/Tomorrow) — no Claude roundtrip needed, handled directly by `lib/interactions.ts`
 
 **Datetime format:** All dates stored in SQLite use space-separated format (`YYYY-MM-DD HH:MM:SS`), never ISO 8601 with `T`/`Z`. Use `lib/time.ts` utilities (`toSQLiteDatetime`, `dateToSQLite`, `nowUTC`) for all conversions.
 
