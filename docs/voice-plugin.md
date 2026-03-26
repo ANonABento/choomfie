@@ -153,6 +153,7 @@ plugins/voice/
     types.ts                  — STTProvider + TTSProvider + ProviderStatus interfaces
     index.ts                  — Provider factory (auto-detect + config)
     detect.ts                 — Shared detection utils (checkBinary, checkPythonModule)
+    audio.ts                  — Shared audio utils (toDiscordPcm, format constants)
     groq/                     — Groq Whisper STT (free API)
     elevenlabs/               — ElevenLabs STT + TTS (paid API)
     whisper/                  — whisper.cpp STT (free local)
@@ -222,6 +223,7 @@ Default is `"auto"` — the factory runs `detect()` on each provider in priority
 // providers/my-tts/tts.ts
 import type { TTSProvider } from "../types.ts";
 import { checkBinary } from "../detect.ts";
+import { toDiscordPcm } from "../audio.ts";
 
 export const myTTS: TTSProvider = {
   name: "my-tts",
@@ -237,7 +239,9 @@ export const myTTS: TTSProvider = {
   },
 
   async synthesize(text: string, language: string = "en"): Promise<Buffer> {
-    // Must return PCM audio buffer (48kHz, 16-bit, mono)
+    if (!text?.trim()) throw new Error("Cannot synthesize empty text");
+    // Generate audio to a temp file, then convert:
+    // return await toDiscordPcm(tempFilePath);
   },
 };
 ```
