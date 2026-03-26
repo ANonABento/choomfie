@@ -14,6 +14,7 @@ import {
   type Interaction,
 } from "discord.js";
 import type { AppContext } from "./types.ts";
+import { getCommandHandler } from "./commands.ts";
 
 /** Button handler signature */
 type ButtonHandler = (
@@ -46,6 +47,29 @@ export async function handleInteraction(
     }
   }
 
+  // Slash commands
+  if (interaction.isChatInputCommand()) {
+    const handler = getCommandHandler(interaction.commandName);
+    if (handler) {
+      try {
+        await handler(interaction, ctx);
+      } catch (e) {
+        console.error(`Command handler error (${interaction.commandName}): ${e}`);
+        const reply = {
+          content: "Something went wrong.",
+          flags: MessageFlags.Ephemeral,
+        };
+        if (interaction.deferred) {
+          await interaction.editReply(reply);
+        } else if (!interaction.replied) {
+          await interaction.reply(reply);
+        }
+      }
+    }
+    return;
+  }
+
+  // Buttons
   if (interaction.isButton()) {
     const parts = interaction.customId.split(":");
     const prefix = parts[0];

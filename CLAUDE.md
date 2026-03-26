@@ -23,6 +23,7 @@ lib/
   mcp-server.ts                # MCP Server creation, instructions, tool registration
   discord.ts                   # Discord client, Ready, MessageCreate, InteractionCreate
   interactions.ts              # Interaction router (buttons, slash commands, modals)
+  commands.ts                  # Slash command definitions + handlers
   conversation.ts              # Channel activation, rate limiting, uptime
   permissions.ts               # Permission relay (tool approval via DM)
   reminders.ts                 # ReminderScheduler — timer-based (setTimeout per reminder)
@@ -40,6 +41,8 @@ lib/
     status-tools.ts            # choomfie_status
   plugins.ts                   # Plugin loader (discovers + loads from plugins/)
 plugins/                       # Plugin directory (each plugin = subdirectory)
+scripts/
+  deploy-commands.ts           # Deploy slash commands to Discord
 .claude-plugin/plugin.json     # Plugin metadata
 .mcp.json                      # How Claude Code spawns the server
 test/
@@ -88,6 +91,18 @@ Discord interactions (buttons, slash commands, modals) are handled by `lib/inter
 - Button handlers registered via `registerButtonHandler(prefix, handler)`
 - All interactions bypass Claude — handled directly for instant response (<100ms vs ~5s)
 - Key constraint: Discord requires response within 3 seconds; use `deferReply()` for async work
+- Slash command definitions in `lib/commands.ts`, deployed via `bun scripts/deploy-commands.ts`
+
+### Slash Commands
+
+Defined in `lib/commands.ts`, deployed via `scripts/deploy-commands.ts`:
+- `/remind <message> <time> [recurring] [nag]` — set a reminder with natural time parsing
+- `/reminders` — list active reminders (ephemeral)
+- `/github <check> [repo]` — check PRs, issues, notifications
+- `/status` — bot status and stats (ephemeral)
+- `/persona [switch]` — list or switch personas
+
+Deploy: `bun scripts/deploy-commands.ts` (guild, instant) or `--global` (up to 1hr propagation).
 
 ## Tools (26)
 
