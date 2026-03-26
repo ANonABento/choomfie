@@ -17,12 +17,22 @@ const DATA_DIR =
   process.env.CHOOMFIE_DATA_DIR ||
   `${process.env.HOME}/.claude/plugins/data/choomfie-inline`;
 
-// Load token
-let token: string;
-try {
-  token = (await readFile(`${DATA_DIR}/token`, "utf-8")).trim();
-} catch {
-  console.error("No token found. Run /choomfie:configure first.");
+// Load token from .env file or environment
+let token = process.env.DISCORD_TOKEN || "";
+if (!token) {
+  try {
+    const envFile = await readFile(`${DATA_DIR}/.env`, "utf-8");
+    for (const line of envFile.split("\n")) {
+      const match = line.match(/^DISCORD_TOKEN=(.+)$/);
+      if (match) {
+        token = match[1].trim();
+        break;
+      }
+    }
+  } catch {}
+}
+if (!token) {
+  console.error("No DISCORD_TOKEN found. Run /choomfie:configure first.");
   process.exit(1);
 }
 
