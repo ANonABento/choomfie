@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Choomfie is a Claude Code plugin (v0.4.0) — an MCP server that bridges Discord to Claude Code with persistent memory, switchable personas, reminders, GitHub integration, and more. It runs as a subprocess inside Claude Code via `--plugin-dir`.
+Choomfie is a Claude Code plugin — an MCP server that bridges Discord to Claude Code with persistent memory, switchable personas, reminders, Discord interactions (buttons/slash commands/modals), GitHub integration, and more. It runs as a subprocess inside Claude Code via `--plugin-dir`. Version is defined in `package.json` and read via `lib/version.ts`.
 
 ## Tech Stack
 
@@ -27,11 +27,13 @@ lib/
   handlers/
     reminder-buttons.ts        # Reminder button builders + click handlers
     modals.ts                  # Modal builders + submit handlers
-    shared.ts                  # Shared handler utils (createAndScheduleReminder)
+    shared.ts                  # Shared handler utils (auth helpers, createAndScheduleReminder)
+    github.ts                  # Shared GitHub CLI helper (buildGhArgs, runGh)
   conversation.ts              # Channel activation, rate limiting
   permissions.ts               # Permission relay (tool approval via DM)
   reminders.ts                 # ReminderScheduler — timer-based (setTimeout per reminder)
-  time.ts                      # Shared datetime utils (SQLite-compatible formatting)
+  time.ts                      # Time constants, formatting, parsing, cron validation
+  version.ts                   # VERSION constant (reads from package.json)
   memory.ts                    # SQLite memory store (core + archival + reminders)
   config.ts                    # Config manager (personas, rate limits, settings)
   tools/
@@ -71,6 +73,7 @@ Plugins live in `plugins/<name>/index.ts` and export a `Plugin` interface:
 - `intents` — extra Discord gateway intents
 - `init(ctx)` — called after Discord ready
 - `onMessage(msg, ctx)` — hook into every message
+- `onInteraction(interaction, ctx)` — hook into every interaction (buttons/commands/modals)
 - `destroy()` — cleanup on shutdown
 
 Enable plugins in `config.json`: `"plugins": ["voice", "image-gen"]`
@@ -92,10 +95,12 @@ Discord interactions (buttons, slash commands, modals) are handled by `lib/inter
 - **InteractionCreate** event registered in `lib/discord.ts`, routes to `handleInteraction()`
 - Plugin hook: `onInteraction?(interaction, ctx)` in the Plugin interface
 - Button customId format: `prefix:action:data` (e.g. `reminder:ack:42`, `reminder:snooze:42:1h`)
-- Button handlers registered via `registerButtonHandler(prefix, handler)`
+- Handlers self-register via `registerButtonHandler()`, `registerModalHandler()`, `registerCommand()`
+- Error handling via `safeHandle()` wrapper — catches errors + replies gracefully
 - All interactions bypass Claude — handled directly for instant response (<100ms vs ~5s)
 - Key constraint: Discord requires response within 3 seconds; use `deferReply()` for async work
 - Slash command definitions in `lib/commands.ts`, deployed via `bun scripts/deploy-commands.ts`
+- Access control: `/persona switch`, `/newpersona`, `/savememory` are owner-only via `requireOwner()`
 
 ### Slash Commands
 
@@ -113,12 +118,19 @@ Deploy: `bun scripts/deploy-commands.ts` (guild, instant) or `--global` (up to 1
 
 ### Modals
 
-Modal forms triggered from slash commands, defined in `lib/interactions.ts`:
+Modal forms triggered from slash commands, defined in `lib/handlers/modals.ts`:
 - Reminder modal: message, time, recurring fields
-- Persona modal: key, name, personality fields
-- Memory modal: key, value fields
+- Persona modal: key, name, personality fields (owner only)
+- Memory modal: key, value fields (owner only)
 - Modal submissions handled via `registerModalHandler(prefix, handler)` with customId prefix routing
 - Key constraint: `showModal()` must be the first response to an interaction (cannot defer first)
+
+### Shared Utilities
+
+- `lib/time.ts` — `MS_PER_MIN/HOUR/DAY` constants, `parseNaturalTime()`, `formatDuration()`, `relativeTime()`, `isValidCron()`, SQLite datetime formatting
+- `lib/handlers/shared.ts` — `createAndScheduleReminder()` (used by /remind + modal), `requireOwner()`, `isOwner()`, `isAllowed()`
+- `lib/handlers/github.ts` — `buildGhArgs()` + `runGh()` (used by MCP tool + slash command)
+- `lib/version.ts` — `VERSION` constant from package.json (used by mcp-server, commands, status-tools)
 
 ## Tools (26)
 
@@ -183,7 +195,7 @@ reminders: id, user_id, chat_id, message, due_at, fired, created_at,
 - Console output goes to stderr (stdout is MCP stdio transport)
 - DMs require Partials.Channel + Partials.Message in discord.js
 - All attachments downloaded to `~/.claude/plugins/data/choomfie-inline/inbox/` (file_path = first, file_paths = all semicolon-separated)
-- GitHub integration shells out to `gh` CLI
+- GitHub integration shells out to `gh` CLI via shared `lib/handlers/github.ts` (15s timeout)
 - Servers: only responds when @mentioned or replied to (not every message)
 - DMs: always responds
 - Rate limit: configurable via config.json (default 5s)
