@@ -41,6 +41,8 @@ export const edgeTTS: TTSProvider = {
   },
 
   async synthesize(text: string, language: string = "en"): Promise<Buffer> {
+    if (!text?.trim()) throw new Error("Cannot synthesize empty text");
+
     const voice =
       process.env.EDGE_TTS_VOICE ||
       DEFAULT_VOICES[language] ||
@@ -88,11 +90,14 @@ export const edgeTTS: TTSProvider = {
         { stdout: "pipe", stderr: "pipe" }
       );
 
-      const output = await new Response(ffProc.stdout).arrayBuffer();
+      const [output, ffStderr] = await Promise.all([
+        new Response(ffProc.stdout).arrayBuffer(),
+        new Response(ffProc.stderr).text(),
+      ]);
       await ffProc.exited;
 
       if (ffProc.exitCode !== 0) {
-        throw new Error("ffmpeg conversion failed for edge-tts output");
+        throw new Error(`ffmpeg conversion failed: ${ffStderr}`);
       }
 
       return Buffer.from(output);

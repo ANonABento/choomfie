@@ -12,13 +12,13 @@ import {
   EmbedBuilder,
   MessageFlags,
 } from "discord.js";
-import { readdirSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { VERSION } from "./version.ts";
 import { registerCommand } from "./interactions.ts";
 import { formatDuration, fromSQLiteDatetime } from "./time.ts";
 import { isOwner, requireOwner } from "./handlers/shared.ts";
 import { buildGhArgs, runGh } from "./handlers/github.ts";
+import { discoverPlugins } from "./plugins.ts";
 import {
   buildReminderModal,
   buildPersonaModal,
@@ -419,32 +419,29 @@ registerCommand("plugins", {
     const action = interaction.options.getString("action");
     const name = interaction.options.getString("name");
 
-    // Discover available plugins by scanning plugins/ directory
     const projectRoot = join(dirname(new URL(import.meta.url).pathname), "..");
-    const pluginsDir = join(projectRoot, "plugins");
-
-    const available: string[] = [];
-    if (existsSync(pluginsDir)) {
-      for (const entry of readdirSync(pluginsDir, { withFileTypes: true })) {
-        if (entry.isDirectory() && existsSync(join(pluginsDir, entry.name, "index.ts"))) {
-          available.push(entry.name);
-        }
-      }
-    }
-
+    const available = discoverPlugins(projectRoot);
     const enabled = ctx.config.getEnabledPlugins();
 
     if (!action) {
-      // List plugins with tool counts for active ones
+      // List plugins with status
       const lines = available.map((p) => {
-        const active = enabled.includes(p);
+        const inConfig = enabled.includes(p);
         const loadedPlugin = ctx.plugins.find((pl) => pl.name === p);
         const toolCount = loadedPlugin?.tools?.length;
         const tools = toolCount ? ` · ${toolCount} tools` : "";
-        const status = active
-          ? loadedPlugin ? `🟢 active${tools}` : "🟡 enabled (restart needed)"
-          : "⚪ disabled";
-        return `${active ? "→ " : "  "}\`${p}\` — ${status}`;
+
+        let status: string;
+        if (loadedPlugin && inConfig) {
+          status = `🟢 active${tools}`;
+        } else if (inConfig && !loadedPlugin) {
+          status = "🔴 enabled but failed to load";
+        } else if (!inConfig && loadedPlugin) {
+          status = "🟠 disabled (restart to remove)";
+        } else {
+          status = "⚪ disabled";
+        }
+        return `${inConfig ? "→ " : "  "}\`${p}\` — ${status}`;
       });
 
       const embed = new EmbedBuilder()

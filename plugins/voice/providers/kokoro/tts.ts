@@ -47,6 +47,8 @@ export const kokoroTTS: TTSProvider = {
   },
 
   async synthesize(text: string, language: string = "en"): Promise<Buffer> {
+    if (!text?.trim()) throw new Error("Cannot synthesize empty text");
+
     const voice = process.env.KOKORO_VOICE || DEFAULT_VOICE;
     const tempWav = join(tmpdir(), `choomfie-kokoro-${Date.now()}.wav`);
 
@@ -95,11 +97,14 @@ export const kokoroTTS: TTSProvider = {
         { stdout: "pipe", stderr: "pipe" }
       );
 
-      const output = await new Response(ffProc.stdout).arrayBuffer();
+      const [output, ffStderr] = await Promise.all([
+        new Response(ffProc.stdout).arrayBuffer(),
+        new Response(ffProc.stderr).text(),
+      ]);
       await ffProc.exited;
 
       if (ffProc.exitCode !== 0) {
-        throw new Error("ffmpeg conversion failed for Kokoro output");
+        throw new Error(`ffmpeg conversion failed: ${ffStderr}`);
       }
 
       return Buffer.from(output);

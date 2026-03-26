@@ -5,6 +5,17 @@
 import type { Plugin } from "./types.ts";
 import type { ConfigManager } from "./config.ts";
 import { join } from "node:path";
+import { readdirSync, existsSync } from "node:fs";
+
+/** Scan plugins/ directory and return names of all valid plugins (have index.ts). */
+export function discoverPlugins(projectRoot: string): string[] {
+  const pluginsDir = join(projectRoot, "plugins");
+  if (!existsSync(pluginsDir)) return [];
+
+  return readdirSync(pluginsDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && existsSync(join(pluginsDir, e.name, "index.ts")))
+    .map((e) => e.name);
+}
 
 export async function loadPlugins(
   config: ConfigManager,

@@ -45,6 +45,12 @@ export class VoiceManager {
     );
   }
 
+  private ensureInitialized() {
+    if (!this.stt || !this.tts) {
+      throw new Error("Voice manager not initialized — call init() first");
+    }
+  }
+
   async join(channelId: string, guildId: string) {
     this.leave(guildId);
 
@@ -101,6 +107,7 @@ export class VoiceManager {
   }
 
   async speak(guildId: string, text: string, language: string = "en") {
+    this.ensureInitialized();
     const gv = this.guilds.get(guildId);
     if (!gv) throw new Error("Not connected to voice in this server");
 
@@ -213,8 +220,15 @@ export class VoiceManager {
     }
     await writer.close();
 
-    const output = await new Response(proc.stdout).arrayBuffer();
+    const [output, stderr] = await Promise.all([
+      new Response(proc.stdout).arrayBuffer(),
+      new Response(proc.stderr).text(),
+    ]);
     await proc.exited;
+
+    if (proc.exitCode !== 0) {
+      throw new Error(`ffmpeg opus→pcm conversion failed: ${stderr}`);
+    }
 
     return Buffer.from(output);
   }

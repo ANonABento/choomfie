@@ -25,6 +25,8 @@ export const elevenlabsTTS: TTSProvider = {
   },
 
   async synthesize(text: string, language: string = "en"): Promise<Buffer> {
+    if (!text?.trim()) throw new Error("Cannot synthesize empty text");
+
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) {
       throw new Error(
