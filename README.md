@@ -75,10 +75,10 @@ mkdir -p ~/.claude/plugins/data/choomfie-inline
 echo "DISCORD_TOKEN=your_token_here" > ~/.claude/plugins/data/choomfie-inline/.env
 
 # Run with --plugin-dir to load Choomfie as a local plugin
-claude --plugin-dir /path/to/choomfie
+claude --plugin-dir /path/to/choomfie --dangerously-load-development-channels server:choomfie
 ```
 
-> **Note:** The `--plugin-dir` flag loads Choomfie only for that session. Do NOT add it to global `~/.claude.json` mcpServers — that would start the Discord bot on every Claude session. Alternatively, install it as a plugin with `claude plugin install /path/to/choomfie` if you want it always available.
+> **Note:** The `--plugin-dir` flag loads Choomfie only for that session. The `--dangerously-load-development-channels` flag is required for Discord messages to reach Claude. Do NOT add it to global `~/.claude.json` mcpServers — that would start the Discord bot on every Claude session.
 
 ### Access & Pairing
 

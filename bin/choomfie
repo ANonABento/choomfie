@@ -24,11 +24,11 @@ if [ "${1:-}" = "--tmux" ]; then
     echo "Choomfie session already running. Attaching..."
     tmux attach -t choomfie
   else
-    tmux new-session -d -s choomfie "cd '$CHOOMFIE_DIR' && claude --plugin-dir '$CHOOMFIE_DIR'"
+    tmux new-session -d -s choomfie "cd '$CHOOMFIE_DIR' && claude --plugin-dir '$CHOOMFIE_DIR' --dangerously-load-development-channels server:choomfie"
     echo "Choomfie started in tmux session. Attaching..."
     tmux attach -t choomfie
   fi
 else
   cd "$CHOOMFIE_DIR"
-  exec claude --plugin-dir "$CHOOMFIE_DIR"
+  exec claude --plugin-dir "$CHOOMFIE_DIR" --dangerously-load-development-channels server:choomfie
 fi

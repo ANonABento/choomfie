@@ -329,7 +329,7 @@ export function createDiscordClient(ctx: AppContext): Client {
 
     // Forward to Claude Code
     ctx.mcp.notification({
-      method: "notifications/claude/channel",
+      method: "notifications/claude/channel" as any,
       params: {
         content:
           cleanContent ||

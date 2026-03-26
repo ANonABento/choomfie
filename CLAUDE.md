@@ -69,7 +69,7 @@ Enable plugins in `config.json`: `"plugins": ["voice", "image-gen"]`
 
 ## How It Works
 
-1. Claude Code loads Choomfie via `--plugin-dir` and spawns `bun server.ts` as an MCP subprocess
+1. Claude Code loads Choomfie via `--plugin-dir` and `--dangerously-load-development-channels server:choomfie`, then spawns `bun server.ts` as an MCP subprocess
 2. Single-instance guard: kills any stale process from a previous session via PID file (`choomfie.pid`)
 3. server.ts connects to Discord via discord.js
 4. Incoming messages → MCP notifications → Claude Code

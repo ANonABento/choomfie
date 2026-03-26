@@ -47,7 +47,7 @@ choomfie
 
 Or manually:
 ```bash
-claude --plugin-dir /path/to/choomfie
+claude --plugin-dir /path/to/choomfie --dangerously-load-development-channels server:choomfie
 ```
 
 You should see in stderr:
@@ -97,7 +97,7 @@ choomfie --tmux
 
 # Or manually:
 tmux new -s choomfie
-claude --plugin-dir /path/to/choomfie
+claude --plugin-dir /path/to/choomfie --dangerously-load-development-channels server:choomfie
 # Detach: Ctrl+B, then D
 # Reattach later: tmux attach -t choomfie
 ```
