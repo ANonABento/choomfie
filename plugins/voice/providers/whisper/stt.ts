@@ -82,6 +82,7 @@ export const whisperSTT: STTProvider = {
         return text.trim();
       } catch {
         // Some versions output to stdout instead
+        console.error("whisper-cpp: no .txt output file, falling back to stdout");
         return stdout.trim();
       }
     } finally {

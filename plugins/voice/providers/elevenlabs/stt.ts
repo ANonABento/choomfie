@@ -58,7 +58,8 @@ export const elevenlabsSTT: STTProvider = {
       );
     }
 
-    const result = (await response.json()) as { text: string };
+    const result = (await response.json()) as { text?: string };
+    if (!result?.text) throw new Error("ElevenLabs STT returned no text");
     return result.text;
   },
 };

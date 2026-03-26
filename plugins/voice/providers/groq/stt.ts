@@ -54,7 +54,8 @@ export const groqSTT: STTProvider = {
       throw new Error(`Groq STT error (${response.status}): ${body}`);
     }
 
-    const result = (await response.json()) as { text: string };
+    const result = (await response.json()) as { text?: string };
+    if (!result?.text) throw new Error("Groq STT returned no text");
     return result.text;
   },
 };
