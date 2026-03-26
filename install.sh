@@ -22,6 +22,10 @@ if ! command -v bun &>/dev/null; then
   missing+=("bun (https://bun.sh — brew install oven-sh/bun/bun)")
 fi
 
+if ! command -v curl &>/dev/null; then
+  missing+=("curl (used for Discord owner auto-detection)")
+fi
+
 if [ ${#missing[@]} -gt 0 ]; then
   echo "Missing prerequisites:"
   for m in "${missing[@]}"; do
@@ -55,6 +59,7 @@ else
   read -rp "Paste your Discord bot token (or press Enter to skip): " token
   if [ -n "$token" ]; then
     echo "DISCORD_TOKEN=$token" > "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
     echo "[3/5] Token saved"
   else
     echo "[3/5] Skipped — run '/choomfie:configure <token>' later in Claude Code"
@@ -80,6 +85,7 @@ elif [ -f "$ENV_FILE" ] && grep -q "DISCORD_TOKEN=" "$ENV_FILE"; then
   "allowed": ["$OWNER_ID"]
 }
 EOJSON
+    chmod 600 "$DATA_DIR/access.json"
     echo "  Owner auto-detected: $OWNER_ID"
   else
     echo "  Could not detect owner — set manually with '/choomfie:access owner <USER_ID>'"
@@ -104,9 +110,13 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
   fi
 
   if [ -n "$SHELL_RC" ]; then
-    echo "export PATH=\"$BIN_DIR:\$PATH\"" >> "$SHELL_RC"
-    echo "  Added $BIN_DIR to PATH in $SHELL_RC"
-    echo "  Run: source $SHELL_RC"
+    if ! grep -Fq "export PATH=\"$BIN_DIR:\$PATH\"" "$SHELL_RC"; then
+      echo "export PATH=\"$BIN_DIR:\$PATH\"" >> "$SHELL_RC"
+      echo "  Added $BIN_DIR to PATH in $SHELL_RC"
+      echo "  Run: source $SHELL_RC"
+    else
+      echo "  PATH already configured in $SHELL_RC"
+    fi
   else
     echo "  Add $BIN_DIR to your PATH manually"
   fi

@@ -61,7 +61,12 @@ export class VoiceManager {
     const player = createAudioPlayer();
     connection.subscribe(player);
 
-    await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
+    try {
+      await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
+    } catch (error) {
+      connection.destroy();
+      throw error;
+    }
 
     const guildVoice: GuildVoice = {
       connection,

@@ -6,6 +6,8 @@
  * Settings control bot behavior (rate limits, triggers, etc.).
  */
 
+import { readFileSync, writeFileSync } from "node:fs";
+
 export interface Persona {
   name: string;
   personality: string;
@@ -42,6 +44,28 @@ const DEFAULT_CONFIG: Config = {
   voice: { stt: "groq", tts: "elevenlabs" },
 };
 
+function mergeConfig(saved: Partial<Config>): Config {
+  const savedPersonas =
+    saved.personas && typeof saved.personas === "object"
+      ? saved.personas
+      : {};
+  const savedVoice =
+    saved.voice && typeof saved.voice === "object" ? saved.voice : {};
+
+  return {
+    ...DEFAULT_CONFIG,
+    ...saved,
+    personas: {
+      ...DEFAULT_CONFIG.personas,
+      ...savedPersonas,
+    },
+    voice: {
+      ...DEFAULT_CONFIG.voice,
+      ...savedVoice,
+    },
+  };
+}
+
 export class ConfigManager {
   private configPath: string;
   private config: Config;
@@ -53,16 +77,16 @@ export class ConfigManager {
 
   private load(): Config {
     try {
-      const raw = require("fs").readFileSync(this.configPath, "utf-8");
+      const raw = readFileSync(this.configPath, "utf-8");
       const saved = JSON.parse(raw) as Partial<Config>;
-      return { ...DEFAULT_CONFIG, ...saved };
+      return mergeConfig(saved);
     } catch {
       return { ...DEFAULT_CONFIG };
     }
   }
 
   private save() {
-    require("fs").writeFileSync(
+    writeFileSync(
       this.configPath,
       JSON.stringify(this.config, null, 2)
     );

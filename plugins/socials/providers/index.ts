@@ -49,7 +49,8 @@ function createFallbackProxy<T extends { name: string }>(
   order: string[],
   providers: Record<string, T>
 ): T {
-  const primary = providers[order[0]];
+  const validOrder = order.filter((name) => providers[name]);
+  const primary = providers[validOrder[0]];
   if (!primary) throw new Error(`Provider "${order[0]}" not found`);
 
   return new Proxy(primary, {
@@ -59,7 +60,7 @@ function createFallbackProxy<T extends { name: string }>(
       if (typeof original !== "function") return original;
 
       return async (...args: any[]) => {
-        for (const name of order) {
+        for (const name of validOrder) {
           const provider = providers[name];
           if (!provider) continue;
           try {
@@ -71,7 +72,7 @@ function createFallbackProxy<T extends { name: string }>(
           }
         }
         throw new Error(
-          `All providers failed for ${prop}. Tried: ${order.join(", ")}`
+          `All providers failed for ${prop}. Tried: ${validOrder.join(", ")}`
         );
       };
     },

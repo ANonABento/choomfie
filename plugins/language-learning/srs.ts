@@ -7,6 +7,7 @@
 
 import { FSRS, createEmptyCard, Rating, type Card } from "ts-fsrs";
 import { Database } from "bun:sqlite";
+import { nowUTC, toSQLiteDatetime } from "../../lib/time.ts";
 
 export interface SRSCard {
   id: number;
@@ -31,11 +32,13 @@ export interface ReviewResult {
 export class SRSManager {
   private db: Database;
   private fsrs: FSRS;
+  private emptyCardState: string;
 
   constructor(dbPath: string) {
     this.db = new Database(dbPath, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL");
     this.fsrs = new FSRS({});
+    this.emptyCardState = JSON.stringify(createEmptyCard());
     this.init();
   }
 
@@ -70,7 +73,6 @@ export class SRSManager {
     deck: string = "default",
     tags: string = ""
   ): number {
-    const emptyCard = createEmptyCard();
     const result = this.db
       .query(
         `INSERT INTO srs_cards (user_id, front, back, reading, deck, tags, card_state)
@@ -83,7 +85,7 @@ export class SRSManager {
         reading,
         deck,
         tags,
-        JSON.stringify(emptyCard)
+        this.emptyCardState
       );
     return Number(result.lastInsertRowid);
   }
@@ -94,7 +96,6 @@ export class SRSManager {
     deck: string,
     cards: Array<{ front: string; back: string; reading: string; tags?: string }>
   ): number {
-    const emptyState = JSON.stringify(createEmptyCard());
     const stmt = this.db.prepare(
       `INSERT INTO srs_cards (user_id, front, back, reading, deck, tags, card_state)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -110,7 +111,7 @@ export class SRSManager {
           card.reading,
           deck,
           card.tags || "",
-          emptyState
+          this.emptyCardState
         );
         count++;
       }
@@ -122,7 +123,7 @@ export class SRSManager {
 
   /** Get cards due for review */
   getDueCards(userId: string, deck?: string, limit: number = 10): SRSCard[] {
-    const now = new Date().toISOString();
+    const now = nowUTC();
     const query = deck
       ? `SELECT * FROM srs_cards WHERE user_id = ? AND deck = ? AND next_review <= ? ORDER BY next_review ASC LIMIT ?`
       : `SELECT * FROM srs_cards WHERE user_id = ? AND next_review <= ? ORDER BY next_review ASC LIMIT ?`;
@@ -137,6 +138,7 @@ export class SRSManager {
 
   /** Review a card with a rating */
   reviewCard(
+    userId: string,
     cardId: number,
     rating: "again" | "hard" | "good" | "easy"
   ): ReviewResult {
@@ -145,6 +147,9 @@ export class SRSManager {
       .get(cardId) as any;
 
     if (!row) throw new Error(`Card #${cardId} not found`);
+    if (row.user_id !== userId) {
+      throw new Error(`Card #${cardId} does not belong to user ${userId}`);
+    }
 
     const card = this.rowToCard(row);
     const fsrsCard: Card = JSON.parse(card.cardState);
@@ -165,7 +170,7 @@ export class SRSManager {
       )
       .run(
         JSON.stringify(scheduled.card),
-        nextReview.toISOString(),
+        toSQLiteDatetime(nextReview.toISOString()),
         cardId
       );
 
@@ -181,7 +186,7 @@ export class SRSManager {
     userId: string,
     deck?: string
   ): { total: number; due: number; learned: number } {
-    const now = new Date().toISOString();
+    const now = nowUTC();
     const where = deck
       ? "user_id = ? AND deck = ?"
       : "user_id = ?";
@@ -203,9 +208,9 @@ export class SRSManager {
     const learned = (
       this.db
         .query(
-          `SELECT COUNT(*) as c FROM srs_cards WHERE ${where} AND card_state != '{}'`
+          `SELECT COUNT(*) as c FROM srs_cards WHERE ${where} AND card_state != ?`
         )
-        .get(...params) as any
+        .get(...params, this.emptyCardState) as any
     ).c;
 
     return { total, due, learned };

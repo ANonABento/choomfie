@@ -46,6 +46,11 @@ export const languageLearningTools: ToolDef[] = [
             description:
               "Word to look up (in target language, romaji, or English)",
           },
+          user_id: {
+            type: "string",
+            description:
+              "Discord user ID (optional, used to default to the user's current study language)",
+          },
           language: {
             type: "string",
             description:
@@ -56,7 +61,12 @@ export const languageLearningTools: ToolDef[] = [
       },
     },
     handler: async (args, ctx) => {
-      const langName = (args.language as string) || "japanese";
+      const langName =
+        (args.language as string) ||
+        ((args.user_id as string | undefined)
+          ? getSession(args.user_id as string).language
+          : undefined) ||
+        "japanese";
       const langModule = getLanguageModule(langName);
 
       try {
@@ -291,6 +301,7 @@ export const languageLearningTools: ToolDef[] = [
       inputSchema: {
         type: "object" as const,
         properties: {
+          user_id: { type: "string", description: "Discord user ID" },
           card_id: { type: "number", description: "Card ID from srs_review" },
           rating: {
             type: "string",
@@ -298,7 +309,7 @@ export const languageLearningTools: ToolDef[] = [
             description: "How well you recalled the card",
           },
         },
-        required: ["card_id", "rating"],
+        required: ["user_id", "card_id", "rating"],
       },
     },
     handler: async (args, _ctx) => {
@@ -307,6 +318,7 @@ export const languageLearningTools: ToolDef[] = [
 
       try {
         const result = srs.reviewCard(
+          args.user_id as string,
           args.card_id as number,
           args.rating as "again" | "hard" | "good" | "easy"
         );

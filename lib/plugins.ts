@@ -27,15 +27,31 @@ export async function loadPlugins(
         continue;
       }
 
-      // Check for tool name collisions
+      // Check for tool name collisions before registering anything from this plugin
+      const pluginToolNames = new Set<string>();
+      let hasCollision = false;
       for (const tool of plugin.tools ?? []) {
-        if (seenTools.has(tool.definition.name)) {
+        const toolName = tool.definition.name;
+        if (pluginToolNames.has(toolName)) {
           console.error(
-            `Plugin ${name}: tool "${tool.definition.name}" conflicts with existing tool, skipping plugin`
+            `Plugin ${name}: duplicate tool "${toolName}" inside plugin, skipping plugin`
           );
-          continue;
+          hasCollision = true;
+          break;
         }
-        seenTools.add(tool.definition.name);
+        if (seenTools.has(toolName)) {
+          console.error(
+            `Plugin ${name}: tool "${toolName}" conflicts with existing tool, skipping plugin`
+          );
+          hasCollision = true;
+          break;
+        }
+        pluginToolNames.add(toolName);
+      }
+      if (hasCollision) continue;
+
+      for (const toolName of pluginToolNames) {
+        seenTools.add(toolName);
       }
 
       plugins.push(plugin);

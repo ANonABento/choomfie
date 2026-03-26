@@ -163,6 +163,10 @@ choomfie/
 ├── bin/choomfie               # Launcher script
 ├── lib/memory.ts              # SQLite memory store
 ├── lib/config.ts              # Config manager (personas, settings)
+├── plugins/
+│   ├── language-learning/     # Furigana, kana conversion, SRS tools
+│   ├── socials/               # Reddit/YouTube provider-backed tools
+│   └── voice/                 # Discord voice, STT/TTS integrations
 ├── .claude-plugin/plugin.json # Plugin metadata
 ├── .mcp.json                  # MCP server config
 ├── skills/

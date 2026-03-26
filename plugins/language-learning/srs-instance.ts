@@ -6,7 +6,7 @@ import type { SRSManager } from "./srs.ts";
 
 let _srs: SRSManager | null = null;
 
-export function setSRS(manager: SRSManager) {
+export function setSRS(manager: SRSManager | null) {
   _srs = manager;
 }
 

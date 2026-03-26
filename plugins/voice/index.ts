@@ -50,7 +50,7 @@ const voicePlugin: Plugin = {
 
 // Module-level accessor for tools to use
 let _manager: VoiceManager | null = null;
-export function setVoiceManager(m: VoiceManager) {
+export function setVoiceManager(m: VoiceManager | null) {
   _manager = m;
 }
 export function getVoiceManager(): VoiceManager | null {

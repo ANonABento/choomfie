@@ -6,6 +6,7 @@
  */
 
 import type { YouTubeProvider, VideoResult, TranscriptSegment } from "../types.ts";
+import { unlink } from "node:fs/promises";
 
 async function run(args: string[]): Promise<string> {
   const proc = Bun.spawn(["yt-dlp", ...args], {
@@ -59,6 +60,8 @@ export const ytdlpProvider: YouTubeProvider = {
   },
 
   async getTranscript(videoUrl: string): Promise<TranscriptSegment[]> {
+    const cleanupPaths: string[] = [];
+
     try {
       // Extract video ID for temp file naming
       const idMatch = videoUrl.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
@@ -79,8 +82,10 @@ export const ytdlpProvider: YouTubeProvider = {
       // Try to read the subtitle file (json3 format)
       const subGlob = new Bun.Glob(`${outPath}*.json3`);
       for await (const file of subGlob.scan("/")) {
+        const fullPath = `/${file}`;
+        cleanupPaths.push(fullPath);
         try {
-          const content = await Bun.file(`/${file}`).json();
+          const content = await Bun.file(fullPath).json();
           const events = content.events || [];
           return events
             .filter((e: any) => e.segs)
@@ -99,6 +104,14 @@ export const ytdlpProvider: YouTubeProvider = {
       return [];
     } catch {
       return [];
+    } finally {
+      await Promise.all(
+        cleanupPaths.map(async (path) => {
+          try {
+            await unlink(path);
+          } catch {}
+        })
+      );
     }
   },
 

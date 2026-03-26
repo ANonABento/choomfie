@@ -16,6 +16,28 @@ import { createDiscordClient } from "./lib/discord.ts";
 import { readFile, writeFile, unlink } from "node:fs/promises";
 import { destroyAll as destroyTyping } from "./lib/typing.ts";
 
+function looksLikeChoomfieProcess(command: string): boolean {
+  return (
+    command.includes("choomfie") ||
+    command.includes("server.ts") ||
+    command.includes("claude")
+  );
+}
+
+async function shouldTerminateStalePid(pid: number): Promise<boolean> {
+  try {
+    const proc = Bun.spawn(["ps", "-p", String(pid), "-o", "command="], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const command = (await new Response(proc.stdout).text()).trim();
+    await proc.exited;
+    return !!command && looksLikeChoomfieProcess(command);
+  } catch {
+    return false;
+  }
+}
+
 // Initialize context (loads env, config, memory, access list)
 const { ctx, discordToken } = await createContext();
 
@@ -25,9 +47,15 @@ try {
   const oldPid = parseInt(await readFile(pidPath, "utf-8"), 10);
   if (oldPid && oldPid !== process.pid) {
     try {
-      process.kill(oldPid, "SIGTERM");
-      // Give it a moment to clean up
-      await new Promise((r) => setTimeout(r, 500));
+      if (await shouldTerminateStalePid(oldPid)) {
+        process.kill(oldPid, "SIGTERM");
+        // Give it a moment to clean up
+        await new Promise((r) => setTimeout(r, 500));
+      } else {
+        console.error(
+          `Choomfie: refusing to terminate PID ${oldPid} because it does not look like a Choomfie process`
+        );
+      }
     } catch {
       // Process already dead, that's fine
     }

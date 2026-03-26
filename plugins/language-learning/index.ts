@@ -76,7 +76,7 @@ const languageLearningPlugin: Plugin = {
     const srs = getSRS();
     if (srs) {
       srs.close();
-      setSRS(null as any);
+      setSRS(null);
     }
   },
 };
