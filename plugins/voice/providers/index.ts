@@ -70,7 +70,7 @@ async function autoSelectProvider<T extends STTProvider | TTSProvider>(
 
 export async function getSTTProvider(config: ConfigManager): Promise<STTProvider> {
   const voiceConfig = config.getVoiceConfig();
-  const name = voiceConfig.stt || "auto";
+  const name = voiceConfig.stt ?? "auto";
 
   if (name === "auto") {
     return autoSelectProvider(sttProviders, sttPriority, "STT");
@@ -87,7 +87,7 @@ export async function getSTTProvider(config: ConfigManager): Promise<STTProvider
 
 export async function getTTSProvider(config: ConfigManager): Promise<TTSProvider> {
   const voiceConfig = config.getVoiceConfig();
-  const name = voiceConfig.tts || "auto";
+  const name = voiceConfig.tts ?? "auto";
 
   if (name === "auto") {
     return autoSelectProvider(ttsProviders, ttsPriority, "TTS");
