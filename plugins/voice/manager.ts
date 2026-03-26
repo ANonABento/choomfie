@@ -23,6 +23,16 @@ import {
   type STTProvider,
   type TTSProvider,
 } from "./providers/index.ts";
+import { STT_WAV } from "./providers/audio.ts";
+
+// --- Timeouts ---
+const CONNECTION_TIMEOUT = 10_000; // 10s to establish voice connection
+const PLAYBACK_START_TIMEOUT = 5_000; // 5s for player to start playing
+const PLAYBACK_FINISH_TIMEOUT = 30_000; // 30s for current playback to finish
+
+// --- Audio thresholds ---
+const MIN_OPUS_CHUNKS = 10; // Skip utterances shorter than ~200ms
+const MIN_PCM_BYTES = 4800; // Skip audio < 300ms at 16kHz mono
 
 interface GuildVoice {
   connection: VoiceConnection;
@@ -68,7 +78,7 @@ export class VoiceManager {
     connection.subscribe(player);
 
     try {
-      await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
+      await entersState(connection, VoiceConnectionStatus.Ready, CONNECTION_TIMEOUT);
     } catch (error) {
       connection.destroy();
       throw error;
@@ -117,11 +127,11 @@ export class VoiceManager {
     const resource = createAudioResource(stream);
 
     if (gv.player.state.status === AudioPlayerStatus.Playing) {
-      await entersState(gv.player, AudioPlayerStatus.Idle, 30_000);
+      await entersState(gv.player, AudioPlayerStatus.Idle, PLAYBACK_FINISH_TIMEOUT);
     }
 
     gv.player.play(resource);
-    await entersState(gv.player, AudioPlayerStatus.Playing, 5_000);
+    await entersState(gv.player, AudioPlayerStatus.Playing, PLAYBACK_START_TIMEOUT);
   }
 
   private listenToUser(guildId: string, userId: string) {
@@ -148,11 +158,11 @@ export class VoiceManager {
     opusStream.on("end", async () => {
       gv.listeningTo.delete(userId);
 
-      if (chunks.length < 10) return;
+      if (chunks.length < MIN_OPUS_CHUNKS) return;
 
       try {
         const pcmBuffer = await this.opusToPcm(chunks);
-        if (pcmBuffer.length < 4800) return;
+        if (pcmBuffer.length < MIN_PCM_BYTES) return;
 
         const transcript = await this.stt.transcribe(pcmBuffer);
         if (!transcript || transcript.trim().length === 0) return;
@@ -200,11 +210,11 @@ export class VoiceManager {
         "-f",
         "wav",
         "-ar",
-        "16000",
+        String(STT_WAV.sampleRate),
         "-ac",
-        "1",
+        String(STT_WAV.channels),
         "-acodec",
-        "pcm_s16le",
+        STT_WAV.codec,
         "pipe:1",
       ],
       {

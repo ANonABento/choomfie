@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { unlinkSync } from "node:fs";
 import type { TTSProvider } from "../types.ts";
 import { checkBinary } from "../detect.ts";
+import { toDiscordPcm } from "../audio.ts";
 
 const DEFAULT_VOICES: Record<string, string> = {
   en: "en-US-AriaNeural",
@@ -71,36 +72,7 @@ export const edgeTTS: TTSProvider = {
         );
       }
 
-      // Convert MP3 → raw PCM 48kHz mono 16-bit (what Discord expects)
-      const ffProc = Bun.spawn(
-        [
-          "ffmpeg",
-          "-i",
-          tempMp3,
-          "-f",
-          "s16le",
-          "-ar",
-          "48000",
-          "-ac",
-          "1",
-          "-acodec",
-          "pcm_s16le",
-          "pipe:1",
-        ],
-        { stdout: "pipe", stderr: "pipe" }
-      );
-
-      const [output, ffStderr] = await Promise.all([
-        new Response(ffProc.stdout).arrayBuffer(),
-        new Response(ffProc.stderr).text(),
-      ]);
-      await ffProc.exited;
-
-      if (ffProc.exitCode !== 0) {
-        throw new Error(`ffmpeg conversion failed: ${ffStderr}`);
-      }
-
-      return Buffer.from(output);
+      return await toDiscordPcm(tempMp3);
     } finally {
       try {
         unlinkSync(tempMp3);
