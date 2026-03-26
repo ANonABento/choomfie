@@ -47,14 +47,5 @@ export function isRateLimited(
   return false;
 }
 
-export function formatUptime(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  const d = Math.floor(s / 86400);
-  const h = Math.floor((s % 86400) / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const parts: string[] = [];
-  if (d > 0) parts.push(`${d}d`);
-  if (h > 0) parts.push(`${h}h`);
-  parts.push(`${m}m`);
-  return parts.join(" ");
-}
+// Re-export formatDuration as formatUptime for backwards compat
+export { formatDuration as formatUptime } from "./time.ts";

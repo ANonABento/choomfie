@@ -6,8 +6,8 @@
 import type { TextChannel } from "discord.js";
 import type { AppContext } from "./types.ts";
 import type { Reminder } from "./memory.ts";
-import { dateToSQLite } from "./time.ts";
-import { buildReminderButtons } from "./interactions.ts";
+import { dateToSQLite, MS_PER_MIN } from "./time.ts";
+import { buildReminderButtons } from "./handlers/reminder-buttons.ts";
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
 
@@ -105,7 +105,7 @@ export class ReminderScheduler {
 
     this.clearNagTimer(reminder.id);
 
-    const targetMs = Date.now() + reminder.nagInterval * 60_000;
+    const targetMs = Date.now() + reminder.nagInterval * MS_PER_MIN;
     this.setLongTimeout(this.nagTimers, reminder.id, targetMs, () => {
       void this.fireNag(reminder);
     });

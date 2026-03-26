@@ -22,9 +22,13 @@ lib/
   context.ts                   # Env/config loading, creates AppContext
   mcp-server.ts                # MCP Server creation, instructions, tool registration
   discord.ts                   # Discord client, Ready, MessageCreate, InteractionCreate
-  interactions.ts              # Interaction router (buttons, slash commands, modals)
-  commands.ts                  # Slash command definitions + handlers
-  conversation.ts              # Channel activation, rate limiting, uptime
+  interactions.ts              # Interaction router + handler registries
+  commands.ts                  # Slash command definitions + handlers (self-registering)
+  handlers/
+    reminder-buttons.ts        # Reminder button builders + click handlers
+    modals.ts                  # Modal builders + submit handlers
+    shared.ts                  # Shared handler utils (createAndScheduleReminder)
+  conversation.ts              # Channel activation, rate limiting
   permissions.ts               # Permission relay (tool approval via DM)
   reminders.ts                 # ReminderScheduler — timer-based (setTimeout per reminder)
   time.ts                      # Shared datetime utils (SQLite-compatible formatting)

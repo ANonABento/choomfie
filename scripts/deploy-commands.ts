@@ -10,7 +10,7 @@
  */
 
 import { REST, Routes } from "discord.js";
-import { getCommandDefs } from "../lib/commands.ts";
+import { getCommandDefs } from "../lib/interactions.ts";
 import { readFile } from "node:fs/promises";
 
 const DATA_DIR =

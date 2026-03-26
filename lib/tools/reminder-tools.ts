@@ -5,27 +5,7 @@
 import type { ToolDef } from "../types.ts";
 import { text, err } from "../types.ts";
 import type { Reminder } from "../memory.ts";
-
-/** Format relative time from now */
-function relativeTime(isoDate: string): string {
-  const now = Date.now();
-  const target = new Date(isoDate).getTime();
-  const diffMs = target - now;
-  const abs = Math.abs(diffMs);
-  const past = diffMs < 0;
-
-  if (abs < 60_000) return past ? "just now" : "in <1 min";
-  if (abs < 3_600_000) {
-    const mins = Math.floor(abs / 60_000);
-    return past ? `${mins}m ago` : `in ${mins}m`;
-  }
-  if (abs < 86_400_000) {
-    const hrs = Math.floor(abs / 3_600_000);
-    return past ? `${hrs}h ago` : `in ${hrs}h`;
-  }
-  const days = Math.floor(abs / 86_400_000);
-  return past ? `${days}d ago` : `in ${days}d`;
-}
+import { relativeTime } from "../time.ts";
 
 /** Format a single reminder for display */
 function formatReminder(r: Reminder): string {
