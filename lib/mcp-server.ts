@@ -11,7 +11,6 @@ import type { AppContext } from "./types.ts";
 import { err } from "./types.ts";
 import { getAllTools } from "./tools/index.ts";
 import { registerPermissionRelay } from "./permissions.ts";
-import { onToolCall } from "./typing.ts";
 
 export function createMcpServer(ctx: AppContext): Server {
   const activePersona = ctx.config.getActivePersona();
@@ -35,7 +34,7 @@ export function createMcpServer(ctx: AppContext): Server {
         "Reply with the reply tool — pass chat_id back. Use reply_to only when replying to an earlier message.",
         'If is_dm="true", this is a private DM conversation.',
         "",
-        "reply accepts file paths (files: ['/abs/path.png']) for attachments.",
+        "reply accepts file paths (files: ['/abs/path.png']) for attachments. Use keep_typing: true when you plan to do more work and send another message — it keeps the typing indicator active instead of stopping it.",
         "Use react to add emoji reactions. Use edit_message for interim progress updates — edits don't trigger push notifications.",
         "Use pin_message to pin important messages in a channel.",
         "",
@@ -148,11 +147,6 @@ export function createMcpServer(ctx: AppContext): Server {
   mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const handler = toolMap.get(req.params.name);
     if (!handler) return err(`Unknown tool: ${req.params.name}`);
-
-    // If this tool call has a chat_id, signal the typing state machine
-    // (resumes typing if in cooldown after a reply)
-    const chatId = (req.params.arguments as Record<string, unknown>)?.chat_id;
-    if (typeof chatId === "string") onToolCall(chatId);
 
     return handler(req.params.arguments ?? {}, ctx);
   });

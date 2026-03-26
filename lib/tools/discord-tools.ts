@@ -86,6 +86,11 @@ export const discordTools: ToolDef[] = [
             items: { type: "string" },
             description: "Absolute file paths to attach",
           },
+          keep_typing: {
+            type: "boolean",
+            description:
+              "Keep the typing indicator active after sending (default false). Use when you plan to send follow-up messages after doing more work.",
+          },
           embeds: {
             type: "array",
             description: "Rich embeds to include. Each embed has: title, description, color (name like 'blue'/'green'/'orange'/'red'/'purple' or hex '#5865f2' or int), fields (array of {name, value, inline?}), footer, thumbnail, url.",
@@ -160,8 +165,10 @@ export const discordTools: ToolDef[] = [
       const sent = await textChannel.send(opts as any);
       ctx.messageStats.sent++;
 
-      // Transition typing to cooldown (will resume if more tool calls come)
-      onReplySent(args.chat_id as string);
+      // Transition typing to cooldown — unless keep_typing is set
+      if (!args.keep_typing) {
+        onReplySent(args.chat_id as string);
+      }
 
       return text(`sent (id: ${sent.id})`);
     },

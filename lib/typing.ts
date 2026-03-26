@@ -2,34 +2,29 @@
  * Typing indicator state machine.
  *
  * States per channel:
- *   IDLE     → no typing indicator
- *   TYPING   → typing indicator active (refreshing every 8s)
- *   COOLDOWN → typing stopped, waiting to see if more tool calls come
+ *   IDLE   → no typing indicator
+ *   TYPING → typing indicator active (refreshing every 8s)
  *
  * Transitions:
- *   IDLE     → message received       → TYPING
- *   TYPING   → reply/poll sent        → COOLDOWN
- *   COOLDOWN → any tool call          → TYPING
- *   COOLDOWN → timer expires (10s)    → IDLE
- *   TYPING   → safety timeout (2min)  → IDLE
+ *   IDLE   → message received               → TYPING
+ *   TYPING → reply sent (keep_typing=false)  → IDLE
+ *   TYPING → safety timeout (2min)           → IDLE
+ *
+ * The reply tool controls the transition via `keep_typing`:
+ *   - keep_typing: true  → stay in TYPING (for multi-message workflows)
+ *   - keep_typing: false → transition to IDLE (default)
  */
 
-import type { AppContext } from "./types.ts";
 import type { TextChannel, DMChannel, NewsChannel } from "discord.js";
 
-type TypingState = "idle" | "typing" | "cooldown";
-
 interface ChannelTypingState {
-  state: TypingState;
+  state: "idle" | "typing";
   /** Interval that refreshes sendTyping every 8s */
   typingInterval?: ReturnType<typeof setInterval>;
-  /** Safety timeout (2min) or cooldown timeout (10s) */
+  /** Safety timeout (2min) */
   timeout?: ReturnType<typeof setTimeout>;
-  /** The channel object for sending typing */
-  channel?: TextChannel | DMChannel | NewsChannel;
 }
 
-const COOLDOWN_MS = 10_000;
 const SAFETY_TIMEOUT_MS = 120_000;
 const TYPING_REFRESH_MS = 8_000;
 
@@ -59,14 +54,12 @@ function transitionToIdle(channelId: string) {
   const s = getState(channelId);
   clearTimers(s);
   s.state = "idle";
-  s.channel = undefined;
 }
 
 function startTyping(channelId: string, channel: TextChannel | DMChannel | NewsChannel) {
   const s = getState(channelId);
   clearTimers(s);
   s.state = "typing";
-  s.channel = channel;
 
   // Send initial typing
   if (channel.isTextBased() && "sendTyping" in channel) {
@@ -102,30 +95,11 @@ export function onMessageReceived(
 }
 
 /**
- * Called when a reply or poll is sent — transition to cooldown.
+ * Called when a reply or poll is sent — stop typing.
+ * The reply tool skips this call when keep_typing is true.
  */
 export function onReplySent(channelId: string) {
-  const s = getState(channelId);
-  if (s.state === "idle") return;
-
-  clearTimers(s);
-  s.state = "cooldown";
-
-  // If no tool call within 10s, go idle
-  s.timeout = setTimeout(() => {
-    transitionToIdle(channelId);
-  }, COOLDOWN_MS);
-}
-
-/**
- * Called when any tool is invoked — if in cooldown, resume typing.
- * Needs the channelId from the tool args (chat_id).
- */
-export function onToolCall(channelId: string) {
-  const s = getState(channelId);
-  if (s.state === "cooldown" && s.channel) {
-    startTyping(channelId, s.channel);
-  }
+  transitionToIdle(channelId);
 }
 
 /**
