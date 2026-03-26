@@ -49,7 +49,7 @@ function formatReminderMessage(reminder: Reminder, isNag: boolean): string {
   const prefix = isNag ? "**Nag**" : "**Reminder**";
   const category = reminder.category ? ` [${reminder.category}]` : "";
   const recurring = reminder.cron ? ` 🔁` : "";
-  const nagInfo = isNag ? " *(reply to acknowledge)*" : "";
+  const nagInfo = isNag ? " *(click Done to acknowledge)*" : "";
   const nagLabel = reminder.nagInterval ? ` 🔔` : "";
 
   return `${prefix}${category} for <@${reminder.userId}>: ${reminder.message}${recurring}${nagLabel}${nagInfo}`;
