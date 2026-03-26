@@ -16,7 +16,7 @@ export const groqSTT: STTProvider = {
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) {
       throw new Error(
-        "GROQ_API_KEY not set. Add it to ~/.claude/channels/choomfie/.env"
+        "GROQ_API_KEY not set. Add it to your .env file (see docs/voice-plugin.md)"
       );
     }
 

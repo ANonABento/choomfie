@@ -37,12 +37,17 @@ In Claude Code:
 /choomfie:configure <your_bot_token>
 ```
 
-This saves the token to `~/.claude/channels/choomfie/.env`.
+This saves the token to the plugin data directory (`.env` file).
 
-## 5. Start with Choomfie Channel
+## 5. Start Choomfie
 
 ```bash
-claude --channels plugin:choomfie
+choomfie
+```
+
+Or manually:
+```bash
+claude --plugin-dir /path/to/choomfie
 ```
 
 You should see in stderr:
@@ -84,15 +89,15 @@ what's your status?
 
 ## Always-On Setup (tmux)
 
-Since Channels requires Claude Code to be running:
+Since Choomfie requires Claude Code to be running:
 
 ```bash
-# Start a tmux session
+# Start in a detached tmux session (built-in)
+choomfie --tmux
+
+# Or manually:
 tmux new -s choomfie
-
-# Run Claude Code with Choomfie
-claude --channels plugin:choomfie
-
+claude --plugin-dir /path/to/choomfie
 # Detach: Ctrl+B, then D
 # Reattach later: tmux attach -t choomfie
 ```

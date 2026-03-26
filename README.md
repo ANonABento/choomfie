@@ -2,11 +2,11 @@
 
 Your personal AI assistant on Discord, powered by Claude Code.
 
-Choomfie is a [Claude Code Channels](https://code.claude.com/docs/en/channels) plugin that gives you a Discord bot with persistent memory, reminders, GitHub integration, and the full power of Claude Code — using your Max plan, no API key needed.
+Choomfie is a Claude Code plugin that gives you a Discord bot with persistent memory, reminders, GitHub integration, and the full power of Claude Code — using your Max plan, no API key needed.
 
 ## Why Choomfie?
 
-- **No API key** — runs on your Claude Max subscription via the official Channels system
+- **No API key** — runs on your Claude Max subscription via the official plugin system
 - **TOS compliant** — built on Anthropic's official plugin architecture, not a proxy hack
 - **Remembers you** — persistent memory survives across sessions (Letta/MemGPT-inspired)
 - **Full Claude Code power** — file editing, code execution, MCP servers, all from Discord
@@ -71,15 +71,14 @@ If you prefer to set things up yourself:
 bun install
 
 # Save your Discord bot token
-mkdir -p ~/.claude/channels/choomfie
-echo "DISCORD_TOKEN=your_token_here" > ~/.claude/channels/choomfie/.env
+mkdir -p ~/.claude/plugins/data/choomfie-inline
+echo "DISCORD_TOKEN=your_token_here" > ~/.claude/plugins/data/choomfie-inline/.env
 
-# Run from the choomfie directory — the project .mcp.json handles MCP registration
-cd /path/to/choomfie
-claude
+# Run with --plugin-dir to load Choomfie as a local plugin
+claude --plugin-dir /path/to/choomfie
 ```
 
-> **Note:** Do NOT add choomfie to global `~/.claude.json` mcpServers — that would start the Discord bot on every Claude session. The project-scoped `.mcp.json` ensures it only activates when Claude runs from the choomfie directory.
+> **Note:** The `--plugin-dir` flag loads Choomfie only for that session. Do NOT add it to global `~/.claude.json` mcpServers — that would start the Discord bot on every Claude session. Alternatively, install it as a plugin with `claude plugin install /path/to/choomfie` if you want it always available.
 
 ### Access & Pairing
 
@@ -140,7 +139,7 @@ create a persona called pirate
 ## Architecture
 
 ```
-Discord ──> discord.js ──> MCP channel server (server.ts)
+Discord ──> discord.js ──> MCP plugin server (server.ts)
                                   |
                           +-------+-------+
                           |       |       |
@@ -153,13 +152,13 @@ Discord ──> discord.js ──> MCP channel server (server.ts)
                             (your session)
 ```
 
-Choomfie runs as an MCP subprocess inside Claude Code. Discord messages arrive as channel notifications, Claude processes them, and replies via MCP tools. Memory persists in SQLite at `~/.claude/channels/choomfie/choomfie.db`.
+Choomfie runs as an MCP subprocess inside Claude Code via the plugin system. Discord messages arrive as notifications, Claude processes them, and replies via MCP tools. Memory persists in SQLite at `~/.claude/plugins/data/choomfie-inline/choomfie.db`.
 
 ## Project Structure
 
 ```
 choomfie/
-├── server.ts                  # MCP channel server
+├── server.ts                  # MCP plugin server
 ├── install.sh                 # Interactive installer
 ├── bin/choomfie               # Launcher script
 ├── lib/memory.ts              # SQLite memory store

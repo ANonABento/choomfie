@@ -31,7 +31,7 @@ That's it. If you also want the YouTube Data API as fallback:
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a project → Enable YouTube Data API v3
 3. Create an API key
-4. Add to `~/.claude/channels/choomfie/.env`:
+4. Add to `~/.claude/plugins/data/choomfie-inline/.env`:
    ```
    YOUTUBE_API_KEY=<your-key>
    ```
@@ -49,7 +49,7 @@ Works immediately — the JSON scraper needs no auth. Just enable the plugin.
 3. Choose "script" type
 4. Set redirect URI to `http://localhost`
 5. Note the client ID (under app name) and secret
-6. Add to `~/.claude/channels/choomfie/.env`:
+6. Add to `~/.claude/plugins/data/choomfie-inline/.env`:
    ```
    REDDIT_CLIENT_ID=<your-client-id>
    REDDIT_CLIENT_SECRET=<your-secret>
@@ -59,7 +59,7 @@ Works immediately — the JSON scraper needs no auth. Just enable the plugin.
 
 ### Enable the plugin
 
-Edit `~/.claude/channels/choomfie/config.json`:
+Edit `~/.claude/plugins/data/choomfie-inline/config.json`:
 ```json
 {
   "plugins": ["socials"]

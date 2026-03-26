@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Choomfie is a Claude Code Channels plugin (v0.4.0) — an MCP server that bridges Discord to Claude Code with persistent memory, switchable personas, reminders, GitHub integration, and more. It runs as a subprocess inside Claude Code.
+Choomfie is a Claude Code plugin (v0.4.0) — an MCP server that bridges Discord to Claude Code with persistent memory, switchable personas, reminders, GitHub integration, and more. It runs as a subprocess inside Claude Code via `--plugin-dir`.
 
 ## Tech Stack
 
@@ -69,10 +69,10 @@ Enable plugins in `config.json`: `"plugins": ["voice", "image-gen"]`
 
 ## How It Works
 
-1. Claude Code spawns `bun server.ts` as an MCP subprocess
+1. Claude Code loads Choomfie via `--plugin-dir` and spawns `bun server.ts` as an MCP subprocess
 2. Single-instance guard: kills any stale process from a previous session via PID file (`choomfie.pid`)
 3. server.ts connects to Discord via discord.js
-4. Incoming messages → `notifications/claude/channel` → Claude Code
+4. Incoming messages → MCP notifications → Claude Code
 5. Claude calls MCP tools (reply, save_memory, etc.) → server.ts → Discord/SQLite
 6. Reminders use precise setTimeout timers — each reminder gets its own timer that fires exactly when due (zero polling overhead)
 7. On shutdown (SIGINT/SIGTERM/SIGHUP/stdin close): destroys Discord client, cleans up plugins/reminders/memory, removes PID file
@@ -133,11 +133,11 @@ reminders: id, user_id, chat_id, message, due_at, fired, created_at,
 
 - Owner auto-detected from Discord app info: during `./install.sh` (primary) or startup fallback if missed
 - Permission relay: owner receives tool approval requests via DM, replies `yes/no <code>` to approve/deny
-- State lives in `~/.claude/channels/choomfie/` (token, access list, database, inbox)
+- State lives in `~/.claude/plugins/data/choomfie-inline/` (token, access list, database, inbox)
 - Personality loaded from core memory (key: "personality") at startup
 - Console output goes to stderr (stdout is MCP stdio transport)
 - DMs require Partials.Channel + Partials.Message in discord.js
-- All attachments downloaded to `~/.claude/channels/choomfie/inbox/` (file_path = first, file_paths = all semicolon-separated)
+- All attachments downloaded to `~/.claude/plugins/data/choomfie-inline/inbox/` (file_path = first, file_paths = all semicolon-separated)
 - GitHub integration shells out to `gh` CLI
 - Servers: only responds when @mentioned or replied to (not every message)
 - DMs: always responds

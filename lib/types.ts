@@ -29,7 +29,6 @@ export interface AppContext {
   activeChannels: Map<string, number>;
   lastMessageTime: Map<string, number>;
   DATA_DIR: string;
-  CHANNELS_DIR: string;
   accessPath: string;
   /** Active typing intervals per channel */
   typingIntervals: Map<string, ReturnType<typeof setInterval>>;

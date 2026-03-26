@@ -6,7 +6,7 @@ Skills are slash commands you run in the Claude Code terminal.
 
 ### `/choomfie:configure <token>`
 
-Set your Discord bot token. Saves to `~/.claude/channels/choomfie/.env`.
+Set your Discord bot token. Saves to the plugin data directory (`.env` file).
 
 ### `/choomfie:access <command>`
 

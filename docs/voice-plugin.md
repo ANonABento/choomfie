@@ -59,7 +59,7 @@ brew install ffmpeg
 
 ### 3. Add keys to .env
 
-Edit `~/.claude/channels/choomfie/.env`:
+Edit `~/.claude/plugins/data/choomfie-inline/.env`:
 
 ```
 DISCORD_TOKEN=<your-discord-token>
@@ -75,7 +75,7 @@ ELEVENLABS_VOICE_JA=<voice-id-for-japanese>
 
 ### 4. Enable the plugin
 
-Edit `~/.claude/channels/choomfie/config.json`:
+Edit `~/.claude/plugins/data/choomfie-inline/config.json`:
 
 ```json
 {
@@ -89,7 +89,7 @@ Edit `~/.claude/channels/choomfie/config.json`:
 
 ### 5. Restart the bot
 
-Restart Claude Code with `--channels` flag.
+Restart Choomfie (`choomfie` or `claude --plugin-dir /path/to/choomfie`).
 
 ---
 

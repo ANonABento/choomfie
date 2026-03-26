@@ -12,7 +12,7 @@ allowed-tools:
 
 Manage who can message Choomfie on Discord.
 
-The access file is at `~/.claude/channels/choomfie/access.json` with format:
+The access file is at `<data_dir>/access.json` (data dir = `CLAUDE_PLUGIN_DATA` env var, or `~/.claude/plugins/data/choomfie-inline/`). Format:
 ```json
 {
   "policy": "allowlist",

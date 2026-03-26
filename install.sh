@@ -5,7 +5,7 @@
 set -euo pipefail
 
 CHOOMFIE_DIR="$(cd "$(dirname "$0")" && pwd)"
-DATA_DIR="$HOME/.claude/channels/choomfie"
+DATA_DIR="$HOME/.claude/plugins/data/choomfie-inline"
 BIN_DIR="${HOME}/.local/bin"
 
 echo "=== Choomfie Installer ==="
@@ -48,14 +48,14 @@ else
   echo ""
   echo "You need a Discord bot token. If you don't have one yet:"
   echo "  1. Go to https://discord.com/developers/applications"
-  echo "  2. Create New Application → Bot → Reset Token → Copy"
-  echo "  3. Enable MESSAGE CONTENT INTENT under Bot → Privileged Intents"
-  echo "  4. Invite bot: OAuth2 → URL Generator → bot scope → Send Messages + Read Message History"
+  echo "  2. Create New Application > Bot > Reset Token > Copy"
+  echo "  3. Enable MESSAGE CONTENT INTENT under Bot > Privileged Intents"
+  echo "  4. Invite bot: OAuth2 > URL Generator > bot scope > Send Messages + Read Message History"
   echo ""
   read -rp "Paste your Discord bot token (or press Enter to skip): " token
   if [ -n "$token" ]; then
     echo "DISCORD_TOKEN=$token" > "$ENV_FILE"
-    echo "[3/5] Token saved to $ENV_FILE"
+    echo "[3/5] Token saved"
   else
     echo "[3/5] Skipped — run '/choomfie:configure <token>' later in Claude Code"
   fi

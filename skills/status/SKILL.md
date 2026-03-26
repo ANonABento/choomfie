@@ -15,21 +15,21 @@ Show the user a complete overview of Choomfie's current state and configuration.
 Read and display the following information:
 
 ## 1. Connection Status
-- Read `~/.claude/channels/choomfie/.env` — is a Discord token configured?
-- Read `~/.claude/channels/choomfie/access.json` — who's on the allowlist? What's the policy?
+- Read `~/.claude/plugins/data/choomfie-inline/.env` — is a Discord token configured?
+- Read `~/.claude/plugins/data/choomfie-inline/access.json` — who's on the allowlist? What's the policy?
 
 ## 2. Memory Stats
-Run: `sqlite3 ~/.claude/channels/choomfie/choomfie.db "SELECT COUNT(*) FROM core_memory; SELECT COUNT(*) FROM archival_memory; SELECT COUNT(*) FROM reminders WHERE fired = 0;"`
+Run: `sqlite3 ~/.claude/plugins/data/choomfie-inline/choomfie.db "SELECT COUNT(*) FROM core_memory; SELECT COUNT(*) FROM archival_memory; SELECT COUNT(*) FROM reminders WHERE fired = 0;"`
 
 Show counts for core memories, archival memories, and active reminders.
 
 ## 3. Core Memories
-Run: `sqlite3 ~/.claude/channels/choomfie/choomfie.db "SELECT key, value FROM core_memory ORDER BY updated_at DESC;"`
+Run: `sqlite3 ~/.claude/plugins/data/choomfie-inline/choomfie.db "SELECT key, value FROM core_memory ORDER BY updated_at DESC;"`
 
 List all core memories.
 
 ## 4. Active Reminders
-Run: `sqlite3 ~/.claude/channels/choomfie/choomfie.db "SELECT id, message, due_at FROM reminders WHERE fired = 0 ORDER BY due_at ASC;"`
+Run: `sqlite3 ~/.claude/plugins/data/choomfie-inline/choomfie.db "SELECT id, message, due_at FROM reminders WHERE fired = 0 ORDER BY due_at ASC;"`
 
 ## 5. Personality
 Read the `instructions` array in `~/choomfie/lib/mcp-server.ts` and show the current personality line (first line of instructions).
@@ -64,6 +64,6 @@ List all skills in `~/choomfie/skills/` by reading the directory:
 - To set a reminder: tell Choomfie "remind me in 30 minutes to check the deploy"
 - To see memories: tell Choomfie "what do you know about me?"
 - To start a thread: Choomfie will auto-create threads for long conversations
-- To run always-on: `tmux new -s choomfie` then start Claude Code with channels
+- To run always-on: `choomfie --tmux` or `tmux new -s choomfie` then `choomfie`
 
 Format everything nicely with markdown headers and tables.

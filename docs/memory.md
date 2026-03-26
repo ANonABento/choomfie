@@ -23,7 +23,7 @@ Examples:
 - "User debugged a Next.js hydration issue on 2026-03-20" `[coding, nextjs]`
 - "User prefers TypeScript over JavaScript" `[preferences]`
 
-## How It Works in Channels
+## How It Works
 
 Core memories are loaded into the MCP server's `instructions` string at startup:
 
@@ -62,7 +62,7 @@ Claude is instructed to proactively save useful information — it will remember
 
 ## Storage
 
-Database: `~/.claude/channels/choomfie/choomfie.db` (SQLite)
+Database: `~/.claude/plugins/data/choomfie-inline/choomfie.db` (SQLite)
 
 Tables:
 - `core_memory` — key TEXT PRIMARY KEY, value TEXT, updated_at TEXT

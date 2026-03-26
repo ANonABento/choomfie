@@ -64,7 +64,7 @@
 - **STT:** whisper.cpp (local, Apple Silicon) — need to verify setup
 - **TTS:** VOICEVOX (local, free, cute JP voices) OR Edge TTS (free, unofficial)
 - **VAD:** Silero VAD (free, open source)
-- **LLM:** Claude (already available via Channels)
+- **LLM:** Claude (already available via plugin)
 - User has ElevenLabs credits too (can use as premium option)
 - Verify tool choices with user before implementing
 

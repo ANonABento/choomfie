@@ -18,7 +18,7 @@ export const elevenlabsTTS: TTSProvider = {
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) {
       throw new Error(
-        "ELEVENLABS_API_KEY not set. Add it to ~/.claude/channels/choomfie/.env"
+        "ELEVENLABS_API_KEY not set. Add it to your .env file (see docs/voice-plugin.md)"
       );
     }
 

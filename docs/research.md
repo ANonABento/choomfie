@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-We evaluated Hermes Agent, OpenClaw, Max plan proxies, standalone bots, and Claude Code Channels. **Channels won** — it's Anthropic's official solution, TOS-compliant, and gives us full Claude Code power. Choomfie is built as a Channels plugin that adds persistent memory and skills.
+We evaluated Hermes Agent, OpenClaw, Max plan proxies, standalone bots, and the Claude Code plugin system. **Plugin system won** — it's Anthropic's official solution, TOS-compliant, and gives us full Claude Code power. Choomfie is built as a plugin that adds persistent memory and skills.
 
 ## Options Evaluated
 
@@ -56,9 +56,9 @@ Use `@anthropic-ai/claude-agent-sdk` with Max plan OAuth token.
 - Using Max plan OAuth with Agent SDK violates Consumer TOS
 - Anthropic's February 2026 clarification specifically calls this out
 
-### 6. Claude Code Channels Plugin — CHOSEN
+### 6. Claude Code Plugin System — CHOSEN
 
-Anthropic's official Channels system (shipped March 20, 2026).
+Anthropic's official plugin system (shipped March 2026).
 
 **Why chosen:**
 - **Official, first-party** — designed by Anthropic specifically for this use case
@@ -82,14 +82,14 @@ We borrowed Letta's two-tier memory architecture:
 - **Core memory** — always in context (key-value pairs in system prompt)
 - **Archival memory** — searchable long-term storage (SQLite with LIKE queries)
 
-This is implemented as MCP tools that Claude can call during Channels sessions, not as a separate service.
+This is implemented as MCP tools that Claude can call during plugin sessions, not as a separate service.
 
 ## Related Projects
 
 | Project | Stars | Relationship |
 |---------|-------|-------------|
 | claude-plugins-official | 14.3k | Official Anthropic plugins — our reference implementation |
-| Claude-to-IM | 345 | Multi-platform bridge — different approach (Agent SDK, not Channels) |
-| claude-code-discord-bot | 68 | Standalone bot — our original approach before pivoting to Channels |
+| Claude-to-IM | 345 | Multi-platform bridge — different approach (Agent SDK, not plugin) |
+| claude-code-discord-bot | 68 | Standalone bot — our original approach before pivoting to plugin system |
 | claude-mem | 39.8k | Session memory — may integrate as complementary layer |
 | Letta/MemGPT | 13k | Memory architecture — our core + archival design comes from here |

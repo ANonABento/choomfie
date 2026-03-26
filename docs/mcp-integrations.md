@@ -329,7 +329,7 @@ Based on fun factor, usefulness, and setup complexity:
 
 ### Adding MCP Servers to Choomfie
 
-Since Choomfie runs as a Claude Code Channels plugin, external MCP servers are configured in the Claude Code session's `.mcp.json` or project settings -- not inside Choomfie itself. Claude Code natively supports multiple MCP servers simultaneously.
+Since Choomfie runs as a Claude Code plugin, external MCP servers are configured in the Claude Code session's `.mcp.json` or project settings — not inside Choomfie itself. Claude Code natively supports multiple MCP servers simultaneously.
 
 ```json
 {

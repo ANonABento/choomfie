@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Choomfie — Claude Code Channels plugin.
+ * Choomfie — Claude Code plugin for Discord.
  *
  * MCP channel server that bridges Discord to Claude Code
  * with persistent memory, reminders, threads, and extensible tools.

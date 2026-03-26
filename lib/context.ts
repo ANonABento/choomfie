@@ -27,12 +27,15 @@ export async function createContext(): Promise<{
   ctx: AppContext;
   discordToken: string;
 }> {
-  const CHANNELS_DIR =
-    process.env.CLAUDE_CHANNELS_DIR ||
-    `${process.env.HOME}/.claude/channels/choomfie`;
-  const DATA_DIR = process.env.CLAUDE_PLUGIN_DATA || CHANNELS_DIR;
+  const DATA_DIR =
+    process.env.CLAUDE_PLUGIN_DATA ||
+    `${process.env.HOME}/.claude/plugins/data/choomfie-inline`;
 
-  // Load env vars from channel config (.env file)
+  // Ensure data directory exists
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(DATA_DIR, { recursive: true });
+
+  // Load env vars from .env file
   const envPath = `${DATA_DIR}/.env`;
   let discordToken = process.env.DISCORD_TOKEN || "";
 
@@ -83,7 +86,6 @@ export async function createContext(): Promise<{
     activeChannels: new Map(),
     lastMessageTime: new Map(),
     DATA_DIR,
-    CHANNELS_DIR,
     accessPath,
     typingIntervals: new Map(),
     typingClearTimeouts: new Map(),

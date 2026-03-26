@@ -2,7 +2,7 @@
 
 ## Phase 1: Foundation (Done)
 
-- [x] MCP channel server (server.ts)
+- [x] MCP plugin server (server.ts)
 - [x] Discord bridge via discord.js
 - [x] Persistent memory (SQLite — core + archival)
 - [x] Memory MCP tools (save, search, list, delete)
@@ -12,7 +12,7 @@
 - [x] Plugin packaging (.claude-plugin, .mcp.json)
 - [x] Documentation
 - [x] Install dependencies and test locally
-- [x] Test with real Discord bot + Claude Code Channels
+- [x] Test with real Discord bot + Claude Code plugin system
 
 ## Phase 2: Smart Memory (Done)
 
@@ -151,4 +151,4 @@
 
 - **Multi-user isolation** — Choomfie is a personal assistant
 - **Custom model training** — use Claude as-is
-- **Standalone mode** — Channels plugin is the path, not a separate bot
+- **Standalone mode** — Plugin system is the path, not a separate bot

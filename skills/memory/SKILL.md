@@ -8,7 +8,7 @@ allowed-tools:
   - Bash(ls *)
 ---
 
-View and manage Choomfie's persistent memory stored in `~/.claude/channels/choomfie/choomfie.db`.
+View and manage Choomfie's persistent memory stored in `<data_dir>/choomfie.db` (data dir = `CLAUDE_PLUGIN_DATA` env var, or `~/.claude/plugins/data/choomfie-inline/`).
 
 Handle $ARGUMENTS:
 

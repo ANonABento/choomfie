@@ -61,7 +61,7 @@ export const statusTools: ToolDef[] = [
         `  Version: 0.4.0`,
         `  Runtime: Bun ${Bun.version}`,
         `  Uptime: ${uptimeStr} (since ${startedAtStr})`,
-        `  Server: Claude Code Channels (MCP)`,
+        `  Server: Claude Code Plugin (MCP)`,
         `  Data dir: ${ctx.DATA_DIR}`,
         "",
         "## Message Stats",
@@ -82,7 +82,7 @@ export const statusTools: ToolDef[] = [
         "",
         "## Model & Engine",
         `  Model: Claude (inherited from Claude Code session)`,
-        `  Engine: Claude Code CLI via Channels plugin`,
+        `  Engine: Claude Code CLI via plugin system`,
         `  Auth: Max plan (no API key)`,
         `  Change model: set model in Claude Code (/model command)`,
         "",
@@ -168,7 +168,7 @@ export const statusTools: ToolDef[] = [
         "  System prompt edits — edit ~/choomfie/lib/mcp-server.ts",
         "  Model selection — /model in Claude Code",
         "  Adding new tools — add a file in ~/choomfie/lib/tools/ and register in index.ts",
-        "  Plugin restart — restart Claude Code with --channels flag",
+        "  Plugin restart — restart Claude Code (or run `choomfie`)",
       ];
 
       return text(lines.filter(Boolean).join("\n"));

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Choomfie is a Claude Code Channels plugin — an MCP server that Claude Code spawns as a subprocess. It bridges Discord messages to Claude Code and provides persistent memory, reminders, and GitHub integration.
+Choomfie is a Claude Code plugin — an MCP server that Claude Code spawns as a subprocess via `--plugin-dir`. It bridges Discord messages to Claude Code and provides persistent memory, reminders, and GitHub integration.
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -17,7 +17,7 @@ Choomfie is a Claude Code Channels plugin — an MCP server that Claude Code spa
 │  │  └───┬────┘ └──┬───┘ └──┬───┘ └───┬────┘  │  │
 │  │      └────┬────┴────┬───┘─────────┘        │  │
 │  │           │         │                      │  │
-│  │      server.ts (MCP channel server)        │  │
+│  │      server.ts (MCP plugin server)          │  │
 │  └────────────────────────────────────────────┘  │
 │                                                  │
 │  Claude sees: <channel source="choomfie" ...>       │
@@ -38,7 +38,7 @@ Choomfie is a Claude Code Channels plugin — an MCP server that Claude Code spa
 4. **Allowlist check:** sender must be on allowlist (or bootstrap mode if empty)
 5. **Rate limit check:** 5 second cooldown per user
 6. `@mention` stripped from message text for clean forwarding
-7. Attachments downloaded to `~/.claude/channels/choomfie/inbox/`
+7. Attachments downloaded to `~/.claude/plugins/data/choomfie-inline/inbox/`
 8. Server emits `notifications/claude/channel` with content + metadata
 9. Claude Code receives it as a `<channel>` tag in context
 
@@ -52,7 +52,7 @@ Choomfie is a Claude Code Channels plugin — an MCP server that Claude Code spa
 ### Memory Flow
 
 1. Claude calls `save_memory` during conversations
-2. Written to SQLite at `~/.claude/channels/choomfie/choomfie.db`
+2. Written to SQLite at `~/.claude/plugins/data/choomfie-inline/choomfie.db`
 3. On startup, core memories loaded into `instructions` string
 4. Personality loaded from `personality` key in core memory
 
@@ -83,12 +83,12 @@ Either way: whoever created the bot in the Discord dev portal = owner. Zero manu
 
 | What | Where |
 |------|-------|
-| Discord token | `~/.claude/channels/choomfie/.env` |
-| Access list | `~/.claude/channels/choomfie/access.json` |
-| Memory database | `~/.claude/channels/choomfie/choomfie.db` |
-| Downloaded attachments | `~/.claude/channels/choomfie/inbox/` |
+| Discord token | `~/.claude/plugins/data/choomfie-inline/.env` |
+| Access list | `~/.claude/plugins/data/choomfie-inline/access.json` |
+| Memory database | `~/.claude/plugins/data/choomfie-inline/choomfie.db` |
+| Downloaded attachments | `~/.claude/plugins/data/choomfie-inline/inbox/` |
 | Plugin code | `~/choomfie/` (or wherever you cloned it) |
-| MCP server config | `~/.claude.json` → `mcpServers.choomfie` |
+| MCP server config | `choomfie/.mcp.json` (loaded via `--plugin-dir`) |
 
 ## Conversation Mode
 
@@ -101,7 +101,7 @@ When a user `@mentions` the bot in a server channel, the bot enters **conversati
 
 ## Design Decisions
 
-- **Channels plugin** over standalone bot — TOS compliant, full Claude Code power
+- **Plugin** over standalone bot — TOS compliant, full Claude Code power
 - **bun:sqlite** over better-sqlite3 — native to Bun, zero dependencies
 - **Single server.ts** — matches official plugin pattern, easy to understand
 - **gh CLI** for GitHub — already installed and authenticated, no token management

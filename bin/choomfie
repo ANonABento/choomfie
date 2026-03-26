@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch Choomfie — Claude Code Channels plugin for Discord
+# Launch Choomfie — Claude Code plugin for Discord
 #
 # Usage:
 #   choomfie          # start normally
@@ -24,10 +24,11 @@ if [ "${1:-}" = "--tmux" ]; then
     echo "Choomfie session already running. Attaching..."
     tmux attach -t choomfie
   else
-    tmux new-session -d -s choomfie "claude --dangerously-load-development-channels server:choomfie"
+    tmux new-session -d -s choomfie "cd '$CHOOMFIE_DIR' && claude --plugin-dir '$CHOOMFIE_DIR'"
     echo "Choomfie started in tmux session. Attaching..."
     tmux attach -t choomfie
   fi
 else
-  exec claude --dangerously-load-development-channels server:choomfie
+  cd "$CHOOMFIE_DIR"
+  exec claude --plugin-dir "$CHOOMFIE_DIR"
 fi

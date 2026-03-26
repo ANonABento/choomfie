@@ -93,7 +93,7 @@ plugins/language-learning/
 ### Priority 2: Voice Plugin Testing
 - Grab Groq API key (console.groq.com, free)
 - Grab ElevenLabs API key
-- Add to `~/.claude/channels/choomfie/.env`
+- Add to `~/.claude/plugins/data/choomfie-inline/.env`
 - Enable voice plugin in config.json
 - Test join/leave/speak in a real VC
 - Pick ElevenLabs voices for EN + JP

@@ -10,16 +10,17 @@ allowed-tools:
 
 Save the user's Discord bot token so Choomfie can connect to Discord.
 
-The token should be saved to `~/.claude/channels/choomfie/.env` in the format:
+The token should be saved to the plugin data directory `.env` file in the format:
 ```
 DISCORD_TOKEN=<token>
 ```
 
 Steps:
 1. Take the token from $ARGUMENTS
-2. Create the directory `~/.claude/channels/choomfie/` if it doesn't exist
-3. Write the token to `~/.claude/channels/choomfie/.env`
-4. Tell the user:
+2. Determine the data directory: use `CLAUDE_PLUGIN_DATA` env var if set, otherwise `~/.claude/plugins/data/choomfie-inline/`
+3. Create the directory if it doesn't exist
+4. Write the token to `<data_dir>/.env`
+5. Tell the user:
    - Token saved
    - Owner will be auto-detected on next startup (from Discord app info)
-   - Restart Claude Code with `claude --channels plugin:choomfie` for changes to take effect
+   - Restart Choomfie with `choomfie` for changes to take effect
