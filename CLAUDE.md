@@ -118,7 +118,7 @@ Defined in `lib/commands.ts`, deployed via `scripts/deploy-commands.ts`:
 - `/voice` — voice provider setup wizard with auto-detection and interactive buttons (owner only)
 - `/help` — show all commands and capabilities
 
-Deploy: `bun scripts/deploy-commands.ts` (guild, instant) or `--global` (up to 1hr propagation).
+Commands auto-deploy on startup when definitions change (hash-based check). Manual: `bun scripts/deploy-commands.ts` or `--global` for global deploy.
 
 ### Modals
 

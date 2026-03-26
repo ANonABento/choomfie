@@ -11,7 +11,7 @@ import {
 } from "discord.js";
 import { mkdir, readdir, stat, unlink } from "node:fs/promises";
 import { basename } from "node:path";
-import { handleInteraction } from "./interactions.ts";
+import { handleInteraction, getCommandDefs } from "./interactions.ts";
 import type { AppContext } from "./types.ts";
 import { saveAccess } from "./context.ts";
 import { ReminderScheduler } from "./reminders.ts";
@@ -115,6 +115,31 @@ export function createDiscordClient(ctx: AppContext): Client {
           console.error(`Plugin ${plugin.name} init failed: ${e}`);
         }
       }
+    }
+
+    // Auto-deploy slash commands if they've changed
+    try {
+      const commands = getCommandDefs();
+      const hash = Bun.hash(JSON.stringify(commands)).toString(36);
+      const hashFile = `${ctx.DATA_DIR}/.commands-hash`;
+      let lastHash = "";
+      try { lastHash = await Bun.file(hashFile).text(); } catch {}
+
+      if (hash !== lastHash.trim()) {
+        const { REST, Routes } = await import("discord.js");
+        const rest = new REST().setToken(ctx.discord.token!);
+        const appId = c.application.id;
+
+        for (const [id, guild] of c.guilds.cache) {
+          await rest.put(Routes.applicationGuildCommands(appId, id), {
+            body: commands,
+          });
+        }
+        await Bun.write(hashFile, hash);
+        console.error(`Slash commands deployed (${commands.length} commands to ${c.guilds.cache.size} guild(s))`);
+      }
+    } catch (e) {
+      console.error(`Slash command auto-deploy failed: ${e}`);
     }
   });
 
