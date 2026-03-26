@@ -11,6 +11,7 @@ import type { AppContext } from "./types.ts";
 import { err } from "./types.ts";
 import { getAllTools } from "./tools/index.ts";
 import { registerPermissionRelay } from "./permissions.ts";
+import { onToolCall } from "./typing.ts";
 
 export function createMcpServer(ctx: AppContext): Server {
   const activePersona = ctx.config.getActivePersona();
@@ -147,6 +148,12 @@ export function createMcpServer(ctx: AppContext): Server {
   mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const handler = toolMap.get(req.params.name);
     if (!handler) return err(`Unknown tool: ${req.params.name}`);
+
+    // If this tool call has a chat_id, signal the typing state machine
+    // (resumes typing if in cooldown after a reply)
+    const chatId = (req.params.arguments as Record<string, unknown>)?.chat_id;
+    if (typeof chatId === "string") onToolCall(chatId);
+
     return handler(req.params.arguments ?? {}, ctx);
   });
 

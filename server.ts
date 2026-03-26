@@ -14,6 +14,7 @@ import { loadPlugins } from "./lib/plugins.ts";
 import { createMcpServer } from "./lib/mcp-server.ts";
 import { createDiscordClient } from "./lib/discord.ts";
 import { readFile, writeFile, unlink } from "node:fs/promises";
+import { destroyAll as destroyTyping } from "./lib/typing.ts";
 
 // Initialize context (loads env, config, memory, access list)
 const { ctx, discordToken } = await createContext();
@@ -69,6 +70,7 @@ const shutdown = async () => {
   if (shutdownCalled) return;
   shutdownCalled = true;
   ctx.reminderScheduler.destroy();
+  destroyTyping();
   for (const plugin of ctx.plugins) {
     if (plugin.destroy) {
       try {

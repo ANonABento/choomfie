@@ -87,8 +87,6 @@ export async function createContext(): Promise<{
     lastMessageTime: new Map(),
     DATA_DIR,
     accessPath,
-    typingIntervals: new Map(),
-    typingClearTimeouts: new Map(),
     reminderScheduler: new ReminderScheduler(),
   };
 

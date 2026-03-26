@@ -143,7 +143,7 @@ reminders: id, user_id, chat_id, message, due_at, fired, created_at,
 - DMs: always responds
 - Rate limit: configurable via config.json (default 5s)
 - Conversation timeout: configurable via config.json `convoTimeoutMs` (default 5 min)
-- Typing indicator: shows "bot is typing..." while Claude processes, refreshes every 8s, clears on reply/poll, auto-expires after 2 min
+- Typing indicator: state machine in `lib/typing.ts` (IDLE → TYPING → COOLDOWN → IDLE). Shows typing while Claude thinks, transitions to cooldown on reply (typing stops), resumes typing if another tool call arrives within 10s, otherwise goes idle. Safety timeout: 2 min. Skipped for conversation_mode.
 - Allowlist: loaded at startup from access.json. Use `allow_user`/`remove_user` tools to modify in-memory + persist to file (no restart needed). Manual file edits require restart.
 - @mentions stripped from message before forwarding to Claude
 - Personas stored in config.json, switchable from Discord

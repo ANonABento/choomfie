@@ -11,23 +11,7 @@ import {
 } from "discord.js";
 import type { ToolDef, AppContext } from "../types.ts";
 import { text, err } from "../types.ts";
-
-/**
- * Clear typing indicator after a reply is sent.
- * Simple and correct: stop immediately, no lingering.
- */
-function clearTyping(ctx: AppContext, channelId: string) {
-  const interval = ctx.typingIntervals.get(channelId);
-  if (interval) {
-    clearInterval(interval);
-    ctx.typingIntervals.delete(channelId);
-  }
-  const pending = ctx.typingClearTimeouts.get(channelId);
-  if (pending) {
-    clearTimeout(pending);
-    ctx.typingClearTimeouts.delete(channelId);
-  }
-}
+import { onReplySent } from "../typing.ts";
 
 /** Discord embed color constants */
 const COLORS = {
@@ -176,8 +160,8 @@ export const discordTools: ToolDef[] = [
       const sent = await textChannel.send(opts as any);
       ctx.messageStats.sent++;
 
-      // Stop typing indicator now that reply is sent
-      clearTyping(ctx, args.chat_id as string);
+      // Transition typing to cooldown (will resume if more tool calls come)
+      onReplySent(args.chat_id as string);
 
       return text(`sent (id: ${sent.id})`);
     },
@@ -546,7 +530,7 @@ export const discordTools: ToolDef[] = [
       });
 
       ctx.messageStats.sent++;
-      clearTyping(ctx, args.chat_id as string);
+      onReplySent(args.chat_id as string);
       return text(`Poll created (id: ${sent.id}): "${args.question}" with ${options.length} options, ${duration}h duration`);
     },
   },

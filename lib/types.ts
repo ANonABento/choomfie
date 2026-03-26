@@ -30,10 +30,6 @@ export interface AppContext {
   lastMessageTime: Map<string, number>;
   DATA_DIR: string;
   accessPath: string;
-  /** Active typing intervals per channel */
-  typingIntervals: Map<string, ReturnType<typeof setInterval>>;
-  /** Pending typing clear timeouts — delayed so multi-message turns keep typing */
-  typingClearTimeouts: Map<string, ReturnType<typeof setTimeout>>;
   /** Timer-based reminder scheduler */
   reminderScheduler: ReminderScheduler;
 }

@@ -13,6 +13,7 @@ import { mkdir, readdir, stat, unlink } from "node:fs/promises";
 import type { AppContext } from "./types.ts";
 import { saveAccess } from "./context.ts";
 import { ReminderScheduler } from "./reminders.ts";
+import { onMessageReceived } from "./typing.ts";
 import {
   isChannelActive,
   activateChannel,
@@ -275,52 +276,9 @@ export function createDiscordClient(ctx: AppContext): Client {
       if (filePaths.length > 1) meta.file_paths = filePaths.join(";");
     }
 
-    // Show typing indicator while Claude processes
-    // Skip for conversation_mode — Claude may choose not to reply, leaving typing stuck
+    // Show typing indicator while Claude processes (state machine in lib/typing.ts)
     const isConversationMode = meta.conversation_mode === "true";
-    if (!isConversationMode) {
-      try {
-        // Clear any existing typing state for this channel
-        const existingInterval = ctx.typingIntervals.get(message.channelId);
-        if (existingInterval) clearInterval(existingInterval);
-        const pendingClear = ctx.typingClearTimeouts.get(message.channelId);
-        if (pendingClear) {
-          clearTimeout(pendingClear);
-          ctx.typingClearTimeouts.delete(message.channelId);
-        }
-
-        // Send initial typing indicator
-        if (message.channel.isTextBased() && "sendTyping" in message.channel) {
-          await message.channel.sendTyping();
-        }
-        // Keep refreshing every 8s (Discord typing indicator lasts ~10s)
-        // Safety: auto-clear after 2 minutes to prevent leaks if Claude never replies
-        const channelId = message.channelId;
-        const typingInterval = setInterval(async () => {
-          try {
-            if (message.channel.isTextBased() && "sendTyping" in message.channel) {
-              await message.channel.sendTyping();
-            }
-          } catch {
-            clearInterval(typingInterval);
-            ctx.typingIntervals.delete(channelId);
-          }
-        }, 8_000);
-        ctx.typingIntervals.set(channelId, typingInterval);
-
-        // Auto-clear typing after 2 minutes (safety fallback)
-        const clearTimeout_ = setTimeout(() => {
-          if (ctx.typingIntervals.get(channelId) === typingInterval) {
-            clearInterval(typingInterval);
-            ctx.typingIntervals.delete(channelId);
-          }
-          ctx.typingClearTimeouts.delete(channelId);
-        }, 120_000);
-        ctx.typingClearTimeouts.set(channelId, clearTimeout_);
-      } catch {
-        // Typing indicator is best-effort, don't block message handling
-      }
-    }
+    onMessageReceived(message.channelId, message.channel as any, isConversationMode);
 
     // Strip bot @mention from the message so Claude sees clean text
     const cleanContent = message.content
