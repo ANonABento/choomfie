@@ -45,6 +45,7 @@ lib/
     reminder-tools.ts          # set/list/cancel/snooze/ack reminder
     github-tools.ts            # check_github
     status-tools.ts            # choomfie_status
+    system-tools.ts            # restart (owner only)
   plugins.ts                   # Plugin loader (discovers + loads from plugins/)
 plugins/                       # Plugin directory (each plugin = subdirectory)
 scripts/
@@ -136,7 +137,7 @@ Modal forms triggered from slash commands, defined in `lib/handlers/modals.ts`:
 - `lib/handlers/github.ts` — `buildGhArgs()` + `runGh()` (used by MCP tool + slash command)
 - `lib/version.ts` — `VERSION` constant from package.json (used by mcp-server, commands, status-tools)
 
-## Tools (26)
+## Tools (27)
 
 Discord: reply (with embeds), react, edit_message, fetch_messages, search_messages, create_thread, create_poll, pin_message, unpin_message
 Memory: save_memory, search_memory, list_memories, delete_memory, save_conversation_summary, memory_stats
@@ -145,6 +146,7 @@ Reminders: set_reminder, list_reminders, cancel_reminder, snooze_reminder, ack_r
 Access: allow_user, remove_user, list_allowed_users (owner only)
 GitHub: check_github
 Status: choomfie_status
+System: restart (owner only)
 
 ### Rich Embeds
 

@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unlinkSync } from "node:fs";
 import type { TTSProvider } from "../types.ts";
-import { checkPythonModule } from "../detect.ts";
+import { checkPythonModule, getPython } from "../detect.ts";
 import { toDiscordPcm } from "../audio.ts";
 
 const DEFAULT_VOICE = "af_heart";
@@ -56,7 +56,7 @@ export const kokoroTTS: TTSProvider = {
     try {
       // Run Kokoro via Python
       const pyProc = Bun.spawn(
-        ["python3", "-c", KOKORO_SCRIPT, voice, tempWav, text],
+        [getPython(), "-c", KOKORO_SCRIPT, voice, tempWav, text],
         { stdout: "pipe", stderr: "pipe" }
       );
 

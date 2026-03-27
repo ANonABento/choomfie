@@ -8,6 +8,7 @@ import {
   joinVoiceChannel,
   createAudioPlayer,
   createAudioResource,
+  StreamType,
   AudioPlayerStatus,
   VoiceConnectionStatus,
   entersState,
@@ -127,7 +128,9 @@ export class VoiceManager {
     const audioBuffer = await this.tts.synthesize(text, language);
 
     const stream = Readable.from(audioBuffer);
-    const resource = createAudioResource(stream);
+    const resource = createAudioResource(stream, {
+      inputType: StreamType.Raw,
+    });
 
     if (gv.player.state.status === AudioPlayerStatus.Playing) {
       await entersState(gv.player, AudioPlayerStatus.Idle, PLAYBACK_FINISH_TIMEOUT);

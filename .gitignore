@@ -4,3 +4,8 @@ dist/
 *.db
 *.sqlite
 .DS_Store
+.venv/
+
+# Kokoro TTS models (~300MB)
+*.onnx
+voices-*.bin

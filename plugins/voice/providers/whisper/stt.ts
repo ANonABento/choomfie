@@ -16,15 +16,22 @@ import { checkBinary } from "../detect.ts";
 
 const DEFAULT_MODEL = "ggml-base.en";
 
+/** Resolve the whisper binary — newer brew versions install as whisper-cli */
+async function resolveWhisperBin(): Promise<string | null> {
+  if (await checkBinary("whisper-cli")) return "whisper-cli";
+  if (await checkBinary("whisper-cpp")) return "whisper-cpp";
+  return null;
+}
+
 export const whisperSTT: STTProvider = {
   name: "whisper",
 
   async detect() {
-    const has = await checkBinary("whisper-cpp");
+    const bin = await resolveWhisperBin();
     return {
-      available: has,
-      reason: has ? "whisper-cpp installed" : "whisper-cpp not found",
-      install: has ? undefined : "brew install whisper-cpp",
+      available: !!bin,
+      reason: bin ? `${bin} installed` : "whisper-cpp not found",
+      install: bin ? undefined : "brew install whisper-cpp",
       type: "local" as const,
     };
   },
@@ -51,7 +58,10 @@ export const whisperSTT: STTProvider = {
         args.push("--language", language);
       }
 
-      const proc = Bun.spawn(["whisper-cpp", ...args], {
+      const bin = await resolveWhisperBin();
+      if (!bin) throw new Error("whisper-cpp not found. Install: brew install whisper-cpp");
+
+      const proc = Bun.spawn([bin, ...args], {
         stdout: "pipe",
         stderr: "pipe",
       });
@@ -63,15 +73,7 @@ export const whisperSTT: STTProvider = {
       await proc.exited;
 
       if (proc.exitCode !== 0) {
-        if (
-          stderr.includes("not found") ||
-          stderr.includes("No such file")
-        ) {
-          throw new Error(
-            "whisper-cpp not found. Install: brew install whisper-cpp"
-          );
-        }
-        throw new Error(`whisper-cpp error (exit ${proc.exitCode}): ${stderr}`);
+        throw new Error(`${bin} error (exit ${proc.exitCode}): ${stderr}`);
       }
 
       // whisper-cpp --output-txt writes to <input>.txt

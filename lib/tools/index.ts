@@ -10,6 +10,7 @@ import { reminderTools } from "./reminder-tools.ts";
 import { githubTools } from "./github-tools.ts";
 import { statusTools } from "./status-tools.ts";
 import { accessTools } from "./access-tools.ts";
+import { systemTools } from "./system-tools.ts";
 
 export function getAllTools(ctx: AppContext): ToolDef[] {
   return [
@@ -20,6 +21,7 @@ export function getAllTools(ctx: AppContext): ToolDef[] {
     ...accessTools,
     ...githubTools,
     ...statusTools,
+    ...systemTools,
     ...ctx.plugins.flatMap((p) => p.tools ?? []),
   ];
 }

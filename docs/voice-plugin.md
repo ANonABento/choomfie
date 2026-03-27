@@ -316,6 +316,32 @@ ElevenLabs offers more than just text-to-speech. Future integration opportunitie
 
 ---
 
+## Potential Future Providers
+
+### Voxtral TTS (Mistral AI)
+
+Released March 26, 2026. Mistral's first TTS model — 4B parameter transformer.
+
+| Detail | Info |
+|--------|------|
+| **Type** | TTS (API) |
+| **Cost** | $0.016/1k chars (similar to OpenAI TTS) |
+| **Quality** | Beats ElevenLabs Flash v2.5 in human naturalness evals |
+| **Languages** | 9 (EN, FR, DE, ES, NL, PT, IT, HI, AR) |
+| **Voices** | 20 presets + zero-shot cloning from 3s audio |
+| **Latency** | 70ms model, ~0.7s streaming TTFA |
+| **SDK** | `@mistralai/mistralai` (TypeScript) |
+| **API** | `POST api.mistral.ai/v1/audio/speech` — model `voxtral-mini-tts-2603` |
+| **Formats** | MP3, WAV, PCM, FLAC, Opus, AAC @ 24kHz |
+| **Self-host** | Open weights (CC BY-NC 4.0, non-commercial only, 16GB+ GPU) |
+| **Env var** | Would need `MISTRAL_API_KEY` |
+
+**Why interesting:** Quality reportedly beats ElevenLabs at OpenAI pricing. Voice cloning from 3 seconds is a nice bonus. TypeScript SDK exists. Streaming support would work well for VC.
+
+**Why not yet:** Brand new (released today), ecosystem untested. API-only for commercial use. Another API key to manage. Not a priority while current providers work well.
+
+---
+
 ## Troubleshooting
 
 **Bot joins but can't hear anyone:**
