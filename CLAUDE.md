@@ -16,11 +16,15 @@ Choomfie is a Claude Code plugin — an MCP server that bridges Discord to Claud
 ## Project Structure
 
 ```
-server.ts                      # Entry point — wiring + lifecycle (~95 lines)
+server.ts                      # Entry point — thin wrapper, imports supervisor.ts
+supervisor.ts                  # Immortal process: MCP server, IPC, restart tool, PID guard
+worker.ts                      # Disposable process: Discord, plugins, tools, reminders
 lib/
+  ipc-types.ts                 # Shared IPC message types (supervisor ↔ worker)
+  mcp-proxy.ts                 # Duck-type MCP Server for worker (notification + permission relay via IPC)
   types.ts                     # AppContext, ToolDef, text/err helpers
   context.ts                   # Env/config loading, creates AppContext
-  mcp-server.ts                # MCP Server creation, instructions, tool registration
+  mcp-server.ts                # buildInstructions() + createMcpServer() (worker + boot test)
   discord.ts                   # Discord client, Ready, MessageCreate, InteractionCreate
   interactions.ts              # Interaction router + handler registries
   commands.ts                  # Slash command definitions + handlers (self-registering)
@@ -45,7 +49,7 @@ lib/
     reminder-tools.ts          # set/list/cancel/snooze/ack reminder
     github-tools.ts            # check_github
     status-tools.ts            # choomfie_status
-    system-tools.ts            # restart (owner only)
+    system-tools.ts            # (empty — restart moved to supervisor)
   plugins.ts                   # Plugin loader (discovers + loads from plugins/)
 plugins/                       # Plugin directory (each plugin = subdirectory)
 scripts/
@@ -62,6 +66,19 @@ skills/
 ```
 
 ## Architecture
+
+**Supervisor/Worker model** — see [docs/supervisor-architecture.md](docs/supervisor-architecture.md) for full details.
+
+```
+Claude Code ← MCP stdio → supervisor.ts (immortal)
+                              ↕ Bun IPC
+                          worker.ts (disposable)
+```
+
+- **Supervisor** owns MCP server + restart tool. Never restarts — MCP connection stays alive.
+- **Worker** owns Discord + plugins + tools. Killed and respawned on restart (fresh code, clean state).
+- IPC: tool calls routed supervisor → worker, notifications forwarded worker → supervisor → Claude.
+- `McpProxy` in worker duck-types the MCP Server interface so discord.ts/permissions.ts/plugins work unchanged.
 
 Shared state flows through a single `AppContext` object (defined in `lib/types.ts`).
 Tools colocate their JSON schema definition + handler in one file as `ToolDef[]` arrays.
@@ -82,13 +99,16 @@ Enable plugins via `/plugins` command from Discord, or in `config.json`: `"plugi
 ## How It Works
 
 1. Claude Code loads Choomfie via `--plugin-dir` and `--dangerously-load-development-channels server:choomfie`, then spawns `bun server.ts` as an MCP subprocess
-2. Single-instance guard: kills any stale process from a previous session via PID file (`choomfie.pid`)
-3. server.ts connects to Discord via discord.js
-4. Incoming messages → MCP notifications → Claude Code
-5. Claude calls MCP tools (reply, save_memory, etc.) → server.ts → Discord/SQLite
-6. Reminders use precise setTimeout timers — each reminder gets its own timer that fires exactly when due (zero polling overhead)
-7. Discord interactions (buttons, slash commands, modals) are handled directly via `lib/interactions.ts` — no Claude roundtrip, instant response
-8. On shutdown (SIGINT/SIGTERM/SIGHUP/stdin close): destroys Discord client, cleans up plugins/reminders/memory, removes PID file
+2. `server.ts` → `supervisor.ts`: acquires PID file (single-instance guard), spawns `worker.ts` via `Bun.spawn({ ipc })`
+3. Worker creates AppContext, loads plugins, connects to Discord, waits for full initialization
+4. Worker sends `{ type: "ready", tools, instructions }` to supervisor via IPC
+5. Supervisor creates MCP server with real instructions + tools, connects stdio transport
+6. Claude Code calls `initialize` → gets correct persona, security rules, and full tool list
+7. Incoming Discord messages → worker → IPC notification → supervisor → MCP → Claude Code
+8. Claude calls MCP tools → supervisor → IPC tool_call → worker → handler → IPC tool_result → supervisor → Claude
+9. Restart: supervisor sends shutdown to worker → worker cleans up + exits → supervisor spawns fresh worker → sends `tools/list_changed` notification
+10. Crash recovery: supervisor detects non-zero worker exit → auto-respawns with exponential backoff (max 5 crashes/60s)
+11. On shutdown (SIGINT/SIGTERM/stdin close): supervisor tells worker to shutdown → cleans up PID file → exits
 
 ### Interaction System
 
@@ -146,7 +166,7 @@ Reminders: set_reminder, list_reminders, cancel_reminder, snooze_reminder, ack_r
 Access: allow_user, remove_user, list_allowed_users (owner only)
 GitHub: check_github
 Status: choomfie_status
-System: restart (owner only)
+System: restart (owner only, supervisor-owned — kills worker, spawns fresh one, reloads all code)
 
 ### Rich Embeds
 

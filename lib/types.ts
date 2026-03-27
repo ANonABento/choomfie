@@ -8,9 +8,11 @@ import type { MemoryStore } from "./memory.ts";
 import type { ConfigManager } from "./config.ts";
 import type { ReminderScheduler } from "./reminders.ts";
 
+
 export interface AppContext {
   discord: Client;
-  mcp: Server;
+  /** MCP Server (supervisor) or McpProxy (worker). Using any to avoid union type issues. */
+  mcp: any;
   memory: MemoryStore;
   config: ConfigManager;
   plugins: Plugin[];
