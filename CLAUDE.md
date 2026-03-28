@@ -52,6 +52,22 @@ lib/
     system-tools.ts            # (empty — restart moved to supervisor)
   plugins.ts                   # Plugin loader (discovers + loads from plugins/)
 plugins/                       # Plugin directory (each plugin = subdirectory)
+  voice/
+    index.ts                   # Voice plugin entry — intents, init, tools, destroy
+    manager.ts                 # VoiceManager — join/leave/speak, STT receive, interruption
+    tools.ts                   # MCP tools: join_voice, leave_voice, speak
+    vad.ts                     # SileroVAD (ONNX), SpeechDetector, downsampleForVAD
+    sentence-splitter.ts       # splitSentences() for streaming TTS chunking
+    providers/
+      index.ts                 # Provider factory — auto-detect or config-select STT/TTS
+      types.ts                 # STTProvider, TTSProvider, ProviderStatus interfaces
+      audio.ts                 # DISCORD_PCM/STT_WAV constants, toDiscordPcm()
+      detect.ts                # checkBinary(), checkPythonModule() helpers
+      kokoro/tts.ts            # Kokoro TTS — local neural TTS via Python/ONNX
+      edge-tts/tts.ts          # Edge TTS — free Microsoft API
+      elevenlabs/              # ElevenLabs — paid API (STT + TTS)
+      groq/stt.ts              # Groq — free cloud STT API
+      whisper/stt.ts           # whisper-cpp — local STT via CLI
 scripts/
   deploy-commands.ts           # Deploy slash commands to Discord
 .claude-plugin/plugin.json     # Plugin metadata
@@ -249,3 +265,53 @@ Runtime-configurable settings — changes take effect immediately, no restart ne
 ```
 
 Settings can be changed via tools (e.g. `setRateLimitMs`, `setConvoTimeoutMs`) or by editing the file directly.
+
+## Voice Plugin
+
+Full-duplex voice conversations in Discord voice channels. See [docs/voice-optimization-roadmap.md](docs/voice-optimization-roadmap.md) for optimization details.
+
+### Architecture
+
+```
+User speaks → Discord Opus → per-speaker SileroVAD (adaptive endpointing)
+  → Opus decode (@discordjs/opus) → ffmpeg resample (48kHz stereo → 16kHz mono)
+  → whisper-cpp STT (segmented every ~3s) → MCP notification → Claude
+  → speak tool → sentence splitter → pipelined kokoro TTS
+  → 48kHz stereo PCM → AudioPlayer → Discord
+```
+
+### Key Features
+
+- **Streaming TTS**: Long responses split into sentences, each synthesized and played independently with one-ahead pipelining (next sentence synthesizes while current plays)
+- **Silero VAD**: Neural voice activity detection replacing fixed silence timeout. Adaptive endpointing: `threshold = min(1200ms, 400ms + utteranceDuration * 0.3)`
+- **Interruption handling**: User speech stops bot playback after 300ms barge-in threshold. Generation IDs invalidate stale speak() calls. Tracks what was actually spoken for context.
+- **Streaming STT**: Audio flushed to whisper every ~3s of continuous speech (MAX_SEGMENT_CHUNKS=150). Segments transcribe in parallel, combined on speech end.
+- **Multi-speaker**: Per-speaker VAD pipelines (independent SileroVAD + SpeechDetector). Max 4 concurrent speakers with LRU eviction. Idle cleanup every 30s.
+- **Silence priming**: Plays 0.5s silence on join to prime Discord's voice receive pipeline (required for Discord to send audio packets)
+- **Speak queue**: Serialized via promise chain with generation ID checks. Prevents race conditions between concurrent speak() calls.
+
+### Providers
+
+Swappable via config. Auto-detection picks the best available:
+
+| Type | Provider | Local | Free | Notes |
+|------|----------|-------|------|-------|
+| STT | whisper-cpp | Yes | Yes | Default. `brew install whisper-cpp`, model at `~/.cache/whisper-cpp/` |
+| STT | groq | No | Yes | Needs GROQ_API_KEY |
+| STT | elevenlabs | No | No | Paid API |
+| TTS | kokoro | Yes | Yes | Default. `pip install kokoro-onnx soundfile`, 53 voices |
+| TTS | edge-tts | No | Yes | Free Microsoft API |
+| TTS | elevenlabs | No | No | Paid API |
+| VAD | silero | Yes | Yes | Always on. Bundled via @ricky0123/vad-node |
+
+### Voice Config
+
+```json
+"voice": {
+  "stt": "whisper",     // or "groq", "elevenlabs", "auto"
+  "tts": "kokoro",      // or "edge-tts", "elevenlabs", "auto"
+  "ttsSpeed": 1.0       // 0.5-2.0, applied via ffmpeg atempo
+}
+```
+
+Voice model: set `KOKORO_VOICE=af_nova` env var (default: `af_heart`). 53 voices available across 8 languages.
