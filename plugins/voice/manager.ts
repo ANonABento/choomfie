@@ -25,6 +25,7 @@ import {
   type TTSProvider,
 } from "./providers/index.ts";
 import { STT_WAV, DISCORD_PCM } from "./providers/audio.ts";
+import { splitSentences } from "./sentence-splitter.ts";
 
 // --- Timeouts ---
 const CONNECTION_TIMEOUT = 10_000; // 10s to establish voice connection
@@ -146,9 +147,59 @@ export class VoiceManager {
     }
 
     const speed = this.ctx.config.getVoiceConfig().ttsSpeed ?? 1.0;
-    const audioBuffer = await this.tts.synthesize(text, language, speed);
+    const sentences = splitSentences(text);
 
-    const stream = Readable.from(audioBuffer);
+    if (sentences.length <= 1) {
+      // Short text or single sentence — play directly (no chunking overhead)
+      await this.playSingleChunk(gv, sentences[0] ?? text, language, speed);
+      return;
+    }
+
+    // Streaming: synthesize + play in pipeline.
+    // While chunk N plays, chunk N+1 is being synthesized.
+    console.error(`Voice: streaming ${sentences.length} sentence chunks`);
+
+    let nextPcm: Promise<Buffer | null> = this.synthesizeSafe(sentences[0], language, speed);
+
+    for (let i = 0; i < sentences.length; i++) {
+      // Await the current chunk's PCM (already synthesizing)
+      const pcm = await nextPcm;
+
+      // Start synthesizing the next chunk immediately (pipeline)
+      if (i + 1 < sentences.length) {
+        nextPcm = this.synthesizeSafe(sentences[i + 1], language, speed);
+      }
+
+      // Skip failed chunks
+      if (!pcm) {
+        console.error(`Voice: skipping chunk ${i + 1}/${sentences.length} (synthesis failed)`);
+        continue;
+      }
+
+      // Play this chunk and wait for it to finish
+      await this.playPcmBuffer(gv, pcm);
+    }
+  }
+
+  /** Synthesize text to PCM, returning null on error instead of throwing */
+  private async synthesizeSafe(text: string, language: string, speed: number): Promise<Buffer | null> {
+    try {
+      return await this.tts.synthesize(text, language, speed);
+    } catch (e) {
+      console.error(`Voice TTS error: ${e}`);
+      return null;
+    }
+  }
+
+  /** Play a single text chunk (synthesize + play, no pipelining) */
+  private async playSingleChunk(gv: GuildVoice, text: string, language: string, speed: number) {
+    const audioBuffer = await this.tts.synthesize(text, language, speed);
+    await this.playPcmBuffer(gv, audioBuffer);
+  }
+
+  /** Play a raw PCM buffer on the audio player, waiting for completion */
+  private async playPcmBuffer(gv: GuildVoice, pcm: Buffer) {
+    const stream = Readable.from(pcm);
     const resource = createAudioResource(stream, {
       inputType: StreamType.Raw,
     });
@@ -159,7 +210,6 @@ export class VoiceManager {
 
     gv.player.play(resource);
     await entersState(gv.player, AudioPlayerStatus.Playing, PLAYBACK_START_TIMEOUT);
-    // Wait for playback to finish before releasing the queue
     await entersState(gv.player, AudioPlayerStatus.Idle, PLAYBACK_FINISH_TIMEOUT);
   }
 
