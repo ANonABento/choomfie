@@ -38,6 +38,11 @@ const MIN_OPUS_CHUNKS = 10; // Skip utterances shorter than ~200ms
 const MIN_PCM_BYTES = 4800; // Skip audio < 300ms at 16kHz mono
 const LISTEN_HARD_TIMEOUT = 30_000; // 30s safety net for leaked subscriptions
 
+// --- Multi-speaker (Phase 6) ---
+const MAX_CONCURRENT_SPEAKERS = 4; // Max simultaneous VAD pipelines per guild
+const PIPELINE_IDLE_TIMEOUT = 60_000; // Evict idle pipelines after 60s
+const PIPELINE_CLEANUP_INTERVAL = 30_000; // Check for idle pipelines every 30s
+
 // --- Streaming STT (Phase 5) ---
 // Max speech duration before flushing a segment to whisper.
 // Discord sends ~50 opus packets/sec (20ms frames), so 3s ≈ 150 chunks.
@@ -46,6 +51,14 @@ const MAX_SEGMENT_CHUNKS = 150; // ~3s at 50 packets/sec
 
 // --- Interruption ---
 const BARGE_IN_THRESHOLD_MS = 300; // Sustained speech before treating as interruption
+
+/** Per-speaker VAD + endpointing pipeline (Phase 6) */
+interface SpeakerPipeline {
+  vad: SileroVAD;
+  speechDetector: SpeechDetector;
+  lastActive: number;
+  ready: boolean;
+}
 
 interface GuildVoice {
   connection: VoiceConnection;
@@ -59,13 +72,16 @@ interface GuildVoice {
   lastSpokenText: string;
   /** Timer for barge-in debounce (filters coughs/backchannels) */
   bargeInTimer: ReturnType<typeof setTimeout> | null;
+  /** Per-speaker VAD pipelines (Phase 6) */
+  speakerPipelines: Map<string, SpeakerPipeline>;
+  /** Periodic cleanup timer for idle pipelines */
+  pipelineCleanupTimer: ReturnType<typeof setInterval> | null;
 }
 
 export class VoiceManager {
   private guilds = new Map<string, GuildVoice>();
   private stt!: STTProvider;
   private tts!: TTSProvider;
-  private sileroVAD!: SileroVAD;
 
   constructor(private ctx: AppContext) {}
 
@@ -73,11 +89,13 @@ export class VoiceManager {
     this.stt = await getSTTProvider(this.ctx.config);
     this.tts = await getTTSProvider(this.ctx.config);
 
-    // Load Silero VAD model (small ONNX, ~2MB) for speech endpointing
-    this.sileroVAD = await SileroVAD.create();
+    // Verify Silero VAD model loads (fast sanity check), but don't keep it —
+    // each speaker gets their own VAD instance (Phase 6: multi-speaker)
+    const testVAD = await SileroVAD.create();
+    void testVAD; // discard — just verifying model path works
 
     console.error(
-      `Voice providers: STT=${this.stt.name}, TTS=${this.tts.name}, VAD=silero`
+      `Voice providers: STT=${this.stt.name}, TTS=${this.tts.name}, VAD=silero (per-speaker)`
     );
   }
 
@@ -118,8 +136,15 @@ export class VoiceManager {
       generationId: 0,
       lastSpokenText: "",
       bargeInTimer: null,
+      speakerPipelines: new Map(),
+      pipelineCleanupTimer: null,
     };
     this.guilds.set(guildId, guildVoice);
+
+    // Periodic cleanup of idle speaker pipelines
+    guildVoice.pipelineCleanupTimer = setInterval(() => {
+      this.cleanupIdlePipelines(guildVoice);
+    }, PIPELINE_CLEANUP_INTERVAL);
 
     // Play a short silence frame to prime Discord's voice receive pipeline.
     // Without this, Discord won't send us audio packets (speaking events never fire).
@@ -146,6 +171,12 @@ export class VoiceManager {
       clearTimeout(gv.bargeInTimer);
       gv.bargeInTimer = null;
     }
+    if (gv.pipelineCleanupTimer) {
+      clearInterval(gv.pipelineCleanupTimer);
+      gv.pipelineCleanupTimer = null;
+    }
+    // Clean up all speaker pipelines
+    gv.speakerPipelines.clear();
     gv.connection.destroy();
     gv.player.stop();
     this.guilds.delete(guildId);
@@ -304,6 +335,70 @@ export class VoiceManager {
     await entersState(gv.player, AudioPlayerStatus.Idle, PLAYBACK_FINISH_TIMEOUT);
   }
 
+  // --- Per-speaker pipeline management (Phase 6) ---
+
+  /**
+   * Get or create a per-speaker VAD pipeline. Each speaker gets their own
+   * SileroVAD instance so hidden state isn't shared across concurrent speakers.
+   */
+  private async getOrCreatePipeline(gv: GuildVoice, userId: string): Promise<SpeakerPipeline> {
+    const existing = gv.speakerPipelines.get(userId);
+    if (existing && existing.ready) {
+      existing.lastActive = Date.now();
+      return existing;
+    }
+
+    // Evict if at capacity
+    if (gv.speakerPipelines.size >= MAX_CONCURRENT_SPEAKERS) {
+      this.evictOldestPipeline(gv);
+    }
+
+    // Create new pipeline with independent VAD instance
+    const vad = await SileroVAD.create();
+    const pipeline: SpeakerPipeline = {
+      vad,
+      speechDetector: new SpeechDetector(),
+      lastActive: Date.now(),
+      ready: true,
+    };
+    gv.speakerPipelines.set(userId, pipeline);
+    console.error(`Voice: created pipeline for speaker ${userId} (${gv.speakerPipelines.size}/${MAX_CONCURRENT_SPEAKERS})`);
+    return pipeline;
+  }
+
+  /** Evict the least-recently-active speaker pipeline to make room */
+  private evictOldestPipeline(gv: GuildVoice) {
+    let oldestId: string | null = null;
+    let oldestTime = Infinity;
+
+    for (const [id, pipeline] of gv.speakerPipelines) {
+      // Don't evict speakers currently being listened to
+      if (gv.listeningTo.has(id)) continue;
+      if (pipeline.lastActive < oldestTime) {
+        oldestTime = pipeline.lastActive;
+        oldestId = id;
+      }
+    }
+
+    if (oldestId) {
+      gv.speakerPipelines.delete(oldestId);
+      console.error(`Voice: evicted pipeline for speaker ${oldestId} (LRU)`);
+    }
+  }
+
+  /** Clean up pipelines that have been idle for too long */
+  private cleanupIdlePipelines(gv: GuildVoice) {
+    const now = Date.now();
+    for (const [id, pipeline] of gv.speakerPipelines) {
+      // Don't evict speakers currently being listened to
+      if (gv.listeningTo.has(id)) continue;
+      if (now - pipeline.lastActive > PIPELINE_IDLE_TIMEOUT) {
+        gv.speakerPipelines.delete(id);
+        console.error(`Voice: cleaned up idle pipeline for speaker ${id}`);
+      }
+    }
+  }
+
   private listenToUser(guildId: string, userId: string) {
     const gv = this.guilds.get(guildId);
     if (!gv) return;
@@ -319,10 +414,18 @@ export class VoiceManager {
 
     const { OpusEncoder } = require("@discordjs/opus");
     const decoder = new OpusEncoder(48000, 2); // Discord stereo 48kHz opus
-    const speechDetector = new SpeechDetector();
 
-    // Reset Silero hidden state for this new subscription
-    this.sileroVAD.resetState();
+    // Per-speaker pipeline: lazy-initialized on first audio data
+    let pipeline: SpeakerPipeline | null = null;
+    let pipelineReady = false;
+    const initPipeline = this.getOrCreatePipeline(gv, userId).then((p) => {
+      pipeline = p;
+      // Reset hidden state for this new subscription
+      pipeline.vad.resetState();
+      pipeline.speechDetector.reset();
+      pipelineReady = true;
+      return p;
+    });
 
     const chunks: Buffer[] = []; // Current segment's opus chunks
     let collecting = false;
@@ -381,10 +484,16 @@ export class VoiceManager {
     };
 
     opusStream.on("data", (chunk: Buffer) => {
+      // Wait for pipeline to be ready before processing
+      if (!pipelineReady || !pipeline) return;
+
+      // Update activity timestamp for LRU eviction
+      pipeline.lastActive = Date.now();
+
       // Discord silence frames (3 bytes: 0xF8, 0xFF, 0xFE) mean user stopped transmitting
       if (chunk.length <= 3) {
         // Feed zero probability to speed up speech_end detection
-        const event = speechDetector.processProbability(0);
+        const event = pipeline.speechDetector.processProbability(0);
         if (event === "speech_end") {
           // Clear barge-in timer — speech ended before threshold
           if (gv.bargeInTimer) {
@@ -429,6 +538,10 @@ export class VoiceManager {
       combined.set(mono16k, vadBuffer.length);
       vadBuffer = combined;
 
+      // Capture pipeline reference for closure safety
+      const speakerVAD = pipeline.vad;
+      const speakerDetector = pipeline.speechDetector;
+
       // Serialize VAD inference to prevent concurrent ONNX calls
       processingChain = processingChain.then(async () => {
         // Process as many complete 512-sample frames as available
@@ -438,13 +551,13 @@ export class VoiceManager {
 
           let probability: number;
           try {
-            probability = await this.sileroVAD.process(frame);
+            probability = await speakerVAD.process(frame);
           } catch (e) {
-            console.error(`Voice VAD error: ${e}`);
+            console.error(`Voice VAD error [${userId}]: ${e}`);
             continue;
           }
 
-          const event = speechDetector.processProbability(probability);
+          const event = speakerDetector.processProbability(probability);
 
           if (event === "speech_start") {
             collecting = true;
@@ -459,7 +572,7 @@ export class VoiceManager {
                 gv.bargeInTimer = setTimeout(() => {
                   gv.bargeInTimer = null;
                   // Confirm bot is still speaking and user speech is still ongoing
-                  if (this.isBotSpeaking(guildId) && speechDetector.speaking) {
+                  if (this.isBotSpeaking(guildId) && speakerDetector.speaking) {
                     console.error(`Voice: barge-in confirmed from user ${userId}`);
                     this.interrupt(guildId);
                   }
@@ -479,13 +592,13 @@ export class VoiceManager {
               collecting = false;
               finalizeUtterance();
               // Don't cleanup — keep listening for more speech
-              speechDetector.reset();
-              this.sileroVAD.resetState();
+              speakerDetector.reset();
+              speakerVAD.resetState();
             }
           }
         }
       }).catch((e) => {
-        console.error(`Voice VAD chain error: ${e}`);
+        console.error(`Voice VAD chain error [${userId}]: ${e}`);
       });
     });
 
