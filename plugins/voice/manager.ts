@@ -38,12 +38,21 @@ const MIN_OPUS_CHUNKS = 10; // Skip utterances shorter than ~200ms
 const MIN_PCM_BYTES = 4800; // Skip audio < 300ms at 16kHz mono
 const LISTEN_HARD_TIMEOUT = 30_000; // 30s safety net for leaked subscriptions
 
+// --- Interruption ---
+const BARGE_IN_THRESHOLD_MS = 300; // Sustained speech before treating as interruption
+
 interface GuildVoice {
   connection: VoiceConnection;
   player: AudioPlayer;
   listeningTo: Set<string>;
   /** Serializes speak() calls so they don't race on the audio player */
   speakQueue: Promise<void>;
+  /** Monotonic counter — incremented on interruption to invalidate stale speak() calls */
+  generationId: number;
+  /** Text of chunks actually played (for interruption context) */
+  lastSpokenText: string;
+  /** Timer for barge-in debounce (filters coughs/backchannels) */
+  bargeInTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export class VoiceManager {
@@ -100,6 +109,9 @@ export class VoiceManager {
       player,
       listeningTo: new Set(),
       speakQueue: Promise.resolve(),
+      generationId: 0,
+      lastSpokenText: "",
+      bargeInTimer: null,
     };
     this.guilds.set(guildId, guildVoice);
 
@@ -124,6 +136,10 @@ export class VoiceManager {
     const gv = this.guilds.get(guildId);
     if (!gv) return false;
 
+    if (gv.bargeInTimer) {
+      clearTimeout(gv.bargeInTimer);
+      gv.bargeInTimer = null;
+    }
     gv.connection.destroy();
     gv.player.stop();
     this.guilds.delete(guildId);
@@ -137,18 +153,59 @@ export class VoiceManager {
     }
   }
 
+  /** Check if the bot is currently playing audio in a guild */
+  isBotSpeaking(guildId: string): boolean {
+    const gv = this.guilds.get(guildId);
+    return gv?.player.state.status === AudioPlayerStatus.Playing;
+  }
+
+  /**
+   * Interrupt current speech — stops playback and invalidates queued speak() calls.
+   * Returns the text that was actually spoken before interruption (for context).
+   */
+  interrupt(guildId: string): string | null {
+    const gv = this.guilds.get(guildId);
+    if (!gv) return null;
+
+    const wasPlaying = gv.player.state.status === AudioPlayerStatus.Playing;
+    const spokenText = gv.lastSpokenText || null;
+
+    // Increment generation to invalidate any queued/in-flight speak() calls
+    gv.generationId++;
+
+    // Stop current playback immediately
+    if (wasPlaying) {
+      gv.player.stop();
+    }
+
+    // Reset speak queue — stale tasks will check generationId and bail
+    gv.speakQueue = Promise.resolve();
+
+    console.error(`Voice: interrupted (gen=${gv.generationId}), spoken so far: "${spokenText?.slice(0, 80) ?? ""}"`);
+    return spokenText;
+  }
+
   async speak(guildId: string, text: string, language: string = "en") {
     this.ensureInitialized();
     const gv = this.guilds.get(guildId);
     if (!gv) throw new Error("Not connected to voice in this server");
 
+    // Capture generation ID — if it changes before we play, discard this speak
+    const myGen = gv.generationId;
+
     // Queue speak calls to prevent racing on the audio player
-    const task = gv.speakQueue.then(() => this.doSpeak(gv, text, language));
+    const task = gv.speakQueue.then(() => {
+      if (gv.generationId !== myGen) {
+        console.error("Voice: discarding stale speak() call (interrupted)");
+        return;
+      }
+      return this.doSpeak(gv, text, language, myGen);
+    });
     gv.speakQueue = task.catch(() => {}); // swallow errors in queue chain
     return task;
   }
 
-  private async doSpeak(gv: GuildVoice, text: string, language: string) {
+  private async doSpeak(gv: GuildVoice, text: string, language: string, generationId: number) {
     if (gv.connection.state.status !== VoiceConnectionStatus.Ready) {
       throw new Error("Voice connection not ready");
     }
@@ -156,9 +213,15 @@ export class VoiceManager {
     const speed = this.ctx.config.getVoiceConfig().ttsSpeed ?? 1.0;
     const sentences = splitSentences(text);
 
+    // Reset spoken text tracker for this generation
+    gv.lastSpokenText = "";
+
     if (sentences.length <= 1) {
-      // Short text or single sentence — play directly (no chunking overhead)
-      await this.playSingleChunk(gv, sentences[0] ?? text, language, speed);
+      const chunk = sentences[0] ?? text;
+      await this.playSingleChunk(gv, chunk, language, speed);
+      if (gv.generationId === generationId) {
+        gv.lastSpokenText = chunk;
+      }
       return;
     }
 
@@ -169,6 +232,12 @@ export class VoiceManager {
     let nextPcm: Promise<Buffer | null> = this.synthesizeSafe(sentences[0], language, speed);
 
     for (let i = 0; i < sentences.length; i++) {
+      // Check if this generation was invalidated (user interrupted)
+      if (gv.generationId !== generationId) {
+        console.error(`Voice: generation ${generationId} invalidated, stopping at chunk ${i + 1}/${sentences.length}`);
+        return;
+      }
+
       // Await the current chunk's PCM (already synthesizing)
       const pcm = await nextPcm;
 
@@ -183,8 +252,17 @@ export class VoiceManager {
         continue;
       }
 
+      // Re-check generation before playing (synthesis may have taken time)
+      if (gv.generationId !== generationId) {
+        console.error(`Voice: generation ${generationId} invalidated during synthesis`);
+        return;
+      }
+
       // Play this chunk and wait for it to finish
       await this.playPcmBuffer(gv, pcm);
+
+      // Track what was actually spoken (for interruption context)
+      gv.lastSpokenText += (gv.lastSpokenText ? " " : "") + sentences[i];
     }
   }
 
@@ -266,11 +344,18 @@ export class VoiceManager {
       if (chunk.length <= 3) {
         // Feed zero probability to speed up speech_end detection
         const event = speechDetector.processProbability(0);
-        if (event === "speech_end" && collecting) {
-          collecting = false;
-          this.processUtterance(guildId, userId, [...chunks]);
-          chunks.length = 0;
-          cleanup();
+        if (event === "speech_end") {
+          // Clear barge-in timer — speech ended before threshold
+          if (gv.bargeInTimer) {
+            clearTimeout(gv.bargeInTimer);
+            gv.bargeInTimer = null;
+          }
+          if (collecting) {
+            collecting = false;
+            this.processUtterance(guildId, userId, [...chunks]);
+            chunks.length = 0;
+            cleanup();
+          }
         }
         return;
       }
@@ -317,15 +402,38 @@ export class VoiceManager {
           if (event === "speech_start") {
             collecting = true;
             chunks.length = 0;
+
+            // Barge-in: user started speaking while bot is playing
+            if (this.isBotSpeaking(guildId)) {
+              // Start barge-in timer — require sustained speech to confirm interruption
+              if (!gv.bargeInTimer) {
+                gv.bargeInTimer = setTimeout(() => {
+                  gv.bargeInTimer = null;
+                  // Confirm bot is still speaking and user speech is still ongoing
+                  if (this.isBotSpeaking(guildId) && speechDetector.speaking) {
+                    console.error(`Voice: barge-in confirmed from user ${userId}`);
+                    this.interrupt(guildId);
+                  }
+                }, BARGE_IN_THRESHOLD_MS);
+              }
+            }
           }
 
-          if (event === "speech_end" && collecting) {
-            collecting = false;
-            this.processUtterance(guildId, userId, [...chunks]);
-            chunks.length = 0;
-            // Don't cleanup — keep listening for more speech
-            speechDetector.reset();
-            this.sileroVAD.resetState();
+          if (event === "speech_end") {
+            // Clear barge-in timer — speech was too short (cough/backchannel)
+            if (gv.bargeInTimer) {
+              clearTimeout(gv.bargeInTimer);
+              gv.bargeInTimer = null;
+            }
+
+            if (collecting) {
+              collecting = false;
+              this.processUtterance(guildId, userId, [...chunks]);
+              chunks.length = 0;
+              // Don't cleanup — keep listening for more speech
+              speechDetector.reset();
+              this.sileroVAD.resetState();
+            }
           }
         }
       }).catch((e) => {
