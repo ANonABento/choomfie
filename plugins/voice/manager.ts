@@ -39,6 +39,8 @@ interface GuildVoice {
   connection: VoiceConnection;
   player: AudioPlayer;
   listeningTo: Set<string>;
+  /** Serializes speak() calls so they don't race on the audio player */
+  speakQueue: Promise<void>;
 }
 
 export class VoiceManager {
@@ -89,6 +91,7 @@ export class VoiceManager {
       connection,
       player,
       listeningTo: new Set(),
+      speakQueue: Promise.resolve(),
     };
     this.guilds.set(guildId, guildVoice);
 
@@ -130,6 +133,14 @@ export class VoiceManager {
     this.ensureInitialized();
     const gv = this.guilds.get(guildId);
     if (!gv) throw new Error("Not connected to voice in this server");
+
+    // Queue speak calls to prevent racing on the audio player
+    const task = gv.speakQueue.then(() => this.doSpeak(gv, text, language));
+    gv.speakQueue = task.catch(() => {}); // swallow errors in queue chain
+    return task;
+  }
+
+  private async doSpeak(gv: GuildVoice, text: string, language: string) {
     if (gv.connection.state.status !== VoiceConnectionStatus.Ready) {
       throw new Error("Voice connection not ready");
     }
@@ -148,6 +159,8 @@ export class VoiceManager {
 
     gv.player.play(resource);
     await entersState(gv.player, AudioPlayerStatus.Playing, PLAYBACK_START_TIMEOUT);
+    // Wait for playback to finish before releasing the queue
+    await entersState(gv.player, AudioPlayerStatus.Idle, PLAYBACK_FINISH_TIMEOUT);
   }
 
   private listenToUser(guildId: string, userId: string) {

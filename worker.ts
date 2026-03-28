@@ -47,6 +47,16 @@ const toolDefs: IpcToolDef[] = allTools.map((t) => t.definition);
 // Handle IPC messages from supervisor
 process.on("message", async (msg: SupervisorMessage) => {
   if (msg.type === "tool_call") {
+    // Start typing when Claude is about to respond to a channel
+    if (msg.args?.chat_id && typeof msg.args.chat_id === "string") {
+      try {
+        const ch = await ctx.discord.channels.fetch(msg.args.chat_id);
+        if (ch?.isTextBased() && "sendTyping" in ch) {
+          ch.sendTyping().catch(() => {});
+        }
+      } catch { /* channel fetch failed, ignore */ }
+    }
+
     const handler = toolMap.get(msg.name);
     let result: ToolResult;
     if (!handler) {
