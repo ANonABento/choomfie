@@ -60,6 +60,26 @@ export interface RedditProvider {
   getComments(postUrl: string, limit?: number): Promise<RedditComment[]>;
 }
 
+/** Extended Reddit provider with write capabilities (requires OAuth config) */
+export interface RedditWriteProvider extends RedditProvider {
+  /** Submit a self/text post to a subreddit */
+  submitPost(subreddit: string, title: string, text: string): Promise<RedditSubmitResult>;
+  /** Submit a link post to a subreddit */
+  submitLink(subreddit: string, title: string, url: string): Promise<RedditSubmitResult>;
+  /** Comment on a post or reply to a comment (parentFullname = t3_id or t1_id) */
+  comment(parentFullname: string, text: string): Promise<{ id: string; fullname: string }>;
+  /** Vote on a post or comment (1=up, -1=down, 0=remove) */
+  vote(fullname: string, direction: 1 | -1 | 0): Promise<void>;
+  /** Check auth status */
+  getAuthStatus(): Promise<{ authenticated: boolean; username: string; expiresAt?: number }>;
+}
+
+export interface RedditSubmitResult {
+  id: string;
+  fullname: string;
+  url: string;
+}
+
 // --- LinkedIn ---
 
 export interface LinkedInPostResult {

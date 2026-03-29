@@ -24,6 +24,12 @@ export interface SocialsConfig {
     clientId: string;
     clientSecret: string;
   };
+  reddit?: {
+    clientId: string;
+    clientSecret: string;
+    username: string;
+    password: string;
+  };
 }
 
 export interface Config {

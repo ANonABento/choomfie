@@ -1,6 +1,6 @@
 /**
- * Reddit providers — Official API (primary) + JSON scraper (fallback).
+ * Reddit providers — OAuth API client (primary) + JSON scraper (fallback).
  */
 
-export { redditApiProvider } from "./api.ts";
+export { redditApiProvider, RedditClient, getRedditApiClient, getRedditClient, destroyRedditClient } from "./api.ts";
 export { redditScraperProvider } from "./scraper.ts";

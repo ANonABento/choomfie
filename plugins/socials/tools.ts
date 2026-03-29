@@ -1,11 +1,12 @@
 /**
- * Social platform tools — YouTube search/info, Reddit browse/search, LinkedIn posting.
+ * Social platform tools — YouTube search/info, Reddit browse/search/post, LinkedIn posting.
  */
 
 import type { ToolDef } from "../../lib/types.ts";
 import { text, err } from "../../lib/types.ts";
-import { getYouTubeProvider, getRedditProvider } from "./providers/index.ts";
+import { getYouTubeProvider, getRedditProvider, getRedditClient } from "./providers/index.ts";
 import { LinkedInClient } from "./providers/linkedin/api.ts";
+import type { RedditClient } from "./providers/reddit/api.ts";
 
 const yt = getYouTubeProvider();
 const reddit = getRedditProvider();
@@ -38,6 +39,14 @@ function getLinkedInClient(ctx: { DATA_DIR: string; config: any }): LinkedInClie
 export function destroyLinkedInClient(): void {
   linkedInClient?.destroy();
   linkedInClient = null;
+}
+
+/**
+ * Get the configured RedditClient for write operations.
+ * Returns null if Reddit is not configured.
+ */
+function getRedditWriteClient(): RedditClient | null {
+  return getRedditClient();
 }
 
 export const socialsTools: ToolDef[] = [
@@ -139,7 +148,7 @@ export const socialsTools: ToolDef[] = [
     },
   },
 
-  // --- Reddit ---
+  // --- Reddit (Read) ---
   {
     definition: {
       name: "reddit_search",
@@ -248,6 +257,168 @@ export const socialsTools: ToolDef[] = [
         return text(formatted);
       } catch (e: any) {
         return err(`Reddit comments failed: ${e.message}`);
+      }
+    },
+  },
+
+  // --- Reddit (Write — owner only) ---
+  {
+    definition: {
+      name: "reddit_auth",
+      description:
+        "Check Reddit API authentication status. Reddit uses OAuth password grant — " +
+        "auto-authenticates from config. Shows connection status, username, and token expiry.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
+    handler: async (_args, _ctx) => {
+      try {
+        const client = getRedditWriteClient();
+        if (!client) {
+          return text(
+            "Reddit: **Not configured**\n\n" +
+            "Add Reddit credentials to config.json:\n" +
+            '```json\n"socials": {\n  "reddit": {\n    "clientId": "...",\n    "clientSecret": "...",\n    "username": "...",\n    "password": "..."\n  }\n}\n```\n' +
+            "Create a script app at https://www.reddit.com/prefs/apps"
+          );
+        }
+
+        const status = await client.getAuthStatus();
+        if (!status.authenticated) {
+          return text(
+            `Reddit: **Auth failed** for u/${status.username}\n` +
+            "Check your credentials in config.json."
+          );
+        }
+
+        const expiresIn = status.expiresAt
+          ? Math.max(0, Math.round((status.expiresAt - Date.now()) / (1000 * 60)))
+          : "unknown";
+
+        return text(
+          `Reddit: **Connected**\n` +
+          `Username: u/${status.username}\n` +
+          `Token expires in: ~${expiresIn} minutes (auto-refreshes)`
+        );
+      } catch (e: any) {
+        return err(`Reddit auth check failed: ${e.message}`);
+      }
+    },
+  },
+  {
+    definition: {
+      name: "reddit_post",
+      description:
+        "Submit a text post to a subreddit. Owner only. " +
+        "Returns the post URL on success.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          subreddit: {
+            type: "string",
+            description: "Subreddit to post to (without r/)",
+          },
+          title: { type: "string", description: "Post title" },
+          text: {
+            type: "string",
+            description: "Post body text (markdown supported)",
+          },
+          kind: {
+            type: "string",
+            enum: ["self", "link"],
+            description: "Post type: 'self' for text post (default), 'link' for link post",
+          },
+          url: {
+            type: "string",
+            description: "URL for link posts (required when kind=link)",
+          },
+        },
+        required: ["subreddit", "title"],
+      },
+    },
+    handler: async (args, _ctx) => {
+      try {
+        const client = getRedditWriteClient();
+        if (!client) {
+          return err(
+            "Reddit not configured. Add socials.reddit config to config.json."
+          );
+        }
+
+        const subreddit = args.subreddit as string;
+        const title = args.title as string;
+        const kind = (args.kind as string) || "self";
+
+        let result;
+        if (kind === "link") {
+          const url = args.url as string;
+          if (!url) return err("URL is required for link posts.");
+          result = await client.submitLink(subreddit, title, url);
+        } else {
+          const postText = (args.text as string) || "";
+          result = await client.submitPost(subreddit, title, postText);
+        }
+
+        return text(
+          `Posted to r/${subreddit} successfully.\n` +
+          `Post ID: ${result.fullname}\n` +
+          `URL: ${result.url}`
+        );
+      } catch (e: any) {
+        return err(`Reddit post failed: ${e.message}`);
+      }
+    },
+  },
+  {
+    definition: {
+      name: "reddit_comment",
+      description:
+        "Comment on a Reddit post or reply to a comment. Owner only. " +
+        "Use the post's fullname (t3_xxx) or a comment's fullname (t1_xxx) as the parent.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          parent: {
+            type: "string",
+            description:
+              "Fullname of the post (t3_xxx) or comment (t1_xxx) to reply to",
+          },
+          text: {
+            type: "string",
+            description: "Comment text (markdown supported)",
+          },
+        },
+        required: ["parent", "text"],
+      },
+    },
+    handler: async (args, _ctx) => {
+      try {
+        const client = getRedditWriteClient();
+        if (!client) {
+          return err(
+            "Reddit not configured. Add socials.reddit config to config.json."
+          );
+        }
+
+        const parent = args.parent as string;
+        const commentText = args.text as string;
+
+        // Validate fullname format
+        if (!/^t[13]_[a-z0-9]+$/i.test(parent)) {
+          return err(
+            "Invalid parent fullname. Must be t3_xxx (post) or t1_xxx (comment)."
+          );
+        }
+
+        const result = await client.comment(parent, commentText);
+        return text(
+          `Comment posted successfully.\n` +
+          `Comment ID: ${result.fullname}`
+        );
+      } catch (e: any) {
+        return err(`Reddit comment failed: ${e.message}`);
       }
     },
   },

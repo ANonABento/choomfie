@@ -3,7 +3,7 @@
  *
  * Provider pattern with auto-fallback:
  *   YouTube: yt-dlp (primary) → YouTube Data API (fallback)
- *   Reddit: Official API via snoowrap (primary) → JSON scraper (fallback)
+ *   Reddit: OAuth API client (primary) → JSON scraper (fallback)
  *   LinkedIn: OAuth 2.0 + PKCE, raw fetch against REST API
  *
  * Future: Twitter/X, Bluesky
@@ -11,6 +11,7 @@
 
 import type { Plugin } from "../../lib/types.ts";
 import { socialsTools, destroyLinkedInClient } from "./tools.ts";
+import { initRedditProvider, destroyRedditClient } from "./providers/index.ts";
 
 const socialsPlugin: Plugin = {
   name: "socials",
@@ -19,17 +20,25 @@ const socialsPlugin: Plugin = {
 
   instructions: [
     "## Social Platforms",
-    "You can search and browse YouTube and Reddit, and post to LinkedIn.",
+    "You can search and browse YouTube and Reddit, post to Reddit and LinkedIn.",
     "",
     "**YouTube:**",
     "- `youtube_search` — search for videos",
     "- `youtube_info` — get video details",
     "- `youtube_transcript` — get video captions/transcript",
     "",
-    "**Reddit:**",
+    "**Reddit (read):**",
     "- `reddit_search` — search posts (optionally in a specific subreddit)",
     "- `reddit_posts` — browse a subreddit (hot/top/new)",
     "- `reddit_comments` — read comments on a post",
+    "",
+    "**Reddit (write — owner only, requires config):**",
+    "- `reddit_auth` — check Reddit authentication status",
+    "- `reddit_post` — submit a text or link post to a subreddit",
+    "- `reddit_comment` — comment on a post or reply to a comment",
+    "",
+    "Reddit write tools need OAuth config in config.json under socials.reddit (clientId, clientSecret, username, password).",
+    "Create a 'script' type app at https://www.reddit.com/prefs/apps",
     "",
     "**LinkedIn:**",
     "- `linkedin_auth` — connect a LinkedIn account (OAuth, owner only)",
@@ -48,11 +57,17 @@ const socialsPlugin: Plugin = {
     "reddit_search",
     "reddit_posts",
     "reddit_comments",
-    // LinkedIn tools are owner-only (not listed here)
+    // Reddit write tools + LinkedIn tools are owner-only (not listed here)
   ],
+
+  async init(ctx) {
+    // Initialize Reddit OAuth client from config (if configured)
+    initRedditProvider({ DATA_DIR: ctx.DATA_DIR, config: ctx.config });
+  },
 
   async destroy() {
     destroyLinkedInClient();
+    destroyRedditClient();
   },
 };
 
