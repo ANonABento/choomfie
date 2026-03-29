@@ -20,6 +20,11 @@ export interface VoiceConfig {
 }
 
 export interface SocialsConfig {
+  youtube?: {
+    apiKey?: string;       // Optional — for YouTube Data API v3 reads (fallback to yt-dlp)
+    clientId?: string;     // Optional — for OAuth (comments)
+    clientSecret?: string; // Optional — for OAuth (comments)
+  };
   linkedin?: {
     clientId: string;
     clientSecret: string;

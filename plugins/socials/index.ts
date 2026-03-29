@@ -11,7 +11,12 @@
 
 import type { Plugin } from "../../lib/types.ts";
 import { socialsTools, destroyLinkedInClient } from "./tools.ts";
-import { initRedditProvider, destroyRedditClient } from "./providers/index.ts";
+import {
+  initRedditProvider,
+  destroyRedditClient,
+  initYouTubeProvider,
+  destroyYouTubeCommentClient,
+} from "./providers/index.ts";
 
 const socialsPlugin: Plugin = {
   name: "socials",
@@ -26,6 +31,11 @@ const socialsPlugin: Plugin = {
     "- `youtube_search` — search for videos",
     "- `youtube_info` — get video details",
     "- `youtube_transcript` — get video captions/transcript",
+    "- `youtube_comment` — post a comment on a video (owner only, requires YouTube OAuth)",
+    "- `youtube_auth` — connect YouTube account for commenting (owner only)",
+    "",
+    "YouTube read tools work via yt-dlp (no config needed). Comment posting requires OAuth config in config.json under socials.youtube (clientId, clientSecret).",
+    "Create a Google Cloud project with YouTube Data API v3 at https://console.cloud.google.com",
     "",
     "**Reddit (read):**",
     "- `reddit_search` — search posts (optionally in a specific subreddit)",
@@ -61,6 +71,8 @@ const socialsPlugin: Plugin = {
   ],
 
   async init(ctx) {
+    // Initialize YouTube API key + OAuth comment client from config (if configured)
+    initYouTubeProvider({ DATA_DIR: ctx.DATA_DIR, config: ctx.config });
     // Initialize Reddit OAuth client from config (if configured)
     initRedditProvider({ DATA_DIR: ctx.DATA_DIR, config: ctx.config });
   },
@@ -68,6 +80,7 @@ const socialsPlugin: Plugin = {
   async destroy() {
     destroyLinkedInClient();
     destroyRedditClient();
+    destroyYouTubeCommentClient();
   },
 };
 

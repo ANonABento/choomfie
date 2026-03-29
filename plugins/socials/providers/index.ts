@@ -6,7 +6,14 @@
  */
 
 import type { YouTubeProvider, RedditProvider } from "./types.ts";
-import { ytdlpProvider, youtubeApiProvider } from "./youtube/index.ts";
+import {
+  ytdlpProvider,
+  youtubeApiProvider,
+  initYouTubeCommentClient,
+  getYouTubeCommentClient,
+  destroyYouTubeCommentClient,
+  setYouTubeApiKey,
+} from "./youtube/index.ts";
 import { redditApiProvider, getRedditApiClient, getRedditClient, destroyRedditClient } from "./reddit/api.ts";
 import { redditScraperProvider } from "./reddit/scraper.ts";
 
@@ -57,8 +64,26 @@ export function initRedditProvider(ctx: { DATA_DIR: string; config: any }): void
   redditProviders["reddit-api"] = client;
 }
 
+/**
+ * Initialize YouTube providers with config context.
+ * Sets API key for read-only provider, initializes OAuth client for comments.
+ */
+export function initYouTubeProvider(ctx: { DATA_DIR: string; config: any }): void {
+  const config = ctx.config.getConfig();
+  const ytConfig = (config as any).socials?.youtube;
+
+  // Set API key for the read-only provider (env var takes priority)
+  if (ytConfig?.apiKey) {
+    setYouTubeApiKey(ytConfig.apiKey);
+  }
+
+  // Initialize OAuth comment client if configured
+  initYouTubeCommentClient(ctx);
+}
+
 /** Re-export for write tool access */
 export { getRedditClient, destroyRedditClient };
+export { getYouTubeCommentClient, destroyYouTubeCommentClient };
 
 /** Creates a proxy that tries each provider in order on method failure */
 function createFallbackProxy<T extends { name: string }>(

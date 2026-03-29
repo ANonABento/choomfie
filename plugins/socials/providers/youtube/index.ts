@@ -3,4 +3,11 @@
  */
 
 export { ytdlpProvider } from "./ytdlp.ts";
-export { youtubeApiProvider } from "./api.ts";
+export {
+  youtubeApiProvider,
+  YouTubeCommentClient,
+  initYouTubeCommentClient,
+  getYouTubeCommentClient,
+  destroyYouTubeCommentClient,
+  setYouTubeApiKey,
+} from "./api.ts";

@@ -8,18 +8,77 @@
 import type { YouTubeProvider, VideoResult, TranscriptSegment } from "../types.ts";
 import { unlink } from "node:fs/promises";
 
-async function run(args: string[]): Promise<string> {
+// --- Constants ---
+
+/** Timeout for yt-dlp commands (30 seconds) */
+const YTDLP_TIMEOUT_MS = 30_000;
+
+/** Cached yt-dlp availability check */
+let ytdlpAvailable: boolean | null = null;
+
+/**
+ * Check if yt-dlp is installed and available on PATH.
+ * Result is cached after first check.
+ */
+async function ensureYtdlp(): Promise<void> {
+  if (ytdlpAvailable === true) return;
+  if (ytdlpAvailable === false) {
+    throw new Error(
+      "yt-dlp is not installed. Install it with: brew install yt-dlp (macOS) " +
+      "or pip install yt-dlp (Python). See https://github.com/yt-dlp/yt-dlp"
+    );
+  }
+
+  try {
+    const proc = Bun.spawn(["which", "yt-dlp"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const exitCode = await proc.exited;
+    ytdlpAvailable = exitCode === 0;
+  } catch {
+    ytdlpAvailable = false;
+  }
+
+  if (!ytdlpAvailable) {
+    throw new Error(
+      "yt-dlp is not installed. Install it with: brew install yt-dlp (macOS) " +
+      "or pip install yt-dlp (Python). See https://github.com/yt-dlp/yt-dlp"
+    );
+  }
+}
+
+/**
+ * Run a yt-dlp command with timeout.
+ * Throws if yt-dlp is not available, times out, or exits with error.
+ */
+async function run(args: string[], timeoutMs: number = YTDLP_TIMEOUT_MS): Promise<string> {
+  await ensureYtdlp();
+
   const proc = Bun.spawn(["yt-dlp", ...args], {
     stdout: "pipe",
     stderr: "pipe",
   });
-  const output = await new Response(proc.stdout).text();
-  const exitCode = await proc.exited;
-  if (exitCode !== 0 && !output.trim()) {
-    const stderr = await new Response(proc.stderr).text();
-    throw new Error(`yt-dlp failed (exit ${exitCode}): ${stderr.slice(0, 200)}`);
-  }
-  return output.trim();
+
+  // Race the process against a timeout
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      proc.kill();
+      reject(new Error(`yt-dlp timed out after ${timeoutMs / 1000}s`));
+    }, timeoutMs);
+  });
+
+  const resultPromise = (async () => {
+    const output = await new Response(proc.stdout).text();
+    const exitCode = await proc.exited;
+    if (exitCode !== 0 && !output.trim()) {
+      const stderr = await new Response(proc.stderr).text();
+      throw new Error(`yt-dlp failed (exit ${exitCode}): ${stderr.slice(0, 200)}`);
+    }
+    return output.trim();
+  })();
+
+  return Promise.race([resultPromise, timeoutPromise]);
 }
 
 export const ytdlpProvider: YouTubeProvider = {
