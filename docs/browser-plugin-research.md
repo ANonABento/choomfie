@@ -111,10 +111,33 @@ bunx playwright install chromium
 - For Cloudflare/DataDome: need headed mode or residential proxy (inherent limitation)
 - Stagehand's vision approach can sometimes work better against dynamic anti-bot
 
-## Implementation Priority
+## What Top AI Agents Use
+
+Every major AI coding agent builds on Playwright:
+
+| Agent | Browser Tool | Notes |
+|-------|-------------|-------|
+| **Devin** | Built-in Chromium | Full sandbox in cloud VM |
+| **OpenHands** | BrowserGym + Playwright | Screenshots + accessibility tree |
+| **Kilo Code** | Puppeteer-based | Headless browser with screenshots |
+| **Claude Code** | Playwright MCP | What we already have |
+| **Cursor** | None | No browser integration |
+| **SWE-Agent** | None | Terminal only |
+
+**Conclusion:** Playwright is the universal engine. The innovation is in AI abstraction layers on top (browser-use for Python, Stagehand for TypeScript).
+
+## Evaluated & Skipped
+
+- **Agent-Reach** (github.com/Panniantong/Agent-Reach) — Python web content extractor. Strips ads/nav, returns clean text for LLMs. Simpler than what we need — our WebFetch already does this, and Playwright + Readability.js would be strictly better (handles JS-rendered pages).
+- **browser-use** (74k stars) — Most popular AI browser agent, but Python-only. Stagehand is the TS equivalent.
+- **Dia browser** (Browser Company) — AI-native consumer browser, not open source, not for agents.
+- **Arc** — Consumer browser with AI features, not agent-focused.
+
+## Features to Include
 
 1. **Core browser** — launch, navigate, screenshot, session persistence
-2. **Discord integration** — screenshot upload, embed previews
-3. **Stagehand AI actions** — natural language control
-4. **Social media auth** — browser-based login for socials plugin
-5. **Monitoring/automation** — scheduled checks, alerts
+2. **Reader mode** — strip page junk (ads, nav, scripts), return clean article text. Use Readability.js or similar extraction on Playwright page content.
+3. **Discord integration** — screenshot upload, embed previews
+4. **Stagehand AI actions** — natural language control for unknown pages
+5. **Social media auth** — browser-based login for socials plugin (bypasses API costs)
+6. **Monitoring/automation** — scheduled checks, alerts
