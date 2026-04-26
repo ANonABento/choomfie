@@ -5,6 +5,7 @@
 import { MemoryStore } from "./memory.ts";
 import { ConfigManager } from "./config.ts";
 import { ReminderScheduler } from "./reminders.ts";
+import { BirthdayScheduler } from "./birthdays.ts";
 import type { AppContext } from "./types.ts";
 
 /** Write current access state to disk. */
@@ -88,6 +89,7 @@ export async function createContext(): Promise<{
     DATA_DIR,
     accessPath,
     reminderScheduler: new ReminderScheduler(),
+    birthdayScheduler: new BirthdayScheduler(),
   };
 
   return { ctx, discordToken };

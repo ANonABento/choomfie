@@ -131,6 +131,7 @@ async function shutdown() {
   shutdownCalled = true;
   console.error("Choomfie Worker: shutting down");
   ctx.reminderScheduler.destroy();
+  ctx.birthdayScheduler.destroy();
   destroyTyping();
   for (const plugin of ctx.plugins) {
     if (plugin.destroy) {

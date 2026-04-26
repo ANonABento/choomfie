@@ -40,6 +40,18 @@ export interface Reminder {
   lastNagAt: string | null;
 }
 
+export interface Birthday {
+  id: number;
+  userId: string | null;
+  name: string;
+  birthday: string;
+  year: number | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastRemindedOn: string | null;
+}
+
 export interface MemoryStats {
   coreCount: number;
   archivalCount: number;
@@ -99,6 +111,18 @@ export class MemoryStore {
         ack INTEGER DEFAULT 0,
         last_nag_at TEXT
       );
+
+      CREATE TABLE IF NOT EXISTS birthdays (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        name TEXT NOT NULL UNIQUE,
+        birthday TEXT NOT NULL,
+        year INTEGER,
+        notes TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        last_reminded_on TEXT
+      );
     `);
 
     // Migration: add new columns to existing tables
@@ -122,6 +146,21 @@ export class MemoryStore {
         // Column already exists, ignore
       }
     }
+
+    const birthdayCols = [
+      "updated_at TEXT",
+      "last_reminded_on TEXT",
+    ];
+    for (const col of birthdayCols) {
+      try {
+        this.db.exec(`ALTER TABLE birthdays ADD COLUMN ${col}`);
+      } catch {
+        // Column already exists, ignore
+      }
+    }
+    try {
+      this.db.exec("UPDATE birthdays SET updated_at = COALESCE(updated_at, created_at, datetime('now'))");
+    } catch {}
   }
 
   // --- Core memory ---
@@ -356,6 +395,99 @@ export class MemoryStore {
       )
       .run(olderThanDays);
     return result.changes;
+  }
+
+  // --- Birthdays ---
+
+  private static readonly BIRTHDAY_COLS = `id, user_id as userId, name, birthday, year, notes,
+    created_at as createdAt, updated_at as updatedAt, last_reminded_on as lastRemindedOn`;
+
+  addBirthday(
+    name: string,
+    birthday: string,
+    opts?: {
+      userId?: string | null;
+      year?: number | null;
+      notes?: string | null;
+    }
+  ): number {
+    const existing = this.getBirthdayByName(name);
+    if (existing) {
+      this.db
+        .query(
+          `UPDATE birthdays
+           SET user_id = ?, name = ?, birthday = ?, year = ?, notes = ?, updated_at = datetime('now')
+           WHERE id = ?`
+        )
+        .run(
+          opts?.userId ?? null,
+          name,
+          birthday,
+          opts?.year ?? null,
+          opts?.notes ?? null,
+          existing.id
+        );
+      return existing.id;
+    }
+
+    this.db
+      .query(
+        "INSERT INTO birthdays (user_id, name, birthday, year, notes) VALUES (?, ?, ?, ?, ?)"
+      )
+      .run(
+        opts?.userId ?? null,
+        name,
+        birthday,
+        opts?.year ?? null,
+        opts?.notes ?? null
+      );
+
+    return (
+      this.db.query("SELECT last_insert_rowid() as id").get() as InsertIdRow
+    ).id;
+  }
+
+  getBirthdayByName(name: string): Birthday | null {
+    return (
+      this.db
+        .query(
+          `SELECT ${MemoryStore.BIRTHDAY_COLS}
+           FROM birthdays
+           WHERE lower(name) = lower(?)
+           LIMIT 1`
+        )
+        .get(name) as Birthday | null
+    );
+  }
+
+  listBirthdays(): Birthday[] {
+    return this.db
+      .query(`SELECT ${MemoryStore.BIRTHDAY_COLS} FROM birthdays ORDER BY name COLLATE NOCASE ASC`)
+      .all() as Birthday[];
+  }
+
+  removeBirthday(name: string): boolean {
+    const result = this.db
+      .query("DELETE FROM birthdays WHERE lower(name) = lower(?)")
+      .run(name);
+    return result.changes > 0;
+  }
+
+  getTodaysBirthdays(birthday: string): Birthday[] {
+    return this.db
+      .query(
+        `SELECT ${MemoryStore.BIRTHDAY_COLS}
+         FROM birthdays
+         WHERE birthday = ?
+         ORDER BY name COLLATE NOCASE ASC`
+      )
+      .all(birthday) as Birthday[];
+  }
+
+  markBirthdayReminded(id: number, reminderDate: string) {
+    this.db
+      .query("UPDATE birthdays SET last_reminded_on = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(reminderDate, id);
   }
 
   // --- Stats ---

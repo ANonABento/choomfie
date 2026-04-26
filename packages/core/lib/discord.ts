@@ -14,7 +14,6 @@ import { basename } from "node:path";
 import { handleInteraction, getCommandDefs } from "./interactions.ts";
 import type { AppContext } from "./types.ts";
 import { saveAccess } from "./context.ts";
-import { ReminderScheduler } from "./reminders.ts";
 import { onMessageReceived } from "./typing.ts";
 import {
   isChannelActive,
@@ -87,6 +86,7 @@ export function createDiscordClient(ctx: AppContext): Client {
 
     // Initialize timer-based reminder scheduler
     ctx.reminderScheduler.init(ctx);
+    ctx.birthdayScheduler.init(ctx);
 
     // Start inbox cleanup (every hour, delete files older than 24h)
     const cleanInbox = async () => {

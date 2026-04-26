@@ -12,6 +12,7 @@ import type { PluginContext, ToolResult } from "@choomfie/shared";
 import type { MemoryStore } from "./memory.ts";
 import type { ConfigManager } from "./config.ts";
 import type { ReminderScheduler } from "./reminders.ts";
+import type { BirthdayScheduler } from "./birthdays.ts";
 import type { McpProxy } from "./mcp-proxy.ts";
 
 // Re-export shared types so existing core code keeps working
@@ -55,4 +56,6 @@ export interface AppContext extends PluginContext {
   accessPath: string;
   /** Timer-based reminder scheduler */
   reminderScheduler: ReminderScheduler;
+  /** Daily birthday reminder scheduler */
+  birthdayScheduler: BirthdayScheduler;
 }
