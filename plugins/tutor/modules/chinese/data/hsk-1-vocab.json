@@ -1,0 +1,18 @@
+[
+  { "term": "你好", "reading": "nǐ hǎo", "meaning": "hello" },
+  { "term": "谢谢", "reading": "xièxie", "meaning": "thank you" },
+  { "term": "再见", "reading": "zài jiàn", "meaning": "goodbye" },
+  { "term": "我", "reading": "wǒ", "meaning": "I; me" },
+  { "term": "你", "reading": "nǐ", "meaning": "you" },
+  { "term": "他", "reading": "tā", "meaning": "he; him" },
+  { "term": "她", "reading": "tā", "meaning": "she; her" },
+  { "term": "是", "reading": "shì", "meaning": "to be" },
+  { "term": "不", "reading": "bù", "meaning": "not; no" },
+  { "term": "有", "reading": "yǒu", "meaning": "to have" },
+  { "term": "人", "reading": "rén", "meaning": "person" },
+  { "term": "中国", "reading": "Zhōngguó", "meaning": "China" },
+  { "term": "学生", "reading": "xuésheng", "meaning": "student", "measure": "个" },
+  { "term": "老师", "reading": "lǎoshī", "meaning": "teacher", "measure": "位" },
+  { "term": "书", "reading": "shū", "meaning": "book", "measure": "本" },
+  { "term": "水", "reading": "shuǐ", "meaning": "water", "measure": "杯" }
+]

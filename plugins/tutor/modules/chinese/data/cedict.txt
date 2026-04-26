@@ -1,0 +1,12 @@
+# Minimal bundled CC-CEDICT seed for tests and offline lookup.
+# Replace with the full CC-CEDICT file via CHOOMFIE_CEDICT_PATH for production use.
+你好 你好 [ni3 hao3] /hello/hi/how are you?/
+謝謝 谢谢 [xie4 xie5] /to thank/thanks/thank you/
+再見 再见 [zai4 jian4] /goodbye/see you again later/
+中國 中国 [Zhong1 guo2] /China/Middle Kingdom/
+學生 学生 [xue2 sheng5] /student/schoolchild/
+老師 老师 [lao3 shi1] /teacher/
+書 书 [shu1] /book/letter/document/
+水 水 [shui3] /water/river/
+嗎 吗 [ma5] /question particle for yes-no questions/
+馬 马 [ma3] /horse/

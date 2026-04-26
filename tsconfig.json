@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "types": ["bun"],
+    "paths": {
+      "@choomfie/shared": ["packages/shared/index.ts"],
+      "@choomfie/voice": ["plugins/voice/index.ts"],
+      "@choomfie/browser": ["plugins/browser/index.ts"],
+      "@choomfie/socials": ["plugins/socials/index.ts"],
+      "@choomfie/tutor": ["plugins/tutor/index.ts"]
+    }
+  },
+  "include": ["packages/**/*.ts", "plugins/**/*.ts"],
+  "exclude": ["node_modules", "packages/core/daemon-*.ts"]
+}
