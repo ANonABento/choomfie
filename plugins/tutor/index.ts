@@ -17,8 +17,8 @@ import { setLessonDB, getLessonDB } from "./core/lesson-db-instance.ts";
 import { registerLessons, completeLesson } from "./core/lesson-engine.ts";
 import { getAllTutorTools } from "./tools/index.ts";
 import { listModules } from "./modules/index.ts";
-import { chineseLessons, chineseUnits } from "./modules/chinese/lessons/index.ts";
 import { japaneseLessons, japaneseUnits } from "./modules/japanese/lessons/index.ts";
+import { chineseLessons, chineseUnits } from "./modules/chinese/lessons/index.ts";
 
 import {
   buildExerciseButtons,
@@ -51,7 +51,9 @@ const tutorPlugin: Plugin = {
     "You are also a tutor. When the user wants to learn or practice a subject:",
     "",
     "**Structured Lessons (recommended for beginners):**",
-    "- Tell beginners to use `/lesson` to start structured lessons when their active module has lessons",
+    "- Tell beginners to use `/lesson` to start structured lessons for their active module",
+    "- Japanese lessons cover hiragana → katakana → phrases → grammar",
+    "- Chinese lessons cover tones → hanzi → HSK 1 vocabulary",
     "- Use `lesson_status` to check their progress and suggest what to study next",
     "- Lessons are button-driven and instant — no need for you to be in the loop",
     "",
@@ -67,15 +69,14 @@ const tutorPlugin: Plugin = {
     "9. Use `srs_rate` after they answer a flashcard (again/hard/good/easy)",
     "10. Use `srs_stats` to show their progress",
     "11. Use `srs_reminders` when they ask to check, enable, or disable SRS reminders",
-    "12. Module-specific tools (e.g. `convert_kana` for Japanese or `convert_pinyin` for Chinese) are also available",
+    "12. Module-specific tools (e.g. `convert_kana` for Japanese) are also available",
     "",
     "**Learning flow:** Lessons (learn new material) → SRS (retain it) → Conversation (use it naturally)",
     "",
-    "Default: Japanese at N5 (complete beginner). Chinese is available at HSK 1.",
+    "Default: Japanese at N5 (complete beginner).",
     "Be encouraging! Learning is hard. Celebrate progress.",
     "When correcting, explain WHY something is wrong, don't just give the answer.",
     "For Japanese: use furigana for kanji: 食[た]べる",
-    "For Chinese: include pinyin with tone marks for new words: 你好 (nǐ hǎo)",
     "",
     "SRS: Cards auto-import from JLPT N5 deck (718 words) on first review.",
     "Lesson completion also adds items to SRS automatically.",
@@ -95,9 +96,6 @@ const tutorPlugin: Plugin = {
     "srs_reminders",
     "lesson_status",
     "convert_kana",
-    "convert_pinyin",
-    "stroke_info",
-    "convert_hanzi",
     "random_word",
   ],
 
@@ -256,9 +254,7 @@ const tutorPlugin: Plugin = {
     // Destroy all modules
     for (const mod of listModules()) {
       if (mod.destroy) {
-        try {
-          await mod.destroy();
-        } catch (e: unknown) {
+        try { await mod.destroy(); } catch (e: unknown) {
           console.error(`Tutor: module destroy failed: ${errorMessage(e)}`);
         }
       }

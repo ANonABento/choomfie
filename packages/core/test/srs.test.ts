@@ -2,11 +2,21 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { PluginContext } from "@choomfie/shared";
 import { SRSManager } from "../../../plugins/tutor/core/srs.ts";
+import { setSRS } from "../../../plugins/tutor/core/srs-instance.ts";
+import { setModule } from "../../../plugins/tutor/core/session.ts";
+import { srsTools } from "../../../plugins/tutor/tools/srs-tools.ts";
 
 const tempDirs: string[] = [];
+const emptyContext = {} as PluginContext;
+
+function resultText(result: Awaited<ReturnType<(typeof srsTools)[number]["handler"]>>): string {
+  return result.content[0]?.text ?? "";
+}
 
 afterEach(async () => {
+  setSRS(null);
   await Promise.all(
     tempDirs.splice(0).map(async (dir) => {
       try {
@@ -43,6 +53,29 @@ test("SRS reviewCard rejects cards owned by another user", async () => {
   expect(() => srs.reviewCard("other-user", cardId, "good")).toThrow(
     /does not belong/
   );
+
+  srs.close();
+});
+
+test("srs_review defaults to active module lesson deck and shows card IDs", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "choomfie-srs-"));
+  tempDirs.push(dir);
+
+  const userId = "chinese-srs-user";
+  const srs = new SRSManager(join(dir, "srs.db"));
+  setSRS(srs);
+  setModule(userId, "chinese", "HSK1");
+  const cardId = srs.addCard(userId, "你好", "hello", "ni3 hao3", "lesson-chinese");
+
+  const tool = srsTools.find((t) => t.definition.name === "srs_review");
+  expect(tool).toBeDefined();
+
+  const result = await tool!.handler({ user_id: userId }, emptyContext);
+  const text = resultText(result);
+
+  expect(text).toContain("**1 cards due** (lesson-chinese)");
+  expect(text).toContain(`Card #${cardId}: 你好 (ni3 hao3)`);
+  expect(text).not.toContain("jlpt-n5");
 
   srs.close();
 });

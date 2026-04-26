@@ -20,6 +20,8 @@ export interface ContentSet {
   items: ContentItem[];
   /** Which modes to generate. Defaults to all. */
   modes?: ExerciseMode[];
+  /** User-facing label for production prompts. Defaults to Japanese for existing lessons. */
+  productionLabel?: string;
 }
 
 export interface ChartBlank {
@@ -39,8 +41,8 @@ export interface ChartExerciseData {
 /** A single exercise within a lesson */
 export interface Exercise {
   type:
-    | "recognition" // see JP → pick meaning (buttons)
-    | "production" // see meaning → type JP
+    | "recognition" // see term → pick meaning (buttons)
+    | "production" // see meaning → type term
     | "cloze" // fill the blank
     | "multiple_choice" // general MC (buttons)
     | "error_correction" // find the mistake
@@ -55,23 +57,6 @@ export interface Exercise {
   explanation?: string; // shown after answering (grammar lessons)
   chart?: ChartExerciseData; // structured chart data for chart exercises
   chartBlankIndex?: number; // runtime expansion index for chart blank scoring
-}
-
-/** A single teachable item that can generate exercises */
-export interface ContentItem {
-  term: string; // e.g. "あ" or "食べる"
-  reading: string; // e.g. "a" or "たべる"
-  meaning: string; // e.g. "a (vowel)" or "to eat"
-}
-
-/** Exercise generation mode */
-export type ExerciseMode = "recognition" | "production" | "matching";
-
-/** A set of content that can generate exercises in multiple modes */
-export interface ContentSet {
-  items: ContentItem[];
-  /** Which modes to generate. Defaults to all. */
-  modes?: ExerciseMode[];
 }
 
 /** An item to introduce in the lesson intro */

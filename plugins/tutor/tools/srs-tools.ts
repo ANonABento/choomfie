@@ -11,6 +11,10 @@ import { updateFromSrsReview } from "../core/learner-profile.ts";
 
 const DEFAULT_DECK = "jlpt-n5";
 
+function defaultDeckForModule(moduleName: string): string {
+  return moduleName === "japanese" ? DEFAULT_DECK : `lesson-${moduleName}`;
+}
+
 export const srsTools: ToolDef[] = [
   {
     definition: {
@@ -32,7 +36,8 @@ export const srsTools: ToolDef[] = [
       if (!srs) return err("SRS not initialized");
 
       const userId = args.user_id as string;
-      const deck = (args.deck as string) || DEFAULT_DECK;
+      const moduleName = getActiveModule(userId);
+      const deck = (args.deck as string) || defaultDeckForModule(moduleName);
 
       // Auto-import N5 deck for Japanese users
       if (!srs.hasDeck(userId, deck) && deck === DEFAULT_DECK) {
@@ -60,7 +65,7 @@ export const srsTools: ToolDef[] = [
       const formatted = due
         .map(
           (c, i) =>
-            `**${i + 1}.** ${c.front} (${c.reading})\n  ||${c.back}||`
+            `**${i + 1}.** Card #${c.id}: ${c.front} (${c.reading})\n  ||${c.back}||`
         )
         .join("\n\n");
 

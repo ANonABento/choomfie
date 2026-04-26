@@ -305,7 +305,7 @@ async function sendNextExercise(
 registerCommand("lesson", {
   data: new SlashCommandBuilder()
     .setName("lesson")
-    .setDescription("Start or continue a tutor lesson")
+    .setDescription("Start or continue your active tutor lesson")
     .toJSON(),
   handler: async (interaction, _ctx) => {
     const db = getLessonDB();

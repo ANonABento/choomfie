@@ -51,6 +51,18 @@ describe("exercise-generator", () => {
     }
   });
 
+  test("production: uses custom content label when provided", () => {
+    const ex = generateExercises(
+      {
+        items: [{ term: "你好", reading: "ni3 hao3", meaning: "hello" }],
+        productionLabel: "hanzi",
+      },
+      "production"
+    );
+
+    expect(ex[0].prompt).toBe('Type the hanzi for **"hello"**');
+  });
+
   test("matching: groups items in chunks of <=5 and yields one exercise per item", () => {
     const items: ContentItem[] = [];
     for (let i = 0; i < 8; i++) {
