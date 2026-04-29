@@ -5,8 +5,17 @@
 import type { DictionaryEntry, QuizQuestion, TutorModule, TutorPromptContext } from "../../core/types.ts";
 import { pick, pickN, shuffle } from "../../core/random.ts";
 import { hsk1Vocab } from "./data/hsk1-vocab.ts";
+import { chineseTools } from "./tools.ts";
 
 const LEVEL_GUIDES: Record<string, string> = {
+  "HSK 1": `Student is a COMPLETE BEGINNER (HSK 1).
+- Use only basic HSK 1 vocabulary and short sentence patterns
+- Always include pinyin with tone numbers for new hanzi: 你好 (ni3 hao3)
+- Explain tones explicitly when pronunciation matters
+- Focus on: greetings, numbers, people, dates, locations, food, simple actions
+- Keep sentences SHORT and concrete
+- If they answer in pinyin, accept it while gently tying it back to hanzi`,
+
   HSK1: `Student is a COMPLETE BEGINNER (HSK 1).
 - Use only basic HSK 1 vocabulary and short sentence patterns
 - Always include pinyin with tone numbers for new hanzi: 你好 (ni3 hao3)
@@ -62,9 +71,11 @@ export const chineseModule: TutorModule = {
   displayName: "Chinese",
   description: "Mandarin Chinese learning with tones, hanzi, and HSK vocabulary",
   icon: "🇨🇳",
-  levels: ["HSK1", "HSK2", "HSK3"],
-  defaultLevel: "HSK1",
+  levels: ["HSK 1", "HSK 2", "HSK 3", "HSK 4", "HSK 5", "HSK 6"],
+  defaultLevel: "HSK 1",
   quizTypes: ["tones", "hanzi", "vocab"],
+
+  tools: chineseTools,
 
   async lookup(query: string): Promise<DictionaryEntry[]> {
     const normalized = query.trim().toLowerCase();
@@ -91,7 +102,7 @@ export const chineseModule: TutorModule = {
       return "";
     })();
 
-    return `You are a Mandarin Chinese language tutor. ${LEVEL_GUIDES[level] || LEVEL_GUIDES.HSK1}${pinyinDirective}
+    return `You are a Mandarin Chinese tutor. ${LEVEL_GUIDES[level] || LEVEL_GUIDES["HSK 1"]}${pinyinDirective}
 
 When the student writes in Chinese or pinyin, respond with a JSON block:
 \`\`\`json

@@ -15,7 +15,6 @@ import {
   ButtonBuilder,
   ButtonStyle,
 } from "discord.js";
-import { dirname, join } from "node:path";
 import { VERSION } from "./version.ts";
 import { registerCommand, registerButtonHandler } from "./interactions.ts";
 import { McpProxy } from "./mcp-proxy.ts";
@@ -546,7 +545,7 @@ registerCommand("voice", {
 
     // Dynamically import to avoid loading voice code when plugin isn't enabled
     const { detectAllProviders } = await import(
-      "../plugins/voice/providers/index.ts"
+      "../../../plugins/voice/providers/index.ts"
     );
 
     let reports;

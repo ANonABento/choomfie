@@ -16,6 +16,13 @@ export const STT_WAV = {
   codec: "pcm_s16le",
 } as const;
 
+export function bufferToArrayBuffer(buffer: Buffer): ArrayBuffer {
+  return buffer.buffer.slice(
+    buffer.byteOffset,
+    buffer.byteOffset + buffer.byteLength
+  ) as ArrayBuffer;
+}
+
 /**
  * Convert audio file to raw PCM for Discord playback (48kHz, stereo, s16le).
  * Caller is responsible for cleaning up inputPath (use try/finally).

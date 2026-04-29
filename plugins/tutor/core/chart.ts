@@ -1,4 +1,4 @@
-import type { ChartExercise } from "./lesson-types.ts";
+import type { ChartExerciseData } from "./lesson-types.ts";
 
 export interface ChartRenderState {
   currentBlankIndex?: number;
@@ -9,7 +9,7 @@ function cellText(
   row: number,
   col: number,
   cell: string | null,
-  blanks: ChartExercise["blanks"],
+  blanks: ChartExerciseData["blanks"],
   state: ChartRenderState
 ): string {
   if (cell !== null) return cell;
@@ -26,7 +26,7 @@ export function renderChartGrid(
   grid: (string | null)[][],
   rowLabels?: string[],
   colLabels?: string[],
-  blanks: ChartExercise["blanks"] = [],
+  blanks: ChartExerciseData["blanks"] = [],
   state: ChartRenderState = {}
 ): string {
   const cellWidth = 3;
@@ -49,7 +49,7 @@ export function renderChartGrid(
 }
 
 export function renderChartPrompt(
-  exercise: ChartExercise,
+  exercise: ChartExerciseData,
   state: ChartRenderState = {}
 ): string {
   const currentBlankIndex = state.currentBlankIndex ?? 0;

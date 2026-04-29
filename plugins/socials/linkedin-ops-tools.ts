@@ -1,5 +1,5 @@
 import type { ToolDef } from "@choomfie/shared";
-import { err, text } from "@choomfie/shared";
+import { dateToSQLite, err, parseNaturalTime, text } from "@choomfie/shared";
 import { getLinkedInClient, getLinkedInMonitor, getLinkedInScheduler } from "./linkedin-runtime.ts";
 import { validateLinkedInText } from "./linkedin-tool-helpers.ts";
 
@@ -58,7 +58,6 @@ export const linkedinOpsTools: ToolDef[] = [
         const timeStr = args.time as string;
         let scheduledAt: string;
 
-        const { parseNaturalTime, dateToSQLite } = await import("../../lib/time.ts");
         const parsed = parseNaturalTime(timeStr);
         if (parsed) {
           scheduledAt = dateToSQLite(parsed);

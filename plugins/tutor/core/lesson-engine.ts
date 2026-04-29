@@ -6,7 +6,7 @@
  */
 
 import type { LessonDB } from "./lesson-db.ts";
-import type { Lesson, Exercise, ExerciseResult, Unit, LessonStatus } from "./lesson-types.ts";
+import type { Lesson, Exercise, ExerciseResult, Unit } from "./lesson-types.ts";
 import { getSRS } from "./srs-instance.ts";
 
 const MASTERY_THRESHOLD = 0.8; // 80% to pass
@@ -140,15 +140,19 @@ export function completeLesson(
   db: LessonDB,
   userId: string,
   module: string,
-  lessonId: string
+  lessonId: string,
+  activeLesson?: Lesson
 ): { score: number; passed: boolean; totalCorrect: number; totalExercises: number } {
-  const lesson = getLesson(module, lessonId);
+  const lesson = activeLesson ?? getLesson(module, lessonId);
   if (!lesson) return { score: 0, passed: false, totalCorrect: 0, totalExercises: 0 };
 
   const progress = db.getProgress(userId, module, lessonId);
   if (!progress) return { score: 0, passed: false, totalCorrect: 0, totalExercises: 0 };
 
-  const totalExercises = lesson.exercises.length;
+  // When exercises are generated from contentSets (via mode selection), the lesson's
+  // static exercises array may not reflect the actual count attempted. Use the larger
+  // of the two to account for dynamically generated exercises.
+  const totalExercises = Math.max(lesson.exercises.length, progress.exerciseResults.length);
   const totalCorrect = progress.exerciseResults.filter((r) => r.correct).length;
   const score = totalExercises > 0 ? totalCorrect / totalExercises : 0;
   const passed = score >= MASTERY_THRESHOLD;

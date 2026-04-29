@@ -70,7 +70,7 @@ export function createMcpServer(ctx: AppContext): Server {
   const toolMap = new Map(
     allTools.map((t) => [t.definition.name, t.handler])
   );
-  mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
+  mcp.setRequestHandler(CallToolRequestSchema, async (req): Promise<any> => {
     const handler = toolMap.get(req.params.name);
     if (!handler) return err(`Unknown tool: ${req.params.name}`);
 

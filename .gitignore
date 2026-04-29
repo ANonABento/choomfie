@@ -15,3 +15,4 @@ voices-*.bin
 
 # Claude Code worktrees
 .claude/worktrees/
+.worktrees/

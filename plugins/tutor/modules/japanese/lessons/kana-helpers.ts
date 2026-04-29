@@ -62,6 +62,8 @@ export function chartReview(knownChars: [string, string][]): Exercise {
   const rowLabels: string[] = [];
   let blankChar = "";
   let blankReading = "";
+  let blankRow = 0;
+  let blankCol = 0;
 
   let idx = 0;
   for (let r = 0; r < rows; r++) {
@@ -74,6 +76,8 @@ export function chartReview(knownChars: [string, string][]): Exercise {
         row.push(null);
         blankChar = selected[idx][0];
         blankReading = selected[idx][1];
+        blankRow = r;
+        blankCol = c;
       } else {
         row.push(selected[idx][0]);
       }
@@ -93,5 +97,18 @@ export function chartReview(knownChars: [string, string][]): Exercise {
     prompt: `Which character goes in the blank? (reading: **${blankReading}**)\n${gridText}`,
     answer: blankChar,
     distractors: distractorPool,
+    chart: {
+      grid,
+      rowLabels,
+      colLabels,
+      blanks: [
+        {
+          row: blankRow,
+          col: blankCol,
+          answer: blankChar,
+          reading: blankReading,
+        },
+      ],
+    },
   };
 }

@@ -13,8 +13,16 @@
     "start": "bun install --no-summary && bun packages/core/server.ts",
     "test": "bun test",
     "test:all": "bun test packages/*/test/ test/",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "lint-staged": "lint-staged",
+    "prepare": "husky",
     "deploy-commands": "bun packages/core/scripts/deploy-commands.ts",
     "daemon": "bun packages/core/daemon.ts"
+  },
+  "lint-staged": {
+    "*.ts": "eslint --fix"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.87",
@@ -42,7 +50,12 @@
     "wanakana": "^5.3.1"
   },
   "devDependencies": {
-    "@types/bun": "^1.3.10"
+    "@types/bun": "^1.3.10",
+    "eslint": "^10.2.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.1"
   },
   "trustedDependencies": [
     "onnxruntime-node"

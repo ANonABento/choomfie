@@ -2,6 +2,7 @@ import type { PluginContext } from "@choomfie/shared";
 import { LinkedInClient } from "./providers/linkedin/api.ts";
 import { LinkedInMonitor } from "./providers/linkedin/monitor.ts";
 import { LinkedInScheduler } from "./providers/linkedin/scheduler.ts";
+import { requireNonEmptyString } from "./config.ts";
 
 let linkedInClient: LinkedInClient | null = null;
 let linkedInMonitor: LinkedInMonitor | null = null;
@@ -22,8 +23,8 @@ export function getLinkedInClient(ctx: PluginContext): LinkedInClient {
 
   linkedInClient = new LinkedInClient(
     ctx.DATA_DIR,
-    socialsConfig.clientId,
-    socialsConfig.clientSecret,
+    requireNonEmptyString(socialsConfig.clientId, "socials.linkedin.clientId"),
+    requireNonEmptyString(socialsConfig.clientSecret, "socials.linkedin.clientSecret"),
   );
   return linkedInClient;
 }

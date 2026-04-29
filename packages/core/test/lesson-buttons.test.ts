@@ -36,6 +36,7 @@ function makeSession(): ActiveLessonSession {
     lessonId: lesson.id,
     exerciseIndex: 0,
     lesson,
+    exercises: lesson.exercises,
     answerOptionsByExercise: new Map(),
   };
 }

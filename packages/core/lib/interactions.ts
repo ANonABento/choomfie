@@ -15,6 +15,7 @@ import {
   type RESTPostAPIChatInputApplicationCommandsJSONBody,
 } from "discord.js";
 import type { AppContext } from "./types.ts";
+import type { PluginContext } from "@choomfie/shared";
 
 // Re-export shared registries so existing core imports keep working
 export {
@@ -50,15 +51,19 @@ export type CommandHandler = (
   ctx: AppContext
 ) => Promise<void>;
 
+function asAppContext(ctx: PluginContext): AppContext {
+  return ctx as AppContext;
+}
+
 export function registerButtonHandler(prefix: string, handler: ButtonHandler) {
   registerSharedButtonHandler(prefix, (interaction, parts, ctx) =>
-    handler(interaction, parts, ctx as AppContext)
+    handler(interaction, parts, asAppContext(ctx))
   );
 }
 
 export function registerModalHandler(prefix: string, handler: ModalHandler) {
   registerSharedModalHandler(prefix, (interaction, parts, ctx) =>
-    handler(interaction, parts, ctx as AppContext)
+    handler(interaction, parts, asAppContext(ctx))
   );
 }
 
@@ -71,7 +76,7 @@ export function registerCommand(
 ) {
   registerSharedCommand(name, {
     data: def.data,
-    handler: (interaction, ctx) => def.handler(interaction, ctx as AppContext),
+    handler: (interaction, ctx) => def.handler(interaction, asAppContext(ctx)),
   });
 }
 

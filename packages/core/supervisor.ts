@@ -16,8 +16,12 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { readFile, writeFile, unlink } from "node:fs/promises";
-import { z } from "zod";
 import { VERSION } from "./lib/version.ts";
+import {
+  PERMISSION_REQUEST_METHOD,
+  PermissionRequestNotificationSchema,
+  requirePermissionRequestParams,
+} from "./lib/permission-schema.ts";
 import type {
   WorkerMessage,
   IpcToolDef,
@@ -39,6 +43,8 @@ let crashCount = 0;
 let lastCrashTime = 0;
 const MAX_CRASHES = 5; // max crashes within the reset window
 const CRASH_WINDOW_MS = 60_000; // reset crash count after 1min of stability
+
+type McpNotification = Parameters<Server["notification"]>[0];
 
 /** Pending tool calls waiting for worker response */
 const pendingCalls = new Map<
@@ -145,11 +151,11 @@ function handleWorkerMessage(msg: WorkerMessage) {
         );
         if (mcp) {
           // Update instructions for any future initialize handshake (e.g. reconnect)
-          (mcp as any)._instructions = currentInstructions;
+          Object.assign(mcp, { _instructions: currentInstructions });
           // Notify Claude Code that the tool list changed so it re-fetches
           mcp.notification({
             method: "notifications/tools/list_changed",
-          } as any);
+          } as McpNotification);
         }
         break;
 
@@ -169,7 +175,7 @@ function handleWorkerMessage(msg: WorkerMessage) {
           mcp.notification({
             method: msg.method,
             params: msg.params,
-          } as any);
+          } as McpNotification);
         }
         break;
 
@@ -371,22 +377,15 @@ function createMcp(): Server {
 
   // Forward permission requests from MCP to worker
   server.setNotificationHandler(
-    z.object({
-      method: z.literal("notifications/claude/channel/permission_request"),
-      params: z.object({
-        request_id: z.string(),
-        tool_name: z.string(),
-        description: z.string(),
-        input_preview: z.string(),
-      }),
-    }),
-    async ({ params }: any) => {
+    PermissionRequestNotificationSchema,
+    async ({ params }) => {
+      const permissionParams = requirePermissionRequestParams(params);
       if (worker && workerReady) {
         try {
           worker.send({
             type: "permission_request",
-            method: "notifications/claude/channel/permission_request",
-            params,
+            method: PERMISSION_REQUEST_METHOD,
+            params: permissionParams,
           });
         } catch {}
       }

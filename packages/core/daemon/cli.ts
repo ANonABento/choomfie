@@ -18,7 +18,8 @@ async function withCliSession(
 
   try {
     await startSession(state);
-    const exitCode = (await run(state)) ?? 0;
+    const result = await run(state);
+    const exitCode = typeof result === "number" ? result : 0;
     await cleanup(state);
     process.exit(exitCode);
   } catch (error: unknown) {

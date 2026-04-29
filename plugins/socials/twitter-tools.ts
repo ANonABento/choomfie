@@ -1,5 +1,6 @@
 import type { PluginContext, ToolDef } from "@choomfie/shared";
 import { err, text } from "@choomfie/shared";
+import { requireNonEmptyString } from "./config.ts";
 import { withRetry } from "./providers/retry.ts";
 import { TwitterClient } from "./providers/twitter/api.ts";
 
@@ -23,9 +24,9 @@ function getTwitterConfig(ctx: PluginContext): { username: string; password: str
   }
 
   return {
-    username: socialsConfig.username,
-    password: socialsConfig.password,
-    email: socialsConfig.email,
+    username: requireNonEmptyString(socialsConfig.username, "socials.twitter.username"),
+    password: requireNonEmptyString(socialsConfig.password, "socials.twitter.password"),
+    email: requireNonEmptyString(socialsConfig.email, "socials.twitter.email"),
   };
 }
 
