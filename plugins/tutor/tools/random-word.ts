@@ -4,16 +4,7 @@
 
 import type { ToolDef } from "@choomfie/shared";
 import { text } from "@choomfie/shared";
-
-// Will be populated on first call
-let vocabCache: Array<{ front: string; back: string; reading: string }> | null = null;
-
-async function getVocab() {
-  if (vocabCache) return vocabCache;
-  const data = await import("../modules/japanese/data/n5-vocab.json");
-  vocabCache = data.default;
-  return vocabCache;
-}
+import { n5Vocab } from "../modules/japanese/vocab.ts";
 
 export const randomWordTools: ToolDef[] = [
   {
@@ -27,10 +18,9 @@ export const randomWordTools: ToolDef[] = [
       },
     },
     handler: async (_args, _ctx) => {
-      const vocab = await getVocab();
-      if (!vocab || vocab.length === 0) return text("No vocabulary data available.");
+      if (n5Vocab.length === 0) return text("No vocabulary data available.");
 
-      const word = vocab[Math.floor(Math.random() * vocab.length)];
+      const word = n5Vocab[Math.floor(Math.random() * n5Vocab.length)];
       return text(
         [
           `📚 **Random Word**`,

@@ -54,6 +54,8 @@ export interface AppContext extends PluginContext {
   lastMessageTime: Map<string, number>;
   DATA_DIR: string;
   accessPath: string;
+  _discordReadyResolve?: () => void;
+  _inboxInterval?: ReturnType<typeof setInterval>;
   /** Timer-based reminder scheduler */
   reminderScheduler: ReminderScheduler;
   /** Daily birthday reminder scheduler */

@@ -11,6 +11,16 @@ import { getSRS } from "./srs-instance.ts";
 
 const MASTERY_THRESHOLD = 0.8; // 80% to pass
 
+function normalizeAnswer(answer: string): string {
+  return answer
+    .trim()
+    .toLowerCase()
+    .replaceAll("œ", "oe")
+    .replaceAll("æ", "ae")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
+}
+
 /** Registered lesson data per module */
 const lessonRegistries = new Map<string, { lessons: Map<string, Lesson>; units: Unit[] }>();
 
@@ -116,11 +126,11 @@ export function scoreExercise(
   userAnswer: string,
   exerciseIndex: number = 0
 ): ExerciseResult & { feedback: string } {
-  const normalized = userAnswer.trim().toLowerCase();
-  const expected = exercise.answer.trim().toLowerCase();
+  const normalized = normalizeAnswer(userAnswer);
+  const expected = normalizeAnswer(exercise.answer);
 
   // Check main answer + alternatives
-  const allAccepted = [expected, ...(exercise.accept ?? []).map((a) => a.trim().toLowerCase())];
+  const allAccepted = [expected, ...(exercise.accept ?? []).map(normalizeAnswer)];
   const correct = allAccepted.includes(normalized);
 
   let feedback: string;

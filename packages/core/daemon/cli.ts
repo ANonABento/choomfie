@@ -1,10 +1,11 @@
 import { readFile, unlink } from "node:fs/promises";
-import { PID_PATH } from "./constants.ts";
+import { ANTHROPIC_FALLBACK_THRESHOLD, OLLAMA_MODEL, PID_PATH } from "./constants.ts";
 import { loadHandoffs } from "./handoffs.ts";
 import { cleanup, createInitialState, setupShutdown } from "./lifecycle.ts";
 import { log } from "./log.ts";
 import { acquirePid } from "./pid.ts";
 import { cycleSession, startSession, waitForResult } from "./runtime.ts";
+import { applyAnthropicFailure, isAnthropicError } from "./session-core.ts";
 import { DAEMON_STATE_PATH } from "./state-file.ts";
 import { getErrorMessage } from "./error.ts";
 import type { MetaState } from "./types.ts";
@@ -18,10 +19,9 @@ async function withCliSession(
 
   try {
     await startSession(state);
-    const result = await run(state);
-    const exitCode = typeof result === "number" ? result : 0;
+    const exitCode = ((await run(state)) ?? 0) as number;
     await cleanup(state);
-    process.exit(exitCode);
+    process.exit(exitCode as number);
   } catch (error: unknown) {
     log(`CLI session failed: ${getErrorMessage(error)}`);
     await cleanup(state);
@@ -199,6 +199,95 @@ export async function stopDaemon(): Promise<void> {
   }
 }
 
+/**
+ * Simulate Anthropic API failures and verify the daemon switches to Ollama.
+ * Does not require a live Claude Code session or real API credentials.
+ *
+ * Usage: bun daemon.ts --test-fallback
+ */
+export async function testFallback(): Promise<void> {
+  log("=== TEST: Anthropic → Ollama Fallback ===");
+
+  await acquirePid();
+  const state = createInitialState();
+  setupShutdown(state);
+
+  let allPassed = true;
+
+  // 1. Verify initial state
+  if (state.activeProvider !== "anthropic") {
+    log(`FAIL: Expected initial provider 'anthropic', got '${state.activeProvider}'`);
+    allPassed = false;
+  } else {
+    log("OK: Initial provider is 'anthropic'");
+  }
+
+  if (state.anthropicFailureCount !== 0) {
+    log(`FAIL: Expected initial anthropicFailureCount 0, got ${state.anthropicFailureCount}`);
+    allPassed = false;
+  } else {
+    log("OK: Initial anthropicFailureCount is 0");
+  }
+
+  // 2. Verify error classification
+  const cases: Array<[string, boolean]> = [
+    ["429 rate_limit_error: Too many requests", true],
+    ["overloaded_error: Claude is temporarily overloaded", true],
+    ["402 Payment Required: billing issue", true],
+    ["credit balance is too low", true],
+    ["authentication_error: invalid api key", true],
+    ["ECONNRESET", false],
+    ["Connection timeout after 30s", false],
+    ["spawn ENOENT", false],
+  ];
+
+  for (const [msg, expected] of cases) {
+    const result = isAnthropicError(new Error(msg));
+    const passed = result === expected;
+    log(`${passed ? "OK" : "FAIL"}: isAnthropicError("${msg.slice(0, 60)}") = ${result}`);
+    if (!passed) allPassed = false;
+  }
+
+  // 3. Simulate threshold errors and verify provider switch
+  log(`\nSimulating ${ANTHROPIC_FALLBACK_THRESHOLD} consecutive Anthropic errors...`);
+
+  const rateLimitError = new Error("429: rate_limit exceeded");
+  for (let i = 1; i <= ANTHROPIC_FALLBACK_THRESHOLD; i++) {
+    applyAnthropicFailure(state, rateLimitError);
+    log(
+      `  Error ${i}: provider=${state.activeProvider}, failureCount=${state.anthropicFailureCount}`
+    );
+  }
+
+  if (state.activeProvider !== "ollama") {
+    log(
+      `FAIL: Expected provider 'ollama' after ${ANTHROPIC_FALLBACK_THRESHOLD} errors, got '${state.activeProvider}'`
+    );
+    allPassed = false;
+  } else {
+    log(`OK: Provider switched to 'ollama' (model: ${OLLAMA_MODEL})`);
+  }
+
+  // 4. Verify count resets after switch
+  if (state.anthropicFailureCount !== 0) {
+    log(`FAIL: anthropicFailureCount should reset to 0 after switch, got ${state.anthropicFailureCount}`);
+    allPassed = false;
+  } else {
+    log("OK: anthropicFailureCount reset to 0 after switch");
+  }
+
+  // 5. Summary
+  if (allPassed) {
+    log("=== TEST PASSED: Anthropic → Ollama Fallback ===");
+    await cleanup(state);
+    process.exit(0);
+  } else {
+    log("=== TEST FAILED: Anthropic → Ollama Fallback ===");
+    await cleanup(state);
+    process.exit(1);
+  }
+}
+
 export async function showStatus(): Promise<void> {
   let daemonPid: number | null = null;
   let running = false;
@@ -245,6 +334,7 @@ export async function showStatus(): Promise<void> {
     console.error(`  Tokens: ${state.tokens?.current}/${state.tokens?.threshold}`);
     console.error(`  Cost: $${state.costUsd?.toFixed(4)}`);
     console.error(`  Cycles: ${state.totalCycles}`);
+    console.error(`  Provider: ${state.activeProvider ?? "anthropic"}`);
     console.error(`  Worker: ${state.workerHealth?.processAlive ? "alive" : "dead"}`);
     console.error(`  Updated: ${state.updatedAt}`);
   } catch {

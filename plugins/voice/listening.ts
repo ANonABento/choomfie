@@ -60,6 +60,8 @@ export function listenToUser(opts: {
   maxSegmentChunks: number;
   minOpusChunks: number;
   onInterrupt: (guildId: string) => string | null;
+  /** Called immediately when a valid utterance ends — play filler audio to mask LLM latency */
+  onSpeechEnd?: () => void;
   stt: STTProvider;
   userId: string;
 }): void {
@@ -119,9 +121,14 @@ export function listenToUser(opts: {
 
     if (segmentTranscripts.length === 0) return;
 
+    opts.onSpeechEnd?.();
+
     const pending = [...segmentTranscripts];
     segmentTranscripts.length = 0;
-    void combineAndNotify(opts.ctx, guildId, userId, pending, gv);
+    // Capture and clear interruption context before async work — must be synchronous
+    const interruptionCtx = gv.interruptionContext;
+    gv.interruptionContext = undefined;
+    void combineAndNotify(opts.ctx, guildId, userId, pending, gv, interruptionCtx);
   };
 
   opusStream.on("data", (chunk: Buffer) => {
@@ -261,6 +268,7 @@ async function combineAndNotify(
   userId: string,
   segmentPromises: Promise<string | null>[],
   gv: GuildVoice,
+  interruptionContext?: string,
 ): Promise<void> {
   try {
     const segmentCount = segmentPromises.length;
@@ -268,7 +276,7 @@ async function combineAndNotify(
     if (!combined) return;
     console.error(`Voice STT [${userId}]: ${combined}${segmentCount > 1 ? ` (${segmentCount} segments)` : ""}`);
     const channelId = gv.connection.joinConfig.channelId;
-    await sendVoiceTranscriptNotification(ctx, guildId, userId, combined, channelId);
+    await sendVoiceTranscriptNotification(ctx, guildId, userId, combined, channelId, interruptionContext);
   } catch (e) {
     console.error(`Voice STT combine error: ${e}`);
   }

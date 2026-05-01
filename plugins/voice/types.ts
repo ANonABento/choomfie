@@ -25,4 +25,6 @@ export interface GuildVoice {
   speakerPipelines: Map<string, SpeakerPipeline>;
   /** Periodic cleanup timer for idle pipelines */
   pipelineCleanupTimer: ReturnType<typeof setInterval> | null;
+  /** Set when bot is interrupted — prepended to next voice notification for context */
+  interruptionContext?: string;
 }

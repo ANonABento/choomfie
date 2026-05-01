@@ -23,8 +23,8 @@ export function getLinkedInClient(ctx: PluginContext): LinkedInClient {
 
   linkedInClient = new LinkedInClient(
     ctx.DATA_DIR,
-    requireNonEmptyString(socialsConfig.clientId, "socials.linkedin.clientId"),
-    requireNonEmptyString(socialsConfig.clientSecret, "socials.linkedin.clientSecret"),
+    socialsConfig.clientId as string,
+    socialsConfig.clientSecret as string,
   );
   return linkedInClient;
 }

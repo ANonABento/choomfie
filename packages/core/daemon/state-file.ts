@@ -20,6 +20,7 @@ export async function writeDaemonState(state: MetaState): Promise<void> {
     sessionUptimeSeconds: uptime,
     turns: { current: state.turnCount, threshold: TURN_THRESHOLD },
     tokens: { current: state.totalInputTokens, threshold: TOKEN_THRESHOLD },
+    tokenUsageToday: state.tokenUsageToday,
     costUsd: state.totalCostUsd,
     totalCycles: state.totalCycles,
     lastCycleReason: state.lastCycleReason,
@@ -28,6 +29,7 @@ export async function writeDaemonState(state: MetaState): Promise<void> {
       lastHealthyAt: state.workerHealth.lastHealthyAt || null,
       consecutiveFailures: state.workerHealth.consecutiveFailures,
     },
+    activeProvider: state.activeProvider,
     updatedAt: new Date().toISOString(),
   };
 

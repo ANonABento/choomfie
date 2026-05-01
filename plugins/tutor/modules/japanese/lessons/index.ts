@@ -7,6 +7,7 @@ import { hiraganaLessons } from "./unit-1-hiragana.ts";
 import { katakanaLessons } from "./unit-2-katakana.ts";
 import { phraseLessons } from "./unit-3-phrases.ts";
 import { grammarLessons } from "./unit-4-grammar.ts";
+import { kanjiLessons } from "./unit-5-kanji.ts";
 
 /** All Japanese lessons in order */
 export const japaneseLessons: Lesson[] = [
@@ -14,6 +15,7 @@ export const japaneseLessons: Lesson[] = [
   ...katakanaLessons,
   ...phraseLessons,
   ...grammarLessons,
+  ...kanjiLessons,
 ];
 
 /** Unit definitions for progress display */
@@ -45,5 +47,12 @@ export const japaneseUnits: Unit[] = [
     name: "Basic Grammar",
     icon: "📝",
     lessonIds: grammarLessons.map((l) => l.id),
+  },
+  {
+    index: 5,
+    id: "kanji",
+    name: "Basic Kanji",
+    icon: "字",
+    lessonIds: kanjiLessons.map((l) => l.id),
   },
 ];

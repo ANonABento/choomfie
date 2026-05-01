@@ -16,24 +16,37 @@ const LEVEL_GUIDES: Record<string, string> = {
 - Keep sentences SHORT and concrete
 - If they answer in pinyin, accept it while gently tying it back to hanzi`,
 
-  HSK1: `Student is a COMPLETE BEGINNER (HSK 1).
-- Use only basic HSK 1 vocabulary and short sentence patterns
-- Always include pinyin with tone numbers for new hanzi: 你好 (ni3 hao3)
-- Explain tones explicitly when pronunciation matters
-- Focus on: greetings, numbers, people, dates, locations, food, simple actions
-- Keep sentences SHORT and concrete
-- If they answer in pinyin, accept it while gently tying it back to hanzi`,
-
-  HSK2: `Student is ELEMENTARY (HSK 2).
+  "HSK 2": `Student is ELEMENTARY (HSK 2).
 - Use HSK 1-2 vocabulary
 - Include pinyin for new or difficult hanzi
 - Build simple connected sentences with common verbs, time words, and complements`,
 
-  HSK3: `Student is LOWER-INTERMEDIATE (HSK 3).
+  "HSK 3": `Student is LOWER-INTERMEDIATE (HSK 3).
 - Use HSK 1-3 vocabulary
 - Include pinyin only for new words
 - Encourage longer answers and simple paragraph-level explanations`,
+
+  "HSK 4": `Student is INTERMEDIATE (HSK 4).
+- Use HSK 1-4 vocabulary
+- Explain grammar with short Mandarin examples and concise English support
+- Encourage connected answers about daily life, plans, and opinions`,
+
+  "HSK 5": `Student is UPPER-INTERMEDIATE (HSK 5).
+- Use natural Mandarin with targeted English explanations for nuance
+- Practice longer reading, discussion, and register differences
+- Correct word choice, collocation, and sentence flow`,
+
+  "HSK 6": `Student is ADVANCED (HSK 6).
+- Use native-like Mandarin for most instruction
+- Focus on nuance, idioms, formal writing, and abstract discussion
+- Use English only for difficult explanations or when requested`,
 };
+
+const LEVELS = ["HSK1", "HSK2", "HSK3"] as const;
+
+function normalizeLevel(level: string): string {
+  return level.replace(/\s+/g, "").toUpperCase();
+}
 
 const TONE_QUESTIONS: QuizQuestion[] = [
   {
@@ -71,10 +84,9 @@ export const chineseModule: TutorModule = {
   displayName: "Chinese",
   description: "Mandarin Chinese learning with tones, hanzi, and HSK vocabulary",
   icon: "🇨🇳",
-  levels: ["HSK 1", "HSK 2", "HSK 3", "HSK 4", "HSK 5", "HSK 6"],
-  defaultLevel: "HSK 1",
+  levels: [...LEVELS],
+  defaultLevel: LEVELS[0],
   quizTypes: ["tones", "hanzi", "vocab"],
-
   tools: chineseTools,
 
   async lookup(query: string): Promise<DictionaryEntry[]> {
@@ -94,6 +106,7 @@ export const chineseModule: TutorModule = {
   },
 
   buildTutorPrompt(level: string, ctx?: TutorPromptContext): string {
+    const levelKey = normalizeLevel(level);
     const pinyinDirective = (() => {
       const fl = ctx?.furiganaLevel;
       if (fl === "full") return "\nPinyin: ALWAYS include pinyin with tone numbers for hanzi, e.g. 你好 (ni3 hao3).";
@@ -102,7 +115,7 @@ export const chineseModule: TutorModule = {
       return "";
     })();
 
-    return `You are a Mandarin Chinese tutor. ${LEVEL_GUIDES[level] || LEVEL_GUIDES["HSK 1"]}${pinyinDirective}
+    return `You are a Mandarin Chinese tutor. ${LEVEL_GUIDES[levelKey] || LEVEL_GUIDES.HSK1}${pinyinDirective}
 
 When the student writes in Chinese or pinyin, respond with a JSON block:
 \`\`\`json

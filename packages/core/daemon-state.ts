@@ -1,6 +1,10 @@
 import { writeFile } from "node:fs/promises";
 import type { MetaState } from "./daemon-types.ts";
 
+function todayKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export function createInitialState(
   generateSessionId: () => string,
   initialRestartBackoff: number,
@@ -11,6 +15,7 @@ export function createInitialState(
     sessionId: generateSessionId(),
     turnCount: 0,
     totalInputTokens: 0,
+    tokenUsageToday: { date: todayKey(), inputTokens: 0 },
     totalCostUsd: 0,
     sessionStartTime: 0,
     messageQueue: [],
@@ -54,6 +59,7 @@ export async function writeDaemonState(
     sessionUptimeSeconds: uptime,
     turns: { current: state.turnCount, threshold: opts.turnThreshold },
     tokens: { current: state.totalInputTokens, threshold: opts.tokenThreshold },
+    tokenUsageToday: state.tokenUsageToday,
     costUsd: state.totalCostUsd,
     totalCycles: state.totalCycles,
     lastCycleReason: state.lastCycleReason,
@@ -67,7 +73,8 @@ export async function writeDaemonState(
 
   try {
     await writeFile(`${opts.metaDir}/daemon-state.json`, JSON.stringify(data, null, 2));
-  } catch (err: any) {
-    opts.log(`Failed to write daemon state: ${err.message}`);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    opts.log(`Failed to write daemon state: ${message}`);
   }
 }

@@ -10,7 +10,12 @@
  */
 
 import { Database } from "bun:sqlite";
+import { spawnSync } from "node:child_process";
 import { normalizeTimeZone, toSQLiteDatetime } from "./time.ts";
+import {
+  isValidCustomCommandName,
+  normalizeCustomCommandName,
+} from "./custom-commands.ts";
 
 export interface CoreMemory {
   key: string;
@@ -23,6 +28,17 @@ export interface ArchivalMemory {
   content: string;
   tags: string;
   createdAt: string;
+  score?: number;
+}
+
+export interface EmbeddingProvider {
+  readonly name: string;
+  readonly model: string;
+  embed(text: string): number[] | null;
+}
+
+export interface MemoryStoreOptions {
+  embeddingProvider?: EmbeddingProvider | null;
 }
 
 export interface Reminder {
@@ -52,6 +68,15 @@ export interface Birthday {
   lastRemindedOn: string | null;
 }
 
+export interface IncomingWebhook {
+  token: string;
+  channelId: string;
+  guildId: string | null;
+  createdBy: string;
+  createdAt: string;
+  revokedAt: string | null;
+}
+
 export interface MemoryStats {
   coreCount: number;
   archivalCount: number;
@@ -72,12 +97,109 @@ interface TimestampRow {
   t: string | null;
 }
 
+interface ArchivalEmbeddingRow {
+  embedding: string;
+  dimension: number;
+}
+
+class OllamaEmbeddingProvider implements EmbeddingProvider {
+  readonly name = "ollama";
+  readonly model: string;
+  private readonly endpoint: string;
+  private available = true;
+
+  constructor() {
+    const baseUrl = process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434";
+    this.endpoint = `${baseUrl.replace(/\/$/, "")}/api/embeddings`;
+    this.model = process.env.OLLAMA_EMBEDDING_MODEL ?? "mxbai-embed-large";
+  }
+
+  embed(text: string): number[] | null {
+    if (!this.available) return null;
+
+    const result = spawnSync(
+      "curl",
+      [
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--max-time",
+        process.env.CHOOMFIE_EMBEDDING_TIMEOUT_SECONDS ?? "2",
+        this.endpoint,
+        "-H",
+        "Content-Type: application/json",
+        "-d",
+        JSON.stringify({ model: this.model, prompt: text }),
+      ],
+      {
+        encoding: "utf8",
+        maxBuffer: 1024 * 1024 * 8,
+      }
+    );
+
+    if (result.status !== 0 || !result.stdout) {
+      this.available = false;
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(result.stdout) as { embedding?: unknown };
+      if (!Array.isArray(parsed.embedding)) return null;
+      const embedding = parsed.embedding.filter((n): n is number => typeof n === "number");
+      return embedding.length > 0 ? embedding : null;
+    } catch {
+      this.available = false;
+      return null;
+    }
+  }
+}
+
+function createDefaultEmbeddingProvider(): EmbeddingProvider | null {
+  if (process.env.CHOOMFIE_EMBEDDINGS === "off") return null;
+  return new OllamaEmbeddingProvider();
+}
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  const length = Math.min(a.length, b.length);
+  if (length === 0) return 0;
+
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+
+  for (let i = 0; i < length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+
+  if (normA === 0 || normB === 0) return 0;
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+function parseEmbedding(value: string): number[] | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    const embedding = parsed.filter((n): n is number => typeof n === "number");
+    return embedding.length > 0 ? embedding : null;
+  } catch {
+    return null;
+  }
+}
+
 export class MemoryStore {
   private db: Database;
+  private embeddingProvider: EmbeddingProvider | null;
 
-  constructor(dbPath: string) {
+  constructor(dbPath: string, options: MemoryStoreOptions = {}) {
     this.db = new Database(dbPath, { create: true });
+    this.embeddingProvider =
+      "embeddingProvider" in options
+        ? options.embeddingProvider ?? null
+        : createDefaultEmbeddingProvider();
     this.db.exec("PRAGMA journal_mode = WAL");
+    this.db.exec("PRAGMA foreign_keys = ON");
     this.init();
   }
 
@@ -94,6 +216,16 @@ export class MemoryStore {
         content TEXT NOT NULL,
         tags TEXT DEFAULT '',
         created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS archival_memory_embeddings (
+        memory_id INTEGER PRIMARY KEY,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        dimension INTEGER NOT NULL,
+        embedding TEXT NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY(memory_id) REFERENCES archival_memory(id) ON DELETE CASCADE
       );
 
       CREATE TABLE IF NOT EXISTS reminders (
@@ -122,6 +254,15 @@ export class MemoryStore {
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
         last_reminded_on TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS incoming_webhooks (
+        token TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL,
+        guild_id TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        revoked_at TEXT
       );
     `);
 
@@ -190,10 +331,8 @@ export class MemoryStore {
   /** Archive oldest core memories when count exceeds MAX_CORE_MEMORIES */
   compactCoreMemory(): number {
     const count = (
-      this.db.query("SELECT COUNT(*) as n FROM core_memory").get() as {
-        n: number;
-      }
-    ).n;
+      this.db.query("SELECT COUNT(*) as count FROM core_memory").get() as CountRow
+    ).count;
 
     if (count <= MemoryStore.MAX_CORE_MEMORIES) return 0;
 
@@ -221,22 +360,117 @@ export class MemoryStore {
 
   // --- Archival memory ---
 
-  addArchival(content: string, tags: string = "") {
+  addArchival(content: string, tags: string = ""): number {
     this.db
       .query("INSERT INTO archival_memory (content, tags) VALUES (?, ?)")
       .run(content, tags);
+    const id = (
+      this.db.query("SELECT last_insert_rowid() as id").get() as InsertIdRow
+    ).id;
+    this.cacheArchivalEmbedding(id, content);
+    return id;
+  }
+
+  deleteArchival(id: number): boolean {
+    const result = this.db
+      .query("DELETE FROM archival_memory WHERE id = ?")
+      .run(id);
+    return result.changes > 0;
   }
 
   searchArchival(query: string, limit: number = 10): ArchivalMemory[] {
+    const semanticResults = this.searchArchivalByEmbedding(query, limit);
+    if (semanticResults) return semanticResults;
+
+    return this.searchArchivalByString(query, limit);
+  }
+
+  private searchArchivalByString(query: string, limit: number): ArchivalMemory[] {
     return this.db
       .query(
         `SELECT id, content, tags, created_at as createdAt
          FROM archival_memory
-         WHERE content LIKE ?
+         WHERE content LIKE ? OR tags LIKE ?
          ORDER BY created_at DESC
          LIMIT ?`
       )
-      .all(`%${query}%`, limit) as ArchivalMemory[];
+      .all(`%${query}%`, `%${query}%`, limit) as ArchivalMemory[];
+  }
+
+  private searchArchivalByEmbedding(query: string, limit: number): ArchivalMemory[] | null {
+    const provider = this.embeddingProvider;
+    if (!provider) return null;
+
+    const queryEmbedding = provider.embed(query);
+    if (!queryEmbedding) return null;
+
+    const memories = this.db
+      .query(
+        `SELECT id, content, tags, created_at as createdAt
+         FROM archival_memory
+         ORDER BY created_at DESC`
+      )
+      .all() as ArchivalMemory[];
+
+    const scored: ArchivalMemory[] = [];
+    for (const memory of memories) {
+      const embedding = this.getOrCreateArchivalEmbedding(memory.id, memory.content);
+      if (!embedding) continue;
+      scored.push({
+        ...memory,
+        score: cosineSimilarity(queryEmbedding, embedding),
+      });
+    }
+
+    if (scored.length === 0) return null;
+
+    return scored
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit);
+  }
+
+  private getOrCreateArchivalEmbedding(id: number, content: string): number[] | null {
+    const provider = this.embeddingProvider;
+    if (!provider) return null;
+
+    const cached = this.db
+      .query(
+        `SELECT embedding, dimension
+         FROM archival_memory_embeddings
+         WHERE memory_id = ? AND provider = ? AND model = ?`
+      )
+      .get(id, provider.name, provider.model) as ArchivalEmbeddingRow | null;
+
+    if (cached) {
+      const embedding = parseEmbedding(cached.embedding);
+      if (embedding && embedding.length === cached.dimension) return embedding;
+    }
+
+    return this.cacheArchivalEmbedding(id, content);
+  }
+
+  private cacheArchivalEmbedding(id: number, content: string): number[] | null {
+    const provider = this.embeddingProvider;
+    if (!provider) return null;
+
+    const embedding = provider.embed(content);
+    if (!embedding) return null;
+
+    this.db
+      .query(
+        `INSERT INTO archival_memory_embeddings
+           (memory_id, provider, model, dimension, embedding, updated_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'))
+         ON CONFLICT(memory_id) DO UPDATE SET
+           provider = excluded.provider,
+           model = excluded.model,
+           dimension = excluded.dimension,
+           embedding = excluded.embedding,
+           updated_at = datetime('now')`
+      )
+      .run(id, provider.name, provider.model, embedding.length, JSON.stringify(embedding));
+
+    return embedding;
   }
 
   // --- Reminders ---
@@ -490,6 +724,52 @@ export class MemoryStore {
       .run(reminderDate, id);
   }
 
+  // --- Incoming webhooks ---
+
+  private static readonly WEBHOOK_COLS = `token, channel_id as channelId, guild_id as guildId,
+    created_by as createdBy, created_at as createdAt, revoked_at as revokedAt`;
+
+  addIncomingWebhook(token: string, channelId: string, createdBy: string, guildId?: string | null) {
+    this.db
+      .query(
+        "INSERT INTO incoming_webhooks (token, channel_id, guild_id, created_by) VALUES (?, ?, ?, ?)"
+      )
+      .run(token, channelId, guildId ?? null, createdBy);
+  }
+
+  getIncomingWebhook(token: string): IncomingWebhook | null {
+    return (
+      this.db
+        .query(
+          `SELECT ${MemoryStore.WEBHOOK_COLS}
+           FROM incoming_webhooks
+           WHERE token = ? AND revoked_at IS NULL`
+        )
+        .get(token) as IncomingWebhook | null
+    );
+  }
+
+  listIncomingWebhooks(includeRevoked = false): IncomingWebhook[] {
+    const where = includeRevoked ? "" : "WHERE revoked_at IS NULL";
+    return this.db
+      .query(
+        `SELECT ${MemoryStore.WEBHOOK_COLS}
+         FROM incoming_webhooks
+         ${where}
+         ORDER BY created_at DESC`
+      )
+      .all() as IncomingWebhook[];
+  }
+
+  revokeIncomingWebhook(token: string): boolean {
+    const result = this.db
+      .query(
+        "UPDATE incoming_webhooks SET revoked_at = datetime('now') WHERE token = ? AND revoked_at IS NULL"
+      )
+      .run(token);
+    return result.changes > 0;
+  }
+
   // --- Stats ---
 
   getStats(): MemoryStats {
@@ -536,7 +816,7 @@ export class MemoryStore {
     return `## Current Memories\n${lines.join("\n")}`;
   }
 
-  close() {
+  close(): void {
     // Checkpoint WAL before closing — ensures all writes are flushed to the main DB file
     // and prevents WAL contention when a new worker opens the same database on restart
     try {

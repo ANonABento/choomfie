@@ -6,6 +6,10 @@ import { generateSessionId } from "./session-core.ts";
 import { DAEMON_STATE_PATH } from "./state-file.ts";
 import type { MetaState } from "./types.ts";
 
+function todayKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export function createInitialState(): MetaState {
   return {
     state: "STARTING",
@@ -13,6 +17,7 @@ export function createInitialState(): MetaState {
     sessionId: generateSessionId(),
     turnCount: 0,
     totalInputTokens: 0,
+    tokenUsageToday: { date: todayKey(), inputTokens: 0 },
     totalCostUsd: 0,
     sessionStartTime: 0,
     messageQueue: [],
@@ -31,6 +36,8 @@ export function createInitialState(): MetaState {
     workerHealthTimer: null,
     totalCycles: 0,
     lastCycleReason: null,
+    activeProvider: "anthropic",
+    anthropicFailureCount: 0,
   };
 }
 

@@ -7,6 +7,8 @@ import { lookupJisho } from "./dictionary.ts";
 import { initFurigana } from "./furigana.ts";
 import { japaneseTools } from "./tools.ts";
 import { pick, pickN, shuffle } from "../../core/random.ts";
+import { BASIC_N5_KANJI } from "./kanji.ts";
+import { n5Vocab } from "./vocab.ts";
 
 const HIRAGANA = [
   ["あ", "a"], ["い", "i"], ["う", "u"], ["え", "e"], ["お", "o"],
@@ -32,29 +34,6 @@ const KATAKANA = [
   ["ヤ", "ya"], ["ユ", "yu"], ["ヨ", "yo"],
   ["ラ", "ra"], ["リ", "ri"], ["ル", "ru"], ["レ", "re"], ["ロ", "ro"],
   ["ワ", "wa"], ["ヲ", "wo"], ["ン", "n"],
-];
-
-const N5_VOCAB = [
-  ["食べる", "たべる", "to eat"],
-  ["飲む", "のむ", "to drink"],
-  ["行く", "いく", "to go"],
-  ["来る", "くる", "to come"],
-  ["見る", "みる", "to see/watch"],
-  ["聞く", "きく", "to hear/ask"],
-  ["話す", "はなす", "to speak"],
-  ["読む", "よむ", "to read"],
-  ["書く", "かく", "to write"],
-  ["買う", "かう", "to buy"],
-  ["大きい", "おおきい", "big"],
-  ["小さい", "ちいさい", "small"],
-  ["新しい", "あたらしい", "new"],
-  ["古い", "ふるい", "old"],
-  ["高い", "たかい", "expensive/tall"],
-  ["安い", "やすい", "cheap"],
-  ["学校", "がっこう", "school"],
-  ["先生", "せんせい", "teacher"],
-  ["学生", "がくせい", "student"],
-  ["友達", "ともだち", "friend"],
 ];
 
 const LEVEL_GUIDES: Record<string, string> = {
@@ -136,7 +115,7 @@ export const japaneseModule: TutorModule = {
   icon: "🇯🇵",
   levels: ["N5", "N4", "N3", "N2", "N1"],
   defaultLevel: "N5",
-  quizTypes: ["reading", "vocab", "grammar"],
+  quizTypes: ["reading", "vocab", "grammar", "kanji"],
 
   tools: japaneseTools,
 
@@ -194,18 +173,34 @@ Always be encouraging and patient. Language learning is hard!`;
     }
 
     if (type === "vocab") {
-      const correct = pick(N5_VOCAB);
+      const correct = pick(n5Vocab);
       const wrongOptions = pickN(
-        N5_VOCAB.filter((v) => v[2] !== correct[2]),
+        n5Vocab.filter((item) => item.back !== correct.back),
         3
       );
-      const options = shuffle([correct[2], ...wrongOptions.map((w) => w[2])]);
+      const options = shuffle([correct.back, ...wrongOptions.map((item) => item.back)]);
 
       return {
-        question: `What does **${correct[0]}** (${correct[1]}) mean?`,
+        question: `What does **${correct.front}** (${correct.reading}) mean?`,
         options,
-        correctIndex: options.indexOf(correct[2]),
-        explanation: `${correct[0]} (${correct[1]}) means "${correct[2]}"`,
+        correctIndex: options.indexOf(correct.back),
+        explanation: `${correct.front} (${correct.reading}) means "${correct.back}"`,
+      };
+    }
+
+    if (type === "kanji") {
+      const correct = pick(BASIC_N5_KANJI);
+      const wrongOptions = pickN(
+        BASIC_N5_KANJI.filter((item) => item.meaning !== correct.meaning),
+        3
+      );
+      const options = shuffle([correct.meaning, ...wrongOptions.map((item) => item.meaning)]);
+
+      return {
+        question: `What does **${correct.character}** mean?`,
+        options,
+        correctIndex: options.indexOf(correct.meaning),
+        explanation: `${correct.character} means "${correct.meaning}" and has ${correct.strokes} strokes.`,
       };
     }
 

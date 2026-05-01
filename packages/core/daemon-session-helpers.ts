@@ -1,11 +1,16 @@
 import type {
   SDKAssistantMessage,
+  SDKCompactBoundaryMessage,
   SDKMessage,
   SDKResultMessage,
   SDKResultSuccess,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { MetaState } from "./daemon-types.ts";
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export function createMessageGenerator(): {
   generator: AsyncGenerator<SDKUserMessage>;
@@ -69,6 +74,15 @@ export function buildSystemPromptAppend(handoffSummary?: string): string {
   return parts.join("");
 }
 
+function addInputTokens(state: MetaState, inputTokens: number): void {
+  const today = new Date().toISOString().slice(0, 10);
+  if (state.tokenUsageToday.date !== today) {
+    state.tokenUsageToday = { date: today, inputTokens: 0 };
+  }
+
+  state.tokenUsageToday.inputTokens += inputTokens;
+}
+
 function extractAssistantText(msg: SDKAssistantMessage): string | null {
   const content = msg.message?.content;
   if (!Array.isArray(content)) return null;
@@ -80,6 +94,12 @@ function extractAssistantText(msg: SDKAssistantMessage): string | null {
     }
   }
   return texts.length > 0 ? texts.join("\n") : null;
+}
+
+function isCompactBoundaryMessage(
+  message: SDKMessage
+): message is SDKCompactBoundaryMessage {
+  return message.type === "system" && message.subtype === "compact_boundary";
 }
 
 export function handleSessionMessage(
@@ -100,7 +120,9 @@ export function handleSessionMessage(
 
         const usage = successResult.usage;
         if (usage) {
-          state.totalInputTokens += usage.input_tokens ?? 0;
+          const inputTokens = usage.input_tokens ?? 0;
+          state.totalInputTokens += inputTokens;
+          addInputTokens(state, inputTokens);
         }
 
         opts.log(
@@ -131,7 +153,7 @@ export function handleSessionMessage(
     }
 
     case "system": {
-      if ((message as any).subtype === "compact_boundary") {
+      if (isCompactBoundaryMessage(message)) {
         opts.log("Context compaction occurred");
       }
       break;
@@ -199,8 +221,8 @@ export async function captureHandoffSummary(
       opts.log(`Using lastAssistantText as summary (${state.lastAssistantText.length} chars)`);
       return state.lastAssistantText;
     }
-  } catch (err: any) {
-    opts.log(`Handoff summary capture failed: ${err.message || err}`);
+  } catch (error: unknown) {
+    opts.log(`Handoff summary capture failed: ${getErrorMessage(error)}`);
     if (state.lastAssistantText) {
       opts.log("Falling back to last assistant text for summary");
       return state.lastAssistantText;

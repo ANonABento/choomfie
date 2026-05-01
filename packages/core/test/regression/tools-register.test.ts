@@ -3,24 +3,24 @@
  * Checks tool count + names for each plugin.
  */
 import { test, expect, describe } from "bun:test";
-import type { Plugin } from "@choomfie/shared";
+import type { ToolDef } from "@choomfie/shared";
 
-function toolNames(plugin: Plugin): string[] {
-  return (plugin.tools ?? []).map((tool) => tool.definition.name);
+function toolNames(tools: ToolDef[] = []): string[] {
+  return tools.map((tool) => tool.definition.name);
 }
 
 describe("plugin tool registration", () => {
   test("voice plugin exports 3 tools", async () => {
     const mod = await import("@choomfie/voice");
-    const plugin = mod.default as Plugin;
-    const names = toolNames(plugin);
+    const plugin = mod.default;
+    const names = toolNames(plugin.tools);
     expect(names).toEqual(["join_voice", "leave_voice", "speak"]);
   });
 
   test("browser plugin exports 7 tools", async () => {
     const mod = await import("@choomfie/browser");
-    const plugin = mod.default as Plugin;
-    const names = toolNames(plugin);
+    const plugin = mod.default;
+    const names = toolNames(plugin.tools);
     expect(names).toEqual([
       "browse",
       "browser_click",
@@ -34,13 +34,17 @@ describe("plugin tool registration", () => {
 
   test("tutor plugin exports 16 tools", async () => {
     const mod = await import("@choomfie/tutor");
-    const plugin = mod.default as Plugin;
-    const names = toolNames(plugin);
+    const plugin = mod.default;
+    const names = toolNames(plugin.tools);
     expect(names).toContain("tutor_prompt");
     expect(names).toContain("quiz");
     expect(names).toContain("dictionary_lookup");
     expect(names).toContain("set_level");
     expect(names).toContain("convert_kana");
+    expect(names).toContain("kanji_stroke_info");
+    expect(names).toContain("convert_pinyin");
+    expect(names).toContain("stroke_info");
+    expect(names).toContain("convert_hanzi");
     expect(names).toContain("list_modules");
     expect(names).toContain("switch_module");
     expect(names).toContain("srs_review");
@@ -59,8 +63,8 @@ describe("plugin tool registration", () => {
 
   test("socials plugin exports 33 tools", async () => {
     const mod = await import("@choomfie/socials");
-    const plugin = mod.default as Plugin;
-    const names = toolNames(plugin);
+    const plugin = mod.default;
+    const names = toolNames(plugin.tools);
     expect(names).toContain("youtube_search");
     expect(names).toContain("youtube_info");
     expect(names).toContain("youtube_transcript");

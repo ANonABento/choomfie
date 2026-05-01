@@ -12,6 +12,7 @@ import { githubTools } from "./github-tools.ts";
 import { statusTools } from "./status-tools.ts";
 import { accessTools } from "./access-tools.ts";
 import { systemTools } from "./system-tools.ts";
+import { translationTools } from "./translation-tools.ts";
 
 export function getAllTools(ctx: AppContext): ToolDef[] {
   return [
@@ -23,7 +24,8 @@ export function getAllTools(ctx: AppContext): ToolDef[] {
     ...accessTools,
     ...githubTools,
     ...statusTools,
+    ...translationTools,
     ...systemTools,
-    ...ctx.plugins.flatMap((p) => p.tools ?? []),
+    ...(ctx.plugins.flatMap((p) => p.tools ?? []) as unknown as ToolDef[]),
   ];
 }

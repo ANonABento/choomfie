@@ -8,6 +8,7 @@ import { getSRS } from "../core/srs-instance.ts";
 import { getActiveModule } from "../core/session.ts";
 import { getLessonDB } from "../core/lesson-db-instance.ts";
 import { updateFromSrsReview } from "../core/learner-profile.ts";
+import { n5Vocab } from "../modules/japanese/vocab.ts";
 
 const DEFAULT_DECK = "jlpt-n5";
 
@@ -41,17 +42,7 @@ export const srsTools: ToolDef[] = [
 
       // Auto-import N5 deck for Japanese users
       if (!srs.hasDeck(userId, deck) && deck === DEFAULT_DECK) {
-        try {
-          const vocabData = await import(
-            "../modules/japanese/data/n5-vocab.json"
-          );
-          const cards = Array.isArray(vocabData.default)
-            ? vocabData.default
-            : vocabData;
-          srs.importDeck(userId, DEFAULT_DECK, cards);
-        } catch (e: unknown) {
-          return err(`Failed to import N5 deck: ${errorMessage(e)}`);
-        }
+        srs.importDeck(userId, DEFAULT_DECK, n5Vocab);
       }
 
       const due = srs.getDueCards(userId, deck, (args.limit as number) || 5);

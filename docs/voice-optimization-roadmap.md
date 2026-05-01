@@ -2,7 +2,41 @@
 
 Comprehensive plan to reduce Choomfie's voice round-trip latency from ~5-8s to ~1.5-2.5s perceived.
 
-## Current Architecture
+## Implementation Status
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase 1 | Streaming TTS (sentence chunking + one-ahead pipelining) | ✅ Implemented |
+| Phase 2 | Silero VAD + adaptive endpointing | ✅ Implemented |
+| Phase 3 | Interruption handling + barge-in detection | ✅ Implemented |
+| Phase 4 | Filler audio (persona-aware, pre-synthesized) | ✅ Implemented |
+| Phase 5 | Streaming STT | Planned |
+| Phase 6 | Multi-speaker architecture (per-speaker VAD pipelines) | ✅ Implemented |
+| Phase 7 | Prompt optimization for voice | ✅ Implemented |
+
+**Key files:**
+- `plugins/voice/vad.ts` — SileroVAD (ONNX) + SpeechDetector (adaptive endpointing)
+- `plugins/voice/sentence-splitter.ts` — `splitSentences()` for TTS chunking
+- `plugins/voice/playback.ts` — `speakText()` with one-ahead synthesis pipelining
+- `plugins/voice/fillers.ts` — Persona-aware filler phrase sets
+- `plugins/voice/listening.ts` — Multi-speaker pipelines, barge-in detection, VAD loop
+- `plugins/voice/manager.ts` — Orchestration: filler cache, interrupt(), generation IDs
+- `plugins/voice/providers/kokoro/tts.ts` — Persistent KokoroSession subprocess
+
+## Updated Architecture
+
+```
+User speaks → Discord Opus → EndBehaviorType.Manual
+  → per-speaker SileroVAD (adaptive endpointing, 400-1200ms)
+  → speech_end → play filler immediately (Phase 4)
+  → parallel STT segments → combine → MCP notification (source=voice)
+  → Claude LLM → speak tool → sentence splitter
+  → pipelined kokoro TTS (one-ahead synthesis) → AudioPlayer → Discord
+```
+
+Barge-in: user speaking ≥300ms while bot plays → `interrupt()` → generation ID invalidates queued speak() calls.
+
+## Original Architecture
 
 ```
 User speaks → Discord Opus → opusToPcm() → ffmpeg resample → whisper-cpp STT → MCP notification

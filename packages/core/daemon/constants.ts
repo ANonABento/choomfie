@@ -12,6 +12,11 @@ export const WORKER_HEALTH_INTERVAL = 30_000;
 export const WORKER_MAX_CONSECUTIVE_FAILURES = 3;
 export const MAX_ERROR_RETRIES = 10;
 
+export const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1";
+export const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3.1:8b";
+/** Number of consecutive Anthropic errors before switching to the Ollama fallback. */
+export const ANTHROPIC_FALLBACK_THRESHOLD = 3;
+
 export const DATA_DIR =
   process.env.CLAUDE_PLUGIN_DATA ||
   `${process.env.HOME}/.claude/plugins/data/choomfie-inline`;

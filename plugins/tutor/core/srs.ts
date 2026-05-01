@@ -28,6 +28,14 @@ export interface ReviewResult {
   interval: number; // days
 }
 
+export interface SRSDeck {
+  name: string;
+  total: number;
+  due: number;
+  learned: number;
+  createdAt: string;
+}
+
 interface SRSCardDBRow {
   id: number;
   user_id: string;
@@ -50,6 +58,14 @@ interface DueCountDBRow {
   count: number;
 }
 
+interface SRSDeckDBRow {
+  name: string;
+  created_at: string;
+  total: number;
+  due: number;
+  learned: number;
+}
+
 export class SRSManager {
   private db: Database;
   private fsrs: FSRS;
@@ -65,6 +81,13 @@ export class SRSManager {
 
   private init() {
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS srs_decks (
+        user_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (user_id, name)
+      );
+
       CREATE TABLE IF NOT EXISTS srs_cards (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,
@@ -83,6 +106,62 @@ export class SRSManager {
       CREATE INDEX IF NOT EXISTS idx_srs_next_review
         ON srs_cards(user_id, next_review);
     `);
+
+    this.db.exec(`
+      INSERT OR IGNORE INTO srs_decks (user_id, name)
+      SELECT DISTINCT user_id, deck FROM srs_cards;
+    `);
+  }
+
+  createDeck(userId: string, deck: string): boolean {
+    const result = this.db
+      .query("INSERT OR IGNORE INTO srs_decks (user_id, name) VALUES (?, ?)")
+      .run(userId, deck);
+    return result.changes > 0;
+  }
+
+  deleteDeck(userId: string, deck: string): { existed: boolean; deletedCards: number } {
+    const existed = this.hasDeck(userId, deck);
+    if (!existed) return { existed: false, deletedCards: 0 };
+
+    const tx = this.db.transaction(() => {
+      const cards = this.db
+        .query("DELETE FROM srs_cards WHERE user_id = ? AND deck = ?")
+        .run(userId, deck);
+      this.db
+        .query("DELETE FROM srs_decks WHERE user_id = ? AND name = ?")
+        .run(userId, deck);
+      return Number(cards.changes);
+    });
+
+    return { existed: true, deletedCards: tx() };
+  }
+
+  listDecks(userId: string): SRSDeck[] {
+    const now = nowUTC();
+    const rows = this.db
+      .query(
+        `SELECT
+           d.name,
+           d.created_at,
+           COUNT(c.id) as total,
+           SUM(CASE WHEN c.next_review <= ? THEN 1 ELSE 0 END) as due,
+           SUM(CASE WHEN c.card_state IS NOT NULL AND c.card_state != ? THEN 1 ELSE 0 END) as learned
+         FROM srs_decks d
+         LEFT JOIN srs_cards c ON c.user_id = d.user_id AND c.deck = d.name
+         WHERE d.user_id = ?
+         GROUP BY d.name, d.created_at
+         ORDER BY d.name ASC`
+      )
+      .all(now, this.emptyCardState, userId) as SRSDeckDBRow[];
+
+    return rows.map((row) => ({
+      name: row.name,
+      total: Number(row.total ?? 0),
+      due: Number(row.due ?? 0),
+      learned: Number(row.learned ?? 0),
+      createdAt: row.created_at,
+    }));
   }
 
   addCard(
@@ -93,6 +172,7 @@ export class SRSManager {
     deck: string = "default",
     tags: string = ""
   ): number {
+    this.createDeck(userId, deck);
     const result = this.db
       .query(
         `INSERT INTO srs_cards (user_id, front, back, reading, deck, tags, card_state)
@@ -114,6 +194,7 @@ export class SRSManager {
 
     let count = 0;
     const tx = this.db.transaction(() => {
+      this.createDeck(userId, deck);
       for (const card of cards) {
         stmt.run(
           userId,
@@ -235,7 +316,7 @@ export class SRSManager {
     const count = (
       this.db
         .query(
-          "SELECT COUNT(*) as c FROM srs_cards WHERE user_id = ? AND deck = ?"
+          `SELECT COUNT(*) as c FROM srs_decks WHERE user_id = ? AND name = ?`
         )
         .get(userId, deck) as CountDBRow
     ).c;

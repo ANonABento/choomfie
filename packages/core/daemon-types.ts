@@ -21,12 +21,18 @@ export type WorkerHealthStatus = {
   consecutiveFailures: number;
 };
 
+export type TokenUsageToday = {
+  date: string;
+  inputTokens: number;
+};
+
 export type MetaState = {
   state: SessionState;
   session: Query | null;
   sessionId: string;
   turnCount: number;
   totalInputTokens: number;
+  tokenUsageToday: TokenUsageToday;
   totalCostUsd: number;
   sessionStartTime: number;
   messageQueue: SDKUserMessage[];

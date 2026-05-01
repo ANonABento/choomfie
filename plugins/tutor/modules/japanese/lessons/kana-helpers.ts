@@ -99,16 +99,9 @@ export function chartReview(knownChars: [string, string][]): Exercise {
     distractors: distractorPool,
     chart: {
       grid,
+      blanks: [{ row: blankRow, col: blankCol, answer: blankChar, reading: blankReading }],
       rowLabels,
       colLabels,
-      blanks: [
-        {
-          row: blankRow,
-          col: blankCol,
-          answer: blankChar,
-          reading: blankReading,
-        },
-      ],
     },
   };
 }

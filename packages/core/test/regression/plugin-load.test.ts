@@ -3,7 +3,7 @@
  */
 import { test, expect, describe } from "bun:test";
 
-const PLUGIN_NAMES = ["voice", "browser", "tutor", "socials"];
+const PLUGIN_NAMES = ["voice", "browser", "tutor", "socials", "rss"];
 
 describe("plugin interface", () => {
   for (const name of PLUGIN_NAMES) {

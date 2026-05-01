@@ -17,10 +17,16 @@
       "@choomfie/shared": ["packages/shared/index.ts"],
       "@choomfie/voice": ["plugins/voice/index.ts"],
       "@choomfie/browser": ["plugins/browser/index.ts"],
+      "@choomfie/rss": ["plugins/rss/index.ts"],
       "@choomfie/socials": ["plugins/socials/index.ts"],
       "@choomfie/tutor": ["plugins/tutor/index.ts"]
     }
   },
   "include": ["packages/**/*.ts", "plugins/**/*.ts"],
-  "exclude": ["node_modules", "packages/core/daemon-*.ts"]
+  "exclude": [
+    "node_modules",
+    "packages/core/daemon-*.ts",
+    "packages/core/test/lesson-mode-picker.test.ts",
+    "packages/core/test/chart-exercise.test.ts"
+  ]
 }

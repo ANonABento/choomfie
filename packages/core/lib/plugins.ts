@@ -3,7 +3,6 @@
  */
 
 import type { Plugin } from "./types.ts";
-import type { ConfigManager } from "./config.ts";
 
 /** Explicit mapping of plugin names to workspace packages. */
 const PLUGIN_PACKAGES: Record<string, string> = {
@@ -11,7 +10,12 @@ const PLUGIN_PACKAGES: Record<string, string> = {
   browser: "@choomfie/browser",
   tutor: "@choomfie/tutor",
   socials: "@choomfie/socials",
+  rss: "@choomfie/rss",
 };
+
+export interface PluginConfigSource {
+  getEnabledPlugins(): string[];
+}
 
 /** Return names of all available plugins. */
 export function discoverPlugins(_projectRoot?: string): string[] {
@@ -19,7 +23,7 @@ export function discoverPlugins(_projectRoot?: string): string[] {
 }
 
 export async function loadPlugins(
-  config: ConfigManager,
+  config: PluginConfigSource,
   _projectRoot?: string
 ): Promise<Plugin[]> {
   const enabled = config.getEnabledPlugins();
