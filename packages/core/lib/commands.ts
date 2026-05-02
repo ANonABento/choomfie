@@ -14,6 +14,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  type GuildTextBasedChannel,
 } from "discord.js";
 import { VERSION } from "./version.ts";
 import { registerCommand, registerButtonHandler } from "./interactions.ts";
@@ -27,6 +28,70 @@ import {
   buildPersonaModal,
   buildMemoryModal,
 } from "./handlers/modals.ts";
+
+type ServerStatsChannel = Pick<
+  GuildTextBasedChannel,
+  "id" | "name" | "messages"
+>;
+type ServerStatsChannelStat = { id: string; name: string; count: number };
+
+const SERVERSTATS_TOP_CHANNEL_LIMIT = 5;
+const MISSING_ACCESS_ERROR_CODE = 50001;
+const MISSING_PERMISSIONS_ERROR_CODE = 50013;
+
+function isSkippableChannelFetchError(error: unknown): boolean {
+  if (error && typeof error === "object" && "code" in error) {
+    const code = (error as { code?: number }).code;
+    return (
+      code === MISSING_ACCESS_ERROR_CODE ||
+      code === MISSING_PERMISSIONS_ERROR_CODE
+    );
+  }
+  return false;
+}
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unexpected error";
+}
+
+function startOfCurrentDay(): Date {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  return now;
+}
+
+async function countMessagesToday(
+  channel: ServerStatsChannel,
+  since: Date
+): Promise<number> {
+  let count = 0;
+  let before: string | undefined;
+
+  while (true) {
+    const batch = await channel.messages.fetch({
+      limit: 100,
+      ...(before ? { before } : {}),
+    });
+    if (batch.size === 0) break;
+
+    for (const message of batch.values()) {
+      if (message.createdAt < since) {
+        return count;
+      }
+      count += 1;
+    }
+
+    const oldest = batch.last();
+    if (!oldest || batch.size < 100 || oldest.createdAt < since) break;
+    before = oldest.id;
+  }
+
+  return count;
+}
+
+function formatTopChannel({ id, name, count }: ServerStatsChannelStat): string {
+  return `#${name} <#${id}> — ${count} messages`;
+}
 
 // --- Command definitions ---
 
@@ -238,6 +303,7 @@ registerCommand("help", {
           value: [
             "`/github <check>` — PRs, issues, notifications",
             "`/status` — bot status and stats",
+            "`/serverstats` — server stats (members, channels, messages, top channels)",
           ].join("\n"),
           inline: false,
         },
@@ -251,6 +317,99 @@ registerCommand("help", {
       .setFooter({ text: "@ me in a server or DM me directly" });
 
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+  },
+});
+
+// /serverstats — show live guild statistics
+registerCommand("serverstats", {
+  data: new SlashCommandBuilder()
+    .setName("serverstats")
+    .setDescription("Show guild statistics and today's activity")
+    .setDMPermission(false)
+    .toJSON(),
+  handler: async (interaction) => {
+    if (!interaction.guild) {
+      await interaction.reply({
+        content: "Server stats can only be used in a guild.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    const since = startOfCurrentDay();
+
+    try {
+      const sourceGuild = interaction.guild;
+      const guild = await interaction.client.guilds.fetch({
+        guild: sourceGuild.id,
+        withCounts: true,
+        force: true,
+      });
+      const channels = await sourceGuild.channels.fetch();
+      const channelCount = channels.size;
+      const memberCount = guild.approximateMemberCount ?? guild.memberCount;
+      const onlineCount = guild.approximatePresenceCount ?? 0;
+
+      const channelStats: ServerStatsChannelStat[] = [];
+      let messagesToday = 0;
+
+      for (const channel of channels.values()) {
+        if (!channel?.isTextBased()) continue;
+
+        let count = 0;
+        try {
+          count = await countMessagesToday(channel, since);
+        } catch (error) {
+          if (isSkippableChannelFetchError(error)) {
+            continue;
+          }
+          throw error;
+        }
+        if (count > 0) {
+          channelStats.push({
+            id: channel.id,
+            name: channel.name ?? "unknown",
+            count,
+          });
+        }
+        messagesToday += count;
+      }
+
+      channelStats.sort((a, b) => b.count - a.count);
+      const topChannels = channelStats
+        .slice(0, SERVERSTATS_TOP_CHANNEL_LIMIT)
+        .map(formatTopChannel);
+
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle(`Server Stats — ${guild.name}`)
+        .addFields(
+          {
+            name: "Current Stats",
+            value: [
+              `**Members:** ${memberCount.toLocaleString("en-US")}`,
+              `**Online:** ${onlineCount.toLocaleString("en-US")}`,
+              `**Channels:** ${channelCount.toLocaleString("en-US")}`,
+              `**Messages today:** ${messagesToday.toLocaleString("en-US")}`,
+            ].join("\n"),
+          },
+          {
+            name: `Top ${SERVERSTATS_TOP_CHANNEL_LIMIT} Active Channels`,
+            value: topChannels.length
+              ? topChannels.join("\n")
+              : "No messages were sent today.",
+          }
+        )
+        .setFooter({ text: `Today since ${since.toISOString()}` });
+
+      await interaction.editReply({ embeds: [embed] });
+    } catch (error: unknown) {
+      await interaction.editReply({
+        content: `Failed to fetch server stats: ${formatErrorMessage(error)}`,
+      });
+    }
   },
 });
 
@@ -290,8 +449,10 @@ registerCommand("github", {
     try {
       const output = await runGh(ghArgs);
       await interaction.editReply({ content: `\`\`\`\n${output.slice(0, 1900)}\n\`\`\`` });
-    } catch (e: any) {
-      await interaction.editReply({ content: `GitHub CLI error: ${e.message}` });
+    } catch (error: unknown) {
+      await interaction.editReply({
+        content: `GitHub CLI error: ${formatErrorMessage(error)}`,
+      });
     }
   },
 });
@@ -551,9 +712,12 @@ registerCommand("voice", {
     let reports;
     try {
       reports = await detectAllProviders();
-    } catch (e: any) {
+    } catch (error: unknown) {
       await interaction.editReply({
-        content: `Provider detection failed: ${e.message}. Check that ffmpeg and python3 are installed.`,
+        content: [
+          `Provider detection failed: ${formatErrorMessage(error)}.`,
+          "Check that ffmpeg and python3 are installed.",
+        ].join(" "),
       });
       return;
     }
