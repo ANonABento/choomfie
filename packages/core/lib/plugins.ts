@@ -8,6 +8,7 @@ import type { Plugin } from "./types.ts";
 const PLUGIN_PACKAGES: Record<string, string> = {
   voice: "@choomfie/voice",
   browser: "@choomfie/browser",
+  "reaction-roles": "@choomfie/reaction-roles",
   tutor: "@choomfie/tutor",
   socials: "@choomfie/socials",
   rss: "@choomfie/rss",

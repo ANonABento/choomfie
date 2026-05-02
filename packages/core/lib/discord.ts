@@ -56,6 +56,8 @@ export function createDiscordClient(ctx: AppContext): Client {
     partials: [
       Partials.Channel, // Required for DM support
       Partials.Message,
+      Partials.Reaction,
+      Partials.User,
     ],
   });
 

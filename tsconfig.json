@@ -18,6 +18,7 @@
       "@choomfie/voice": ["plugins/voice/index.ts"],
       "@choomfie/browser": ["plugins/browser/index.ts"],
       "@choomfie/rss": ["plugins/rss/index.ts"],
+      "@choomfie/reaction-roles": ["plugins/reaction-roles/index.ts"],
       "@choomfie/socials": ["plugins/socials/index.ts"],
       "@choomfie/tutor": ["plugins/tutor/index.ts"]
     }
