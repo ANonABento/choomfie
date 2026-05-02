@@ -26,10 +26,8 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.87",
-    "@choomfie/automod": "workspace:*",
     "@choomfie/browser": "workspace:*",
     "@choomfie/core": "workspace:*",
-    "@choomfie/reaction-roles": "workspace:*",
     "@choomfie/shared": "workspace:*",
     "@choomfie/socials": "workspace:*",
     "@choomfie/tutor": "workspace:*",

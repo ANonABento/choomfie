@@ -13,7 +13,6 @@ import { REST, Routes } from "discord.js";
 import { getCommandDefs } from "../lib/interactions.ts";
 import { deployGuildCommands } from "../lib/command-deploy.ts";
 import { readFile } from "node:fs/promises";
-import "@choomfie/reaction-roles";
 import "@choomfie/tutor";
 
 const DATA_DIR =

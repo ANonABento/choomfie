@@ -9,7 +9,6 @@ import { personaTools } from "./persona-tools.ts";
 import { reminderTools } from "./reminder-tools.ts";
 import { birthdayTools } from "./birthday-tools.ts";
 import { githubTools } from "./github-tools.ts";
-import { imageTools } from "./image-tools.ts";
 import { statusTools } from "./status-tools.ts";
 import { accessTools } from "./access-tools.ts";
 import { systemTools } from "./system-tools.ts";
@@ -24,7 +23,6 @@ export function getAllTools(ctx: AppContext): ToolDef[] {
     ...birthdayTools,
     ...accessTools,
     ...githubTools,
-    ...imageTools,
     ...statusTools,
     ...translationTools,
     ...systemTools,

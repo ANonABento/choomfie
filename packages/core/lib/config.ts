@@ -7,9 +7,7 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import type { SocialsPlatformConfig, AutomodAction, AutomodConfig } from "@choomfie/shared";
-
-export type { AutomodAction, AutomodConfig };
+import type { SocialsPlatformConfig } from "@choomfie/shared";
 
 export interface Persona {
   name: string;
@@ -54,11 +52,6 @@ export interface SocialsConfig {
   [key: string]: SocialsPlatformConfig | undefined;
 }
 
-export interface WelcomeConfig {
-  channelId?: string | null;
-  template: string;
-}
-
 export interface Config {
   activePersona: string;
   personas: Record<string, Persona>;
@@ -67,34 +60,8 @@ export interface Config {
   autoSummarize: boolean;
   plugins: string[];
   voice: VoiceConfig;
-  automod: AutomodConfig;
-  welcome: WelcomeConfig;
   socials?: SocialsConfig;
   [key: string]: unknown;
-}
-
-export const DEFAULT_WELCOME_TEMPLATE = "Welcome {user} to {server}!";
-
-export function normalizeWelcomeTemplate(value: unknown): string {
-  return typeof value === "string" && value.trim()
-    ? value.trim()
-    : DEFAULT_WELCOME_TEMPLATE;
-}
-
-function normalizeWelcomeConfig(value: unknown): WelcomeConfig {
-  const saved =
-    value && typeof value === "object"
-      ? (value as Partial<Record<keyof WelcomeConfig, unknown>>)
-      : {};
-  const channelId =
-    typeof saved.channelId === "string" && saved.channelId.trim()
-      ? saved.channelId.trim()
-      : null;
-
-  return {
-    channelId,
-    template: normalizeWelcomeTemplate(saved.template),
-  };
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -111,40 +78,7 @@ const DEFAULT_CONFIG: Config = {
   autoSummarize: true,
   plugins: [],
   voice: { stt: "auto", tts: "auto", ttsSpeed: 0.7 },
-  automod: {
-    maxMessagesPerMinute: 20,
-    bannedWords: [],
-    action: "warn",
-  },
-  welcome: {
-    channelId: null,
-    template: DEFAULT_WELCOME_TEMPLATE,
-  },
 };
-
-function normalizeMaxMessagesPerMinute(raw: unknown): number {
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return DEFAULT_CONFIG.automod.maxMessagesPerMinute;
-
-  const normalized = Math.floor(value);
-  if (normalized < 1) return 1;
-  if (normalized > 120) return 120;
-  return normalized;
-}
-
-function normalizeBannedWords(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean)
-    .map((item) => item.toLowerCase())
-    .filter((item, idx, arr) => arr.indexOf(item) === idx);
-}
-
-function normalizeAutomodAction(raw: unknown): AutomodAction {
-  if (raw === "timeout" || raw === "kick" || raw === "warn") return raw;
-  return DEFAULT_CONFIG.automod.action;
-}
 
 function mergeConfig(saved: Partial<Config>): Config {
   const savedPersonas =
@@ -153,12 +87,8 @@ function mergeConfig(saved: Partial<Config>): Config {
       : {};
   const savedVoice =
     saved.voice && typeof saved.voice === "object" ? saved.voice : {};
-  const savedAutomod =
-    saved.automod && typeof saved.automod === "object" ? saved.automod : {};
-  const savedWelcome = normalizeWelcomeConfig(saved.welcome);
   const savedSocials =
     saved.socials && typeof saved.socials === "object" ? saved.socials : undefined;
-  const normalizedAutomod = savedAutomod as Partial<AutomodConfig>;
 
   return {
     ...DEFAULT_CONFIG,
@@ -170,19 +100,6 @@ function mergeConfig(saved: Partial<Config>): Config {
     voice: {
       ...DEFAULT_CONFIG.voice,
       ...savedVoice,
-    },
-    automod: {
-      ...DEFAULT_CONFIG.automod,
-      ...savedAutomod,
-      maxMessagesPerMinute: normalizeMaxMessagesPerMinute(
-        normalizedAutomod.maxMessagesPerMinute
-      ),
-      bannedWords: normalizeBannedWords(normalizedAutomod.bannedWords),
-      action: normalizeAutomodAction(normalizedAutomod.action),
-    },
-    welcome: {
-      ...DEFAULT_CONFIG.welcome,
-      ...savedWelcome,
     },
     ...(savedSocials ? { socials: savedSocials } : {}),
   };
@@ -313,41 +230,6 @@ export class ConfigManager {
 
   getSocialsConfig(): SocialsConfig | undefined {
     return this.config.socials;
-  }
-
-  // --- Automod ---
-
-  getAutomodConfig(): AutomodConfig {
-    return {
-      ...this.config.automod,
-      bannedWords: [...this.config.automod.bannedWords],
-    };
-  }
-
-  setAutomodConfig(raw: Partial<AutomodConfig>) {
-    const existing = this.config.automod || { ...DEFAULT_CONFIG.automod };
-    this.config.automod = {
-      maxMessagesPerMinute: normalizeMaxMessagesPerMinute(
-        raw.maxMessagesPerMinute ?? existing.maxMessagesPerMinute
-      ),
-      bannedWords: normalizeBannedWords(raw.bannedWords ?? existing.bannedWords),
-      action: normalizeAutomodAction(raw.action ?? existing.action),
-    };
-    this.save();
-  }
-
-  // --- Welcome messages ---
-
-  getWelcomeConfig(): WelcomeConfig {
-    return normalizeWelcomeConfig(this.config.welcome);
-  }
-
-  setWelcomeConfig(welcome: Partial<WelcomeConfig>) {
-    this.config.welcome = normalizeWelcomeConfig({
-      ...this.config.welcome,
-      ...welcome,
-    });
-    this.save();
   }
 
   // --- Full config ---

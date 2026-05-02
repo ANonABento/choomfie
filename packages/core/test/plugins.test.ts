@@ -24,15 +24,10 @@ test("loadPlugins skips unknown plugin names", async () => {
 });
 
 test("loadPlugins loads real workspace plugins", async () => {
-  const config = makePluginConfig(["voice", "browser", "reaction-roles", "socials"]);
+  const config = makePluginConfig(["voice", "browser", "socials"]);
 
   const plugins = await loadPlugins(config);
-  expect(plugins.map((p) => p.name)).toEqual([
-    "voice",
-    "browser",
-    "reaction-roles",
-    "socials",
-  ]);
+  expect(plugins.map((p) => p.name)).toEqual(["voice", "browser", "socials"]);
 }, 30_000);
 
 test("loadPlugins loads rss workspace plugin", async () => {

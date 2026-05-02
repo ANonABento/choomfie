@@ -19,14 +19,6 @@ export interface SocialsConfig {
   [key: string]: SocialsPlatformConfig | undefined;
 }
 
-export type AutomodAction = "warn" | "timeout" | "kick";
-
-export interface AutomodConfig {
-  maxMessagesPerMinute: number;
-  bannedWords: string[];
-  action: AutomodAction;
-}
-
 export interface ChoomfieConfig {
   localFirst?: boolean;
   provider?: string;
@@ -34,7 +26,6 @@ export interface ChoomfieConfig {
   ollamaUrl?: string;
   embeddings?: string;
   socials?: SocialsConfig;
-  automod?: AutomodConfig;
   [key: string]: unknown;
 }
 
@@ -58,8 +49,6 @@ export interface PluginConfig {
   getEnabledPlugins(): string[];
   getVoiceConfig(): { stt: string; tts: string; ttsSpeed?: number };
   getSocialsConfig(): SocialsConfig | undefined;
-  getAutomodConfig(): AutomodConfig;
-  setAutomodConfig(config: Partial<AutomodConfig>): void;
 }
 
 export interface PluginContext {

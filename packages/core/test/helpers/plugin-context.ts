@@ -1,10 +1,4 @@
-import type { PluginContext, AutomodConfig } from "@choomfie/shared";
-
-const DEFAULT_TEST_AUTOMOD: AutomodConfig = {
-  maxMessagesPerMinute: 20,
-  bannedWords: [],
-  action: "warn",
-};
+import type { PluginContext } from "@choomfie/shared";
 
 export const testPluginContext: PluginContext = {
   DATA_DIR: "/tmp/choomfie-test",
@@ -13,7 +7,5 @@ export const testPluginContext: PluginContext = {
     getEnabledPlugins: () => [],
     getVoiceConfig: () => ({ stt: "mock", tts: "mock" }),
     getSocialsConfig: () => undefined,
-    getAutomodConfig: () => ({ ...DEFAULT_TEST_AUTOMOD, bannedWords: [...DEFAULT_TEST_AUTOMOD.bannedWords] }),
-    setAutomodConfig: () => {},
   },
 };
