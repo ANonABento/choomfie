@@ -6,6 +6,7 @@
       "name": "choomfie-monorepo",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "^0.2.87",
+        "@choomfie/automod": "workspace:*",
         "@choomfie/browser": "workspace:*",
         "@choomfie/core": "workspace:*",
         "@choomfie/reaction-roles": "workspace:*",
@@ -51,6 +52,14 @@
       "name": "@choomfie/shared",
       "version": "0.4.0",
       "dependencies": {
+        "discord.js": "^14.16.0",
+      },
+    },
+    "plugins/automod": {
+      "name": "@choomfie/automod",
+      "version": "0.4.0",
+      "dependencies": {
+        "@choomfie/shared": "workspace:*",
         "discord.js": "^14.16.0",
       },
     },
@@ -123,6 +132,8 @@
     "@asamuzakjp/nwsapi": ["@asamuzakjp/nwsapi@2.3.9", "", {}, "sha512-n8GuYSrI9bF7FFZ/SjhwevlHc8xaVlb/7HmHelnc/PZXBD2ZR49NnN9sMMuDdEGPeeRQ5d0hqlSlEpgCX3Wl0Q=="],
 
     "@babel/runtime": ["@babel/runtime@7.29.2", "", {}, "sha512-JiDShH45zKHWyGe4ZNVRrCjBz8Nh9TMmZG1kh4QTK8hCBTWBi8Da+i7s1fJw7/lYpM4ccepSNfqzZ/QvABBi5g=="],
+
+    "@choomfie/automod": ["@choomfie/automod@workspace:plugins/automod"],
 
     "@choomfie/browser": ["@choomfie/browser@workspace:plugins/browser"],
 

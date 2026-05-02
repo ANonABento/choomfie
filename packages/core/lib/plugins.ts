@@ -12,6 +12,7 @@ const PLUGIN_PACKAGES: Record<string, string> = {
   tutor: "@choomfie/tutor",
   socials: "@choomfie/socials",
   rss: "@choomfie/rss",
+  automod: "@choomfie/automod",
 };
 
 export interface PluginConfigSource {

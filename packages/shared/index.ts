@@ -11,7 +11,17 @@ export { text, err } from "./types.ts";
 export { errorMessage } from "./errors.ts";
 
 // Plugin context
-export type { PluginContext, PluginConfig, McpTransport, NotificationMessage, SocialsConfig, SocialsPlatformConfig, ChoomfieConfig } from "./plugin-context.ts";
+export type {
+  PluginContext,
+  PluginConfig,
+  McpTransport,
+  NotificationMessage,
+  SocialsConfig,
+  SocialsPlatformConfig,
+  ChoomfieConfig,
+  AutomodAction,
+  AutomodConfig,
+} from "./plugin-context.ts";
 
 // Time utilities
 export {
