@@ -54,6 +54,11 @@ export interface SocialsConfig {
   [key: string]: SocialsPlatformConfig | undefined;
 }
 
+export interface WelcomeConfig {
+  channelId?: string | null;
+  template: string;
+}
+
 export interface Config {
   activePersona: string;
   personas: Record<string, Persona>;
@@ -63,8 +68,33 @@ export interface Config {
   plugins: string[];
   voice: VoiceConfig;
   automod: AutomodConfig;
+  welcome: WelcomeConfig;
   socials?: SocialsConfig;
   [key: string]: unknown;
+}
+
+export const DEFAULT_WELCOME_TEMPLATE = "Welcome {user} to {server}!";
+
+export function normalizeWelcomeTemplate(value: unknown): string {
+  return typeof value === "string" && value.trim()
+    ? value.trim()
+    : DEFAULT_WELCOME_TEMPLATE;
+}
+
+function normalizeWelcomeConfig(value: unknown): WelcomeConfig {
+  const saved =
+    value && typeof value === "object"
+      ? (value as Partial<Record<keyof WelcomeConfig, unknown>>)
+      : {};
+  const channelId =
+    typeof saved.channelId === "string" && saved.channelId.trim()
+      ? saved.channelId.trim()
+      : null;
+
+  return {
+    channelId,
+    template: normalizeWelcomeTemplate(saved.template),
+  };
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -85,6 +115,10 @@ const DEFAULT_CONFIG: Config = {
     maxMessagesPerMinute: 20,
     bannedWords: [],
     action: "warn",
+  },
+  welcome: {
+    channelId: null,
+    template: DEFAULT_WELCOME_TEMPLATE,
   },
 };
 
@@ -121,6 +155,7 @@ function mergeConfig(saved: Partial<Config>): Config {
     saved.voice && typeof saved.voice === "object" ? saved.voice : {};
   const savedAutomod =
     saved.automod && typeof saved.automod === "object" ? saved.automod : {};
+  const savedWelcome = normalizeWelcomeConfig(saved.welcome);
   const savedSocials =
     saved.socials && typeof saved.socials === "object" ? saved.socials : undefined;
   const normalizedAutomod = savedAutomod as Partial<AutomodConfig>;
@@ -144,6 +179,10 @@ function mergeConfig(saved: Partial<Config>): Config {
       ),
       bannedWords: normalizeBannedWords(normalizedAutomod.bannedWords),
       action: normalizeAutomodAction(normalizedAutomod.action),
+    },
+    welcome: {
+      ...DEFAULT_CONFIG.welcome,
+      ...savedWelcome,
     },
     ...(savedSocials ? { socials: savedSocials } : {}),
   };
@@ -294,6 +333,20 @@ export class ConfigManager {
       bannedWords: normalizeBannedWords(raw.bannedWords ?? existing.bannedWords),
       action: normalizeAutomodAction(raw.action ?? existing.action),
     };
+    this.save();
+  }
+
+  // --- Welcome messages ---
+
+  getWelcomeConfig(): WelcomeConfig {
+    return normalizeWelcomeConfig(this.config.welcome);
+  }
+
+  setWelcomeConfig(welcome: Partial<WelcomeConfig>) {
+    this.config.welcome = normalizeWelcomeConfig({
+      ...this.config.welcome,
+      ...welcome,
+    });
     this.save();
   }
 

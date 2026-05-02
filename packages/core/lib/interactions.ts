@@ -162,4 +162,5 @@ export async function handleInteraction(
 await import("./handlers/reminder-buttons.ts");
 await import("./handlers/permission-buttons.ts");
 await import("./handlers/modals.ts");
+await import("./handlers/welcome.ts");
 await import("./commands.ts");

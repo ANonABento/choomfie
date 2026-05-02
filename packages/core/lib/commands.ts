@@ -308,6 +308,7 @@ registerCommand("help", {
             "`/github <check>` — PRs, issues, notifications",
             "`/status` — bot status and stats",
             "`/serverstats` — server stats (members, channels, messages, top channels)",
+            "`/welcome_config` — configure welcome messages (owner)",
           ].join("\n"),
           inline: false,
         },
