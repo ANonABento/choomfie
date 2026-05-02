@@ -11,11 +11,13 @@ import {
   SlashCommandBuilder,
   EmbedBuilder,
   MessageFlags,
+  AttachmentBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
   type GuildTextBasedChannel,
 } from "discord.js";
+import { errorMessage } from "@choomfie/shared";
 import { VERSION } from "./version.ts";
 import { registerCommand, registerButtonHandler } from "./interactions.ts";
 import { McpProxy } from "./mcp-proxy.ts";
@@ -28,6 +30,7 @@ import {
   buildPersonaModal,
   buildMemoryModal,
 } from "./handlers/modals.ts";
+import { formatGeneratedImageMessage, generateImage } from "./image-generation.ts";
 
 type ServerStatsChannel = Pick<
   GuildTextBasedChannel,
@@ -301,6 +304,7 @@ registerCommand("help", {
         {
           name: "Other",
           value: [
+            "`/imagine <prompt>` — generate an image",
             "`/github <check>` — PRs, issues, notifications",
             "`/status` — bot status and stats",
             "`/serverstats` — server stats (members, channels, messages, top channels)",
@@ -317,6 +321,42 @@ registerCommand("help", {
       .setFooter({ text: "@ me in a server or DM me directly" });
 
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+  },
+});
+
+// /imagine <prompt> — generate an image and attach it
+registerCommand("imagine", {
+  data: new SlashCommandBuilder()
+    .setName("imagine")
+    .setDescription("Generate an image from a prompt")
+    .addStringOption((o) =>
+      o
+        .setName("prompt")
+        .setDescription("What to generate")
+        .setRequired(true)
+        .setMaxLength(1000)
+    )
+    .toJSON(),
+  handler: async (interaction, ctx) => {
+    const prompt = interaction.options.getString("prompt", true).trim();
+    await interaction.deferReply();
+
+    try {
+      const image = await generateImage(prompt, ctx.DATA_DIR);
+      const attachment = new AttachmentBuilder(image.filePath);
+
+      await interaction.editReply({
+        content: formatGeneratedImageMessage(image),
+        files: [attachment],
+        allowedMentions: { parse: [] },
+      });
+      ctx.messageStats.sent++;
+    } catch (error: unknown) {
+      await interaction.editReply({
+        content: `I couldn't generate that image: ${errorMessage(error)}`,
+        allowedMentions: { parse: [] },
+      });
+    }
   },
 });
 
