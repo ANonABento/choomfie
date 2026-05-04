@@ -47,7 +47,7 @@ export const kokoroTTS: TTSProvider = {
     };
   },
 
-  async synthesize(text: string, language: string = "en", speed: number = 1.0): Promise<Buffer> {
+  async synthesize(text: string, _language: string = "en", speed: number = 1.0): Promise<Buffer> {
     console.error(`Kokoro TTS: speed=${speed}, text="${text.slice(0, 50)}..."`);
     if (!text?.trim()) throw new Error("Cannot synthesize empty text");
 

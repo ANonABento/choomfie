@@ -9,7 +9,7 @@ import type { ToolDef } from "@choomfie/shared";
 import { text, err } from "@choomfie/shared";
 import { getLessonDB } from "../core/lesson-db-instance.ts";
 import { getActiveModule } from "../core/session.ts";
-import { getProgressData, getNextLesson, getUnits } from "../core/lesson-engine.ts";
+import { getProgressData, getNextLesson } from "../core/lesson-engine.ts";
 
 export const lessonTools: ToolDef[] = [
   {

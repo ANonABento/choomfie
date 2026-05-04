@@ -5,7 +5,7 @@
  * crafted contexts. ContentSets used for vocabulary within grammar lessons.
  */
 
-import type { Lesson, LessonSRSItem } from "../../../core/lesson-types.ts";
+import type { Lesson } from "../../../core/lesson-types.ts";
 import { generateExercises, type ContentSet } from "../../../core/exercise-generator.ts";
 import { vocabSRS, patternSRS, cloze, mc } from "./phrase-helpers.ts";
 

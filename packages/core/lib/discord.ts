@@ -131,7 +131,7 @@ export function createDiscordClient(ctx: AppContext): Client {
       try { lastHash = await Bun.file(hashFile).text(); } catch {}
 
       if (hash !== lastHash.trim()) {
-        const { REST, Routes } = await import("discord.js");
+        const { REST } = await import("discord.js");
         const rest = new REST().setToken(ctx.discord.token!);
         const appId = c.application.id;
         await deployGuildCommands(rest, appId, c.guilds.cache.keys(), commands);

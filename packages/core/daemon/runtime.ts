@@ -25,6 +25,7 @@ import { log, setSessionId, verbose } from "./log.ts";
 import { createMessageGenerator } from "./message-generator.ts";
 import { getErrorMessage } from "./error.ts";
 import {
+  applyAnthropicFailure,
   createSession,
   extractAssistantText,
   generateSessionId,
@@ -61,7 +62,7 @@ export async function startSession(
   state.pushMessage = push;
   state.closeGenerator = close;
 
-  state.session = createSession(generator, handoffSummary);
+  state.session = createSession(generator, handoffSummary, state.activeProvider);
 
   void consumeSessionStream(state).catch((error: unknown) => {
     log(`Session stream error: ${getErrorMessage(error)}`);
@@ -134,6 +135,10 @@ export async function handleStreamError(
 
   let error = initialError;
   for (let attempt = 1; attempt <= MAX_ERROR_RETRIES; attempt++) {
+    if (applyAnthropicFailure(state, error)) {
+      log("Anthropic failure threshold reached — switching daemon sessions to Ollama fallback");
+    }
+
     log(
       `Session stream failed: ${getErrorMessage(error)} (attempt ${attempt}/${MAX_ERROR_RETRIES})`
     );

@@ -3,7 +3,7 @@
  */
 
 import type { ToolDef } from "../types.ts";
-import { text, err } from "../types.ts";
+import { text } from "../types.ts";
 
 export const memoryTools: ToolDef[] = [
   {

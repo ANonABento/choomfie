@@ -31,7 +31,6 @@ export const elevenlabsSTT: STTProvider = {
       );
     }
 
-    const audioBytes = new Uint8Array(audio);
     const formData = new FormData();
     formData.append(
       "file",

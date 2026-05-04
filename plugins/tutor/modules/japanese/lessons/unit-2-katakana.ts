@@ -7,7 +7,7 @@
  * Lessons 2.7-2.8 use loanword practice via the exercise generator.
  */
 
-import type { Lesson, Exercise, IntroItem, LessonSRSItem } from "../../../core/lesson-types.ts";
+import type { Lesson, LessonSRSItem } from "../../../core/lesson-types.ts";
 import { generateExercises, type ContentSet } from "../../../core/exercise-generator.ts";
 import { recognition, production, chartReview } from "./kana-helpers.ts";
 

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, test } from "bun:test";
 import { expandExercisesForSession, buildExerciseButtons, type ActiveLessonSession } from "../../../plugins/tutor/lesson-interactions.ts";
 import { chartReview } from "../../../plugins/tutor/modules/japanese/lessons/kana-helpers.ts";

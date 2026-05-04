@@ -29,12 +29,6 @@ interface YouTubeTokens {
   expiresAt: number; // Unix ms
 }
 
-interface YouTubeConfig {
-  apiKey?: string;
-  clientId?: string;
-  clientSecret?: string;
-}
-
 interface PendingAuth {
   codeVerifier: string;
   state: string;

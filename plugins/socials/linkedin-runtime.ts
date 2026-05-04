@@ -2,7 +2,6 @@ import type { PluginContext } from "@choomfie/shared";
 import { LinkedInClient } from "./providers/linkedin/api.ts";
 import { LinkedInMonitor } from "./providers/linkedin/monitor.ts";
 import { LinkedInScheduler } from "./providers/linkedin/scheduler.ts";
-import { requireNonEmptyString } from "./config.ts";
 
 let linkedInClient: LinkedInClient | null = null;
 let linkedInMonitor: LinkedInMonitor | null = null;

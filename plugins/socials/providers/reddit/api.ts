@@ -276,7 +276,7 @@ export class RedditClient implements RedditWriteProvider {
     subreddit: string,
     title: string,
     imagePath: string,
-    text?: string,
+    _text?: string,
   ): Promise<RedditSubmitResult> {
     if (/^https?:\/\//i.test(imagePath)) {
       return this.submitLink(subreddit, title, imagePath);

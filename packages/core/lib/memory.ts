@@ -12,10 +12,6 @@
 import { Database } from "bun:sqlite";
 import { spawnSync } from "node:child_process";
 import { normalizeTimeZone, toSQLiteDatetime } from "./time.ts";
-import {
-  isValidCustomCommandName,
-  normalizeCustomCommandName,
-} from "./custom-commands.ts";
 
 export interface CoreMemory {
   key: string;

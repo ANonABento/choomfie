@@ -9,7 +9,7 @@ import {
   type TextChannel,
   type ThreadChannel,
 } from "discord.js";
-import type { ToolDef, AppContext } from "../types.ts";
+import type { ToolDef } from "../types.ts";
 import { text, err } from "../types.ts";
 import { onReplySent } from "../typing.ts";
 import { refreshChannel } from "../conversation.ts";

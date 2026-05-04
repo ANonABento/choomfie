@@ -30,7 +30,6 @@ export const groqSTT: STTProvider = {
       );
     }
 
-    const audioBytes = new Uint8Array(audio);
     const formData = new FormData();
     formData.append(
       "file",

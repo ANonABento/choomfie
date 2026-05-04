@@ -6,7 +6,7 @@
  * exercises where appropriate.
  */
 
-import type { Lesson, LessonSRSItem } from "../../../core/lesson-types.ts";
+import type { Lesson } from "../../../core/lesson-types.ts";
 import { generateExercises, type ContentSet } from "../../../core/exercise-generator.ts";
 import { vocabSRS, cloze, mc } from "./phrase-helpers.ts";
 

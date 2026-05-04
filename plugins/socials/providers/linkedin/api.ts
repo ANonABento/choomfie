@@ -17,7 +17,6 @@ import type { LinkedInProfile, LinkedInPostResult } from "../types.ts";
 
 const LINKEDIN_AUTH_URL = "https://www.linkedin.com/oauth/v2/authorization";
 const LINKEDIN_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken";
-const LINKEDIN_API_BASE = "https://api.linkedin.com/v2";
 const LINKEDIN_REST_BASE = "https://api.linkedin.com/rest";
 const LINKEDIN_VERSION = "202603";
 const SCOPES = ["openid", "profile", "w_member_social"];

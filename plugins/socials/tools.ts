@@ -21,8 +21,6 @@ import { TwitterClient } from "./providers/twitter/api.ts";
 import { withRetry } from "./providers/retry.ts";
 import { LinkedInMonitor } from "./providers/linkedin/monitor.ts";
 import { LinkedInScheduler } from "./providers/linkedin/scheduler.ts";
-import type { NewComment } from "./providers/linkedin/monitor.ts";
-import type { YouTubeCommentClient } from "./providers/youtube/api.ts";
 
 const yt = getYouTubeProvider();
 const reddit = getRedditProvider();
@@ -1370,7 +1368,7 @@ export const socialsTools: ToolDef[] = [
         required: ["text"],
       },
     },
-    handler: async (args: Record<string, unknown>, ctx: PluginContext) => {
+    handler: async (args: Record<string, unknown>, _ctx: PluginContext) => {
       try {
         const client = getTwitterClient();
         const result = await withRetry(
@@ -1397,7 +1395,7 @@ export const socialsTools: ToolDef[] = [
         required: ["text", "image"],
       },
     },
-    handler: async (args: Record<string, unknown>, ctx: PluginContext) => {
+    handler: async (args: Record<string, unknown>, _ctx: PluginContext) => {
       try {
         const client = getTwitterClient();
         const result = await withRetry(
@@ -1427,7 +1425,7 @@ export const socialsTools: ToolDef[] = [
         required: ["tweets"],
       },
     },
-    handler: async (args: Record<string, unknown>, ctx: PluginContext) => {
+    handler: async (args: Record<string, unknown>, _ctx: PluginContext) => {
       try {
         const client = getTwitterClient();
         const results = await client.postThread(args.tweets as string[]);
@@ -1447,7 +1445,7 @@ export const socialsTools: ToolDef[] = [
       description: "Check Twitter/X authentication status.",
       inputSchema: { type: "object" as const, properties: {} },
     },
-    handler: async (_args: unknown, ctx: PluginContext) => {
+    handler: async (_args: unknown, _ctx: PluginContext) => {
       try {
         const client = getTwitterClient();
         const status = client.getStatus();

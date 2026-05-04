@@ -30,6 +30,7 @@ packages/
   core/                            # @choomfie/core — Discord bridge, memory, etc.
     package.json
     server.ts, supervisor.ts, worker.ts, daemon.ts
+    daemon/                         # Agent SDK session runtime, handoffs, health checks
     lib/
       types.ts                     # AppContext (extends PluginContext), re-exports shared
       interactions.ts              # handleInteraction() + safeHandle() + re-exports shared registries
@@ -55,7 +56,7 @@ plugins/                           # Optional, enable/disable from Discord
   socials/                         # @choomfie/socials
     package.json
     index.ts                       # Plugin export
-    tools.ts, providers/
+    tools/, providers/
 docs/
 .claude-plugin/
 .mcp.json
@@ -64,7 +65,7 @@ CLAUDE.md, README.md, LICENSE
 
 ## Architecture
 
-**Supervisor/Worker model** — see [docs/supervisor-architecture.md](docs/supervisor-architecture.md) for full details.
+**Supervisor/Worker model** — see [docs/architecture.md](docs/architecture.md) and [docs/supervisor-architecture.md](docs/supervisor-architecture.md) for full details.
 
 ```
 Claude Code ← MCP stdio → supervisor.ts (immortal)
@@ -82,7 +83,7 @@ Tools colocate their JSON schema definition + handler in one file as `ToolDef[]`
 
 ### Daemon Mode (`choomfie --daemon`)
 
-Autonomous mode — see [docs/architecture-v2.md](docs/architecture-v2.md) for full design.
+Autonomous mode — see [docs/architecture.md](docs/architecture.md) and [docs/architecture-v2.md](docs/architecture-v2.md) for full design.
 
 ```
 daemon.ts (always running)
@@ -90,27 +91,29 @@ daemon.ts (always running)
        └→ supervisor.ts (MCP stdio) → worker.ts (Discord)
 ```
 
-- **daemon.ts** uses the Agent SDK to spawn Claude Code sessions programmatically
+- **daemon.ts** is a thin CLI entry point; the runtime lives in `packages/core/daemon/`
+- Uses `@anthropic-ai/claude-agent-sdk` to spawn Claude Code sessions programmatically
 - Sessions are cycled when context gets heavy (~120k tokens or 80 turns)
 - Before cycling: captures a handoff summary from Claude, persists to `meta/handoffs.json`
 - New session gets handoff context injected into system prompt
-- Worker health monitored via PID file checks every 30s
+- Worker health monitored via `choomfie.pid` checks every 30s; 3 consecutive failures trigger a full session cycle
 - Daemon state written to `meta/daemon-state.json` for `/status` integration
-- ~12s gap during cycling where Discord messages are lost (known limitation)
+- Repeated Anthropic API failures switch new sessions to the Ollama-compatible fallback provider
 - Crash recovery with exponential backoff (2s → 60s max)
 
 ### Plugin System
 
-Plugins live in `packages/<name>/index.ts` and export a `Plugin` interface:
+Plugins live in `plugins/<name>/index.ts` as workspace packages and export a `Plugin` interface:
 - `tools` — ToolDef[] (auto-registered into MCP)
 - `instructions` — string[] (appended to system prompt)
 - `intents` — extra Discord gateway intents
+- `userTools` — plugin tool names allowed for non-owner users
 - `init(ctx)` — called after Discord ready
 - `onMessage(msg, ctx)` — hook into every message
 - `onInteraction(interaction, ctx)` — hook into every interaction (buttons/commands/modals)
 - `destroy()` — cleanup on shutdown
 
-Plugins are workspace packages (`@choomfie/voice`, `@choomfie/browser`, etc.) that import shared types from `@choomfie/shared` instead of relative `../../lib/` paths. The plugin loader in `packages/core/lib/plugins.ts` uses an explicit workspace package map to resolve plugins.
+Plugins are workspace packages (`@choomfie/voice`, `@choomfie/browser`, `@choomfie/tutor`, `@choomfie/socials`) that import shared types from `@choomfie/shared` instead of relative `../../lib/` paths. The plugin loader in `packages/core/lib/plugins.ts` uses an explicit workspace package map. `discoverPlugins()` currently also advertises `rss`, but there is no `plugins/rss` workspace package, so enabling it logs a load failure.
 
 Enable plugins via `/plugins` command from Discord, or in `config.json`: `"plugins": ["voice", "socials"]`
 
@@ -118,7 +121,7 @@ Enable plugins via `/plugins` command from Discord, or in `config.json`: `"plugi
 
 1. Claude Code loads Choomfie via `--plugin-dir` and `--dangerously-load-development-channels server:choomfie`, then spawns `bun packages/core/server.ts` as an MCP subprocess
 2. `server.ts` → `supervisor.ts`: acquires PID file (single-instance guard), spawns `worker.ts` via `Bun.spawn({ ipc })` (all in `packages/core/`)
-3. Worker creates AppContext, loads plugins (from `packages/`), connects to Discord, waits for full initialization
+3. Worker creates AppContext, loads enabled plugins (from `plugins/` workspace packages), connects to Discord, waits for full initialization
 4. Worker sends `{ type: "ready", tools, instructions }` to supervisor via IPC
 5. Supervisor creates MCP server with real instructions + tools, connects stdio transport
 6. Claude Code calls `initialize` → gets correct persona, security rules, and full tool list
@@ -178,18 +181,25 @@ Modal forms triggered from slash commands, defined in `packages/core/lib/handler
 - `packages/core/lib/handlers/github.ts` — `buildGhArgs()` + `runGh()` (used by MCP tool + slash command)
 - `packages/shared/version.ts` — `VERSION` constant from package.json (used by mcp-server, commands, status-tools)
 
-## Tools (42)
+## Tools (96 max)
 
-Discord: reply (with embeds), react, edit_message, fetch_messages, search_messages, create_thread, create_poll, pin_message, unpin_message
-Memory: save_memory, search_memory, list_memories, delete_memory, save_conversation_summary, memory_stats
-Personas: switch_persona, save_persona, list_personas, delete_persona
-Reminders: set_reminder, list_reminders, cancel_reminder, snooze_reminder, ack_reminder
-Access: allow_user, remove_user, list_allowed_users (owner only)
-Lessons: lesson_status
-LinkedIn: linkedin_auth, linkedin_post, linkedin_post_image, linkedin_post_images, linkedin_post_link, linkedin_edit, linkedin_poll, linkedin_repost, linkedin_delete, linkedin_comments, linkedin_comment, linkedin_react, linkedin_schedule, linkedin_queue, linkedin_monitor, linkedin_analytics, linkedin_status
-GitHub: check_github
-Status: choomfie_status
+Tool lists are dynamic: the supervisor always exposes `restart`, the worker exposes 34 core tools, and enabled plugins add their own tools. With all shipped plugins enabled, Choomfie exposes 96 MCP tools total: 95 worker tools plus the supervisor-owned `restart` tool.
+
+Core Discord: reply (with embeds), react, edit_message, fetch_messages, search_messages, create_thread, create_poll, pin_message, unpin_message
+Core Memory: save_memory, search_memory, list_memories, delete_memory, save_conversation_summary, memory_stats
+Core Personas: switch_persona, save_persona, list_personas, delete_persona
+Core Reminders: set_reminder, list_reminders, cancel_reminder, snooze_reminder, ack_reminder
+Core Birthdays: birthday_add, birthday_remove, birthday_list, birthday_upcoming
+Core Access: allow_user, remove_user, list_allowed_users (owner only)
+Core GitHub: check_github
+Core Status: choomfie_status
+Core Translation: translate
 System: restart (owner only, supervisor-owned — kills worker, spawns fresh one, reloads all code)
+
+Browser plugin: browse, browser_click, browser_type, browser_screenshot, browser_eval, browser_press_key, browser_close
+Voice plugin: join_voice, leave_voice, speak
+Tutor plugin: tutor_prompt, dictionary_lookup, quiz, set_level, list_modules, switch_module, srs_review, srs_rate, srs_stats, srs_reminders, lesson_status, random_word, convert_kana, kanji_stroke_info, convert_pinyin, stroke_info, convert_hanzi
+Socials plugin: youtube_search, youtube_info, youtube_transcript, youtube_auth, youtube_comment, reddit_search, reddit_posts, reddit_comments, reddit_auth, reddit_post, reddit_comment, linkedin_auth, linkedin_post, linkedin_post_image, linkedin_post_images, linkedin_post_link, linkedin_edit, linkedin_poll, linkedin_repost, linkedin_delete, linkedin_comments, linkedin_comment, linkedin_react, linkedin_schedule, linkedin_queue, linkedin_monitor, linkedin_analytics, linkedin_status, twitter_auth, twitter_post, twitter_post_image, twitter_thread, twitter_status
 
 ### Rich Embeds
 
@@ -254,6 +264,8 @@ reminders: id, user_id, chat_id, message, due_at, fired, created_at,
 - @mentions stripped from message before forwarding to Claude
 - Personas stored in config.json, switchable from Discord (auto-restarts worker)
 - search_messages paginates up to 1000 messages for user/keyword filtering
+- Plugin tool names are collision-checked during load; a plugin with duplicate/conflicting tool names is skipped before registration
+- Slash commands auto-deploy on Discord ready when the command definition hash changes
 - **Hot-reload boundary:** Worker code in `packages/core/` (tools, Discord) and all plugin packages in `plugins/` (voice, browser, tutor, socials) are hot-reloadable via worker restart. Supervisor code (`packages/core/supervisor.ts`, IPC types, MCP server) requires full session restart (exit + re-run `choomfie`). Shared package (`packages/shared/`) changes require worker restart at minimum.
 - Auto-restart triggers: persona switch, plugin enable/disable, voice config change — all send `request_restart` IPC → supervisor restarts worker → sends confirmation to Discord channel
 

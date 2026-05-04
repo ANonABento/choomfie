@@ -32,7 +32,7 @@ export async function initFurigana(): Promise<void> {
 }
 
 /** Add furigana to Japanese text. Returns bracket notation: 食[た]べる */
-async function addFurigana(text: string): Promise<string> {
+export async function addFurigana(text: string): Promise<string> {
   if (!kuroshiro) await initFurigana();
   const html = await kuroshiro.convert(text, {
     mode: "furigana",
