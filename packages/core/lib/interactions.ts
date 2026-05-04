@@ -156,3 +156,4 @@ await import("./handlers/reminder-buttons.ts");
 await import("./handlers/permission-buttons.ts");
 await import("./handlers/modals.ts");
 await import("./commands.ts");
+await import("./local-commands.ts");
