@@ -14,6 +14,7 @@ import type { ConfigManager } from "./config.ts";
 import type { ReminderScheduler } from "./reminders.ts";
 import type { BirthdayScheduler } from "./birthdays.ts";
 import type { McpProxy } from "./mcp-proxy.ts";
+import type { LocalRuntime } from "./orchestrator/index.ts";
 
 // Re-export shared types so existing core code keeps working
 export type { Plugin, ToolResult } from "@choomfie/shared";
@@ -60,4 +61,6 @@ export interface AppContext extends PluginContext {
   reminderScheduler: ReminderScheduler;
   /** Daily birthday reminder scheduler */
   birthdayScheduler: BirthdayScheduler;
+  /** Local-mode orchestrator (only set when running with --local) */
+  localRuntime?: LocalRuntime;
 }

@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Launch Choomfie Local — Discord bot powered by local Ollama models only.
+# No Claude / no Anthropic — fully offline once Ollama and the models are pulled.
+#
+# Usage:
+#   choomfie-local              # foreground
+#   choomfie-local --tmux       # detached tmux session "choomfie-local"
+#   choomfie-local --always-on  # tmux + caffeinate (macOS sleep prevention)
+#   choomfie-local --check      # quick health check (Ollama reachable?)
+
+set -euo pipefail
+
+# bin/choomfie-local lives at packages/core/bin/ — monorepo root is up 3 levels.
+CHOOMFIE_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0")")/../../.." && pwd)"
+OLLAMA_URL="${OLLAMA_BASE_URL:-http://localhost:11434}"
+OLLAMA_URL="${OLLAMA_URL%/v1}"
+
+USE_TMUX=false
+ALWAYS_ON=false
+CHECK_ONLY=false
+EXTRA_ARGS=()
+
+for arg in "$@"; do
+  case "$arg" in
+    --tmux) USE_TMUX=true ;;
+    --always-on) ALWAYS_ON=true; USE_TMUX=true ;;
+    --check) CHECK_ONLY=true ;;
+    *) EXTRA_ARGS+=("$arg") ;;
+  esac
+done
+
+if [ "$CHECK_ONLY" = true ]; then
+  echo "Choomfie Local health check"
+  echo "  monorepo: $CHOOMFIE_DIR"
+  if ! command -v bun &>/dev/null; then
+    echo "  bun: missing — install from https://bun.sh"
+    exit 1
+  fi
+  echo "  bun:    $(bun --version)"
+  if curl -sf --max-time 2 "$OLLAMA_URL/api/tags" >/dev/null 2>&1; then
+    MODELS=$(curl -sf --max-time 2 "$OLLAMA_URL/api/tags" | grep -oE '"name":"[^"]+"' | wc -l | tr -d ' ')
+    echo "  ollama: reachable at $OLLAMA_URL ($MODELS models pulled)"
+  else
+    echo "  ollama: UNREACHABLE at $OLLAMA_URL"
+    echo "          Install: https://ollama.com   then: ollama serve"
+    exit 1
+  fi
+  exit 0
+fi
+
+# Install deps if needed
+if [ ! -d "$CHOOMFIE_DIR/node_modules" ]; then
+  echo "Installing dependencies..."
+  (cd "$CHOOMFIE_DIR" && bun install --no-summary) || { echo "Error: bun install failed"; exit 1; }
+fi
+
+# Verify Ollama is up before bothering Discord
+if ! curl -sf --max-time 2 "$OLLAMA_URL/api/tags" >/dev/null 2>&1; then
+  echo "Error: Ollama is not reachable at $OLLAMA_URL"
+  echo "Start it with: ollama serve  (or install: https://ollama.com)"
+  exit 1
+fi
+
+INNER_CMD="cd $(printf %q "$CHOOMFIE_DIR") && exec bun packages/core/server.ts --local"
+for a in "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"; do
+  INNER_CMD="$INNER_CMD $(printf %q "$a")"
+done
+
+if [ "$USE_TMUX" = true ]; then
+  if ! command -v tmux &>/dev/null; then
+    echo "Error: tmux not found. Install with: brew install tmux"
+    exit 1
+  fi
+  if [ "$ALWAYS_ON" = true ]; then
+    if command -v caffeinate &>/dev/null; then
+      pkill -f "caffeinate.*choomfie-local" 2>/dev/null || true
+      caffeinate -dims &
+      echo "Sleep prevention enabled (caffeinate PID: $!)"
+    else
+      echo "Warning: caffeinate not found (not macOS?). Skipping sleep prevention."
+    fi
+  fi
+  SESSION="choomfie-local"
+  if tmux has-session -t "$SESSION" 2>/dev/null; then
+    echo "Choomfie Local already running in tmux. Attaching..."
+    tmux attach -t "$SESSION"
+  else
+    tmux new-session -d -s "$SESSION" "$INNER_CMD"
+    echo "Started tmux session '$SESSION'. Attaching..."
+    tmux attach -t "$SESSION"
+  fi
+else
+  cd "$CHOOMFIE_DIR"
+  exec bun packages/core/server.ts --local "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"
+fi

@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "start": "bun install --no-summary && bun packages/core/server.ts",
+    "start:local": "bun install --no-summary && bun packages/core/server.ts --local",
     "test": "bun test",
     "test:all": "bun test packages/*/test/ test/",
     "type-check": "tsc --noEmit",
@@ -19,7 +20,8 @@
     "lint-staged": "lint-staged",
     "prepare": "husky || true",
     "deploy-commands": "bun packages/core/scripts/deploy-commands.ts",
-    "daemon": "bun packages/core/daemon.ts"
+    "daemon": "bun packages/core/daemon.ts",
+    "install:launchd": "packages/core/scripts/install-launchd.sh"
   },
   "lint-staged": {
     "*.ts": "eslint --fix"

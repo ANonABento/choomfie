@@ -8,6 +8,10 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import type { SocialsPlatformConfig } from "@choomfie/shared";
+import {
+  DEFAULT_LOCAL_CONFIG as DEFAULT_LOCAL_RUNTIME_CONFIG,
+  type LocalRuntimeConfig,
+} from "./orchestrator/local-runtime.ts";
 
 export interface Persona {
   name: string;
@@ -52,6 +56,14 @@ export interface SocialsConfig {
   [key: string]: SocialsPlatformConfig | undefined;
 }
 
+export type LocalBackgroundTasksConfig = LocalRuntimeConfig["backgroundTasks"];
+export type LocalResourceConfig = LocalRuntimeConfig["resourceManagement"];
+
+export interface LocalConfig extends LocalRuntimeConfig {
+  /** Persistence flag — only the user-facing wrapper sees this; runtime ignores. */
+  enabled: boolean;
+}
+
 export interface Config {
   activePersona: string;
   personas: Record<string, Persona>;
@@ -61,8 +73,14 @@ export interface Config {
   plugins: string[];
   voice: VoiceConfig;
   socials?: SocialsConfig;
+  local?: LocalConfig;
   [key: string]: unknown;
 }
+
+export const DEFAULT_LOCAL_CONFIG: LocalConfig = {
+  enabled: false,
+  ...DEFAULT_LOCAL_RUNTIME_CONFIG,
+};
 
 const DEFAULT_CONFIG: Config = {
   activePersona: "choomfie",
@@ -89,6 +107,8 @@ function mergeConfig(saved: Partial<Config>): Config {
     saved.voice && typeof saved.voice === "object" ? saved.voice : {};
   const savedSocials =
     saved.socials && typeof saved.socials === "object" ? saved.socials : undefined;
+  const savedLocal =
+    saved.local && typeof saved.local === "object" ? saved.local : undefined;
 
   return {
     ...DEFAULT_CONFIG,
@@ -102,6 +122,22 @@ function mergeConfig(saved: Partial<Config>): Config {
       ...savedVoice,
     },
     ...(savedSocials ? { socials: savedSocials } : {}),
+    ...(savedLocal
+      ? {
+          local: {
+            ...DEFAULT_LOCAL_CONFIG,
+            ...savedLocal,
+            backgroundTasks: {
+              ...DEFAULT_LOCAL_CONFIG.backgroundTasks,
+              ...(savedLocal.backgroundTasks ?? {}),
+            },
+            resourceManagement: {
+              ...DEFAULT_LOCAL_CONFIG.resourceManagement,
+              ...(savedLocal.resourceManagement ?? {}),
+            },
+          },
+        }
+      : {}),
   };
 }
 
@@ -230,6 +266,45 @@ export class ConfigManager {
 
   getSocialsConfig(): SocialsConfig | undefined {
     return this.config.socials;
+  }
+
+  // --- Local mode ---
+
+  getLocalConfig(): LocalConfig {
+    if (!this.config.local) return { ...DEFAULT_LOCAL_CONFIG };
+    return {
+      ...DEFAULT_LOCAL_CONFIG,
+      ...this.config.local,
+      backgroundTasks: {
+        ...DEFAULT_LOCAL_CONFIG.backgroundTasks,
+        ...this.config.local.backgroundTasks,
+      },
+      resourceManagement: {
+        ...DEFAULT_LOCAL_CONFIG.resourceManagement,
+        ...this.config.local.resourceManagement,
+      },
+    };
+  }
+
+  setLocalConfig(local: Partial<LocalConfig>) {
+    const current = this.getLocalConfig();
+    this.config.local = {
+      ...current,
+      ...local,
+      backgroundTasks: {
+        ...current.backgroundTasks,
+        ...(local.backgroundTasks ?? {}),
+      },
+      resourceManagement: {
+        ...current.resourceManagement,
+        ...(local.resourceManagement ?? {}),
+      },
+    };
+    this.save();
+  }
+
+  isLocalEnabled(): boolean {
+    return this.getLocalConfig().enabled;
   }
 
   // --- Full config ---
