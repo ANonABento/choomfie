@@ -26,10 +26,16 @@ import type {
   WorkerMessage,
   IpcToolDef,
 } from "./lib/ipc-types.ts";
+import {
+  waitForPendingToolCalls,
+  type PendingToolCallMap,
+} from "./lib/supervisor-boundary.ts";
+import { errorMessage } from "@choomfie/shared";
 
 // --- Config ---
 const WORKER_READY_TIMEOUT = 30_000; // 30s for worker to send "ready"
 const TOOL_CALL_TIMEOUT = 120_000; // 2min per tool call
+const RESTART_PENDING_DRAIN_TIMEOUT = 5_000; // planned restarts wait for active calls to finish
 const WORKER_PATH = `${import.meta.dir}/worker.ts`;
 
 // --- State ---
@@ -47,10 +53,7 @@ const CRASH_WINDOW_MS = 60_000; // reset crash count after 1min of stability
 type McpNotification = Parameters<Server["notification"]>[0];
 
 /** Pending tool calls waiting for worker response */
-const pendingCalls = new Map<
-  string,
-  { resolve: (result: any) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }
->();
+const pendingCalls: PendingToolCallMap = new Map();
 
 /** MCP server — created once, lives forever */
 let mcp: Server;
@@ -201,7 +204,9 @@ function handleWorkerMessage(msg: WorkerMessage) {
               }, 1000);
             }
           } catch (e) {
-            console.error(`Supervisor: worker-requested restart failed: ${e}`);
+            console.error(
+              `Supervisor: worker-requested restart failed: ${errorMessage(e)}`
+            );
           }
         }, 100);
         break;
@@ -211,7 +216,7 @@ function handleWorkerMessage(msg: WorkerMessage) {
         break;
     }
   } catch (e) {
-    console.error(`Supervisor: IPC message handler error: ${e}`);
+    console.error(`Supervisor: IPC message handler error: ${errorMessage(e)}`);
   }
 }
 
@@ -219,7 +224,7 @@ function handleWorkerMessage(msg: WorkerMessage) {
 function callWorkerTool(
   name: string,
   args: Record<string, unknown>
-): Promise<any> {
+): Promise<unknown> {
   return new Promise((resolve, reject) => {
     if (!workerReady || !worker) {
       return reject(new Error("Worker not ready"));
@@ -237,7 +242,7 @@ function callWorkerTool(
     } catch (e) {
       clearTimeout(timer);
       pendingCalls.delete(id);
-      reject(new Error(`Failed to send tool call to worker: ${e}`));
+      reject(new Error(`Failed to send tool call to worker: ${errorMessage(e)}`));
     }
   });
 }
@@ -265,6 +270,16 @@ const SUPERVISOR_TOOLS: IpcToolDef[] = [
 async function restartWorker(reason: string): Promise<{ timedOut: boolean }> {
   console.error(`Supervisor: restarting worker — ${reason}`);
   intentionalRestart = true;
+
+  const drainStatus = await waitForPendingToolCalls(
+    pendingCalls,
+    RESTART_PENDING_DRAIN_TIMEOUT,
+  );
+  if (drainStatus === "timed_out") {
+    console.error(
+      `Supervisor: restarting with ${pendingCalls.size} pending tool call(s) after drain timeout`,
+    );
+  }
 
   // Graceful shutdown (even if not ready yet — worker may be mid-startup)
   if (worker) {
@@ -303,7 +318,7 @@ async function restartWorker(reason: string): Promise<{ timedOut: boolean }> {
 async function handleSupervisorTool(
   name: string,
   args: Record<string, unknown>
-): Promise<any> {
+): Promise<unknown> {
   if (name === "restart") {
     const reason = (args.reason as string) || "manual restart";
     const { timedOut } = await restartWorker(reason);
@@ -367,9 +382,9 @@ function createMcp(): Server {
 
     try {
       return await callWorkerTool(name, args);
-    } catch (e: any) {
+    } catch (e) {
       return {
-        content: [{ type: "text", text: `Tool error: ${e.message}` }],
+        content: [{ type: "text", text: `Tool error: ${errorMessage(e)}` }],
         isError: true,
       };
     }

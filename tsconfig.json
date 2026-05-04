@@ -17,7 +17,6 @@
       "@choomfie/shared": ["packages/shared/index.ts"],
       "@choomfie/voice": ["plugins/voice/index.ts"],
       "@choomfie/browser": ["plugins/browser/index.ts"],
-      "@choomfie/rss": ["plugins/rss/index.ts"],
       "@choomfie/socials": ["plugins/socials/index.ts"],
       "@choomfie/tutor": ["plugins/tutor/index.ts"]
     }

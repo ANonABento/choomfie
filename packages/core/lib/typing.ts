@@ -15,7 +15,10 @@
  *   - keep_typing: false → transition to IDLE (default)
  */
 
-import type { TextChannel, DMChannel, NewsChannel } from "discord.js";
+type TypingChannel = {
+  isTextBased(): boolean;
+  sendTyping?: () => Promise<unknown>;
+};
 
 interface ChannelTypingState {
   state: "idle" | "typing";
@@ -56,19 +59,19 @@ function transitionToIdle(channelId: string) {
   s.state = "idle";
 }
 
-function startTyping(channelId: string, channel: TextChannel | DMChannel | NewsChannel) {
+function startTyping(channelId: string, channel: TypingChannel) {
   const s = getState(channelId);
   clearTimers(s);
   s.state = "typing";
 
   // Send initial typing
-  if (channel.isTextBased() && "sendTyping" in channel) {
+  if (channel.isTextBased() && channel.sendTyping) {
     channel.sendTyping().catch(() => {});
   }
 
   // Refresh every 8s
   s.typingInterval = setInterval(() => {
-    if (channel.isTextBased() && "sendTyping" in channel) {
+    if (channel.isTextBased() && channel.sendTyping) {
       channel.sendTyping().catch(() => {
         transitionToIdle(channelId);
       });
@@ -87,7 +90,7 @@ function startTyping(channelId: string, channel: TextChannel | DMChannel | NewsC
  */
 export function onMessageReceived(
   channelId: string,
-  channel: TextChannel | DMChannel | NewsChannel,
+  channel: TypingChannel,
   isConversationMode: boolean
 ) {
   if (isConversationMode) return;

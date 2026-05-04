@@ -29,10 +29,3 @@ test("loadPlugins loads real workspace plugins", async () => {
   const plugins = await loadPlugins(config);
   expect(plugins.map((p) => p.name)).toEqual(["voice", "browser", "socials"]);
 }, 30_000);
-
-test("loadPlugins loads rss workspace plugin", async () => {
-  const config = makePluginConfig(["rss"]);
-
-  const plugins = await loadPlugins(config);
-  expect(plugins.map((p) => p.name)).toEqual(["rss"]);
-}, 10_000);
