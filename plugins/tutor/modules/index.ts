@@ -16,6 +16,7 @@ const modules: Record<string, TutorModule> = {
   japanese: japaneseModule,
   chinese: chineseModule,
   french: frenchModule,
+  spanish: spanishModule,
 };
 
 export function getModule(name: string): TutorModule {

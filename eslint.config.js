@@ -8,6 +8,8 @@ export default [
       ".playwright-cli/**",
       ".claude/**",
       ".husky/**",
+      ".worktrees/**",
+      "**/.worktrees/**",
     ],
   },
   ...tseslint.configs.recommended,

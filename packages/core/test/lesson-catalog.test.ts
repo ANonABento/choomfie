@@ -15,6 +15,7 @@ const EXPECTED_JAPANESE_UNIT_NAMES = [
   "Katakana",
   "First Words & Phrases",
   "Basic Grammar",
+  "Basic Kanji",
 ];
 
 const EXPECTED_CHINESE_UNIT_NAMES = ["Tones", "Hanzi", "HSK 1 Vocabulary"];

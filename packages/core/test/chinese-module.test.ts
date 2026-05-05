@@ -12,15 +12,15 @@ describe("Chinese tutor module", () => {
   });
 
   test("exposes HSK level metadata and tutor prompt", () => {
-    expect(chineseModule.defaultLevel).toBe("HSK 1");
-    expect(chineseModule.levels).toContain("HSK 6");
+    expect(chineseModule.defaultLevel).toBe("HSK1");
+    expect(chineseModule.levels).toContain("HSK3");
 
-    const prompt = chineseModule.buildTutorPrompt!("HSK 1");
+    const prompt = chineseModule.buildTutorPrompt!("HSK1");
     expect(prompt).toContain("Mandarin Chinese tutor");
     expect(prompt).toContain("pinyin");
     expect(prompt).toContain("tone");
 
-    const hsk2Prompt = chineseModule.buildTutorPrompt!("HSK 2");
+    const hsk2Prompt = chineseModule.buildTutorPrompt!("HSK2");
     expect(hsk2Prompt).toContain("Student is ELEMENTARY (HSK 2)");
     expect(hsk2Prompt).not.toContain("COMPLETE BEGINNER");
   });
@@ -56,7 +56,7 @@ describe("Chinese tutor module", () => {
     );
 
     expect(result.isError).toBeUndefined();
-    expect(result.content[0].text).toContain("HSK 2");
-    expect(getModuleLevel(userId, "chinese")).toBe("HSK 2");
+    expect(result.content[0].text).toContain("HSK2");
+    expect(getModuleLevel(userId, "chinese")).toBe("HSK2");
   });
 });
