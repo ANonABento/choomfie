@@ -3,7 +3,7 @@ import type {
   Exercise,
   IntroItem,
   LessonSRSItem,
-} from "../../../core/lesson-types.ts";
+} from "./lesson-types.ts";
 
 export function vocabSRS(items: ContentItem[], tags: string): LessonSRSItem[] {
   return items.map((item) => ({

@@ -5,7 +5,7 @@
 import type { Lesson, Unit } from "../../../core/lesson-types.ts";
 import { generateExercises, type ContentSet } from "../../../core/exercise-generator.ts";
 import { hsk1ByTerms, hsk1Vocab } from "../data/hsk1-vocab.ts";
-import { cloze, introItems, mc, vocabSRS } from "./helpers.ts";
+import { cloze, introItems, mc, vocabSRS } from "../../../core/lesson-helpers.ts";
 
 function content(terms: string[]): ContentSet {
   return { items: hsk1ByTerms(terms), productionLabel: "hanzi" };

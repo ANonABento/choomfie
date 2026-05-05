@@ -5,7 +5,7 @@
 import type { ContentItem, Lesson, Unit } from "../../../core/lesson-types.ts";
 import { generateExercises, type ContentSet } from "../../../core/exercise-generator.ts";
 import { frenchA1ByTerms, frenchA1Vocab } from "../data/a1-vocab.ts";
-import { cloze, introItems, mc, vocabSRS } from "./helpers.ts";
+import { cloze, introItems, mc, vocabSRS } from "../../../core/lesson-helpers.ts";
 
 function content(items: ContentItem[]): ContentSet {
   return { items, productionLabel: "French" };

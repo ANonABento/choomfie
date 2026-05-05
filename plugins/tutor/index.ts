@@ -19,6 +19,7 @@ import { getAllTutorTools } from "./tools/index.ts";
 import { listModules } from "./modules/index.ts";
 import { japaneseLessons, japaneseUnits } from "./modules/japanese/lessons/index.ts";
 import { chineseLessons, chineseUnits } from "./modules/chinese/lessons/index.ts";
+import { koreanLessons, koreanUnits } from "./modules/korean/lessons/index.ts";
 
 import {
   buildExerciseButtons,
@@ -54,6 +55,7 @@ const tutorPlugin: Plugin = {
     "- Tell beginners to use `/lesson` to start structured lessons for their active module",
     "- Japanese lessons cover hiragana → katakana → phrases → grammar",
     "- Chinese lessons cover tones → hanzi → HSK 1 vocabulary",
+    "- Korean lessons cover Hangul → particles/grammar → A1 vocabulary",
     "- Use `lesson_status` to check their progress and suggest what to study next",
     "- Lessons are button-driven and instant — no need for you to be in the loop",
     "",
@@ -99,6 +101,7 @@ const tutorPlugin: Plugin = {
     "convert_pinyin",
     "stroke_info",
     "convert_hanzi",
+    "convert_hangul",
     "random_word",
   ],
 
@@ -190,6 +193,8 @@ const tutorPlugin: Plugin = {
     console.error(`Tutor: registered ${japaneseLessons.length} Japanese lessons`);
     registerLessons("chinese", chineseLessons, chineseUnits);
     console.error(`Tutor: registered ${chineseLessons.length} Chinese lessons`);
+    registerLessons("korean", koreanLessons, koreanUnits);
+    console.error(`Tutor: registered ${koreanLessons.length} Korean lessons`);
 
     // Initialize all modules
     for (const mod of listModules()) {
