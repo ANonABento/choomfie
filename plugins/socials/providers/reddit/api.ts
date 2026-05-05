@@ -10,8 +10,8 @@
  * Token storage: DATA_DIR/socials/reddit-tokens.json
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { VERSION, type PluginContext } from "@choomfie/shared";
+import { readFileSync, mkdirSync, existsSync } from "node:fs";
+import { VERSION, writeSecretFileSync, type PluginContext } from "@choomfie/shared";
 import type { RedditProvider, RedditWriteProvider, RedditPost, RedditComment, RedditSubmitResult } from "../types.ts";
 import { mapCommentChildren, mapPostChildren } from "./common.ts";
 
@@ -71,7 +71,7 @@ export class RedditClient implements RedditWriteProvider {
 
   private saveTokens(): void {
     if (!this.tokens) return;
-    writeFileSync(this.tokensPath, JSON.stringify(this.tokens, null, 2));
+    writeSecretFileSync(this.tokensPath, JSON.stringify(this.tokens, null, 2));
   }
 
   private async authenticate(): Promise<void> {

@@ -165,12 +165,11 @@ export function createDiscordClient(ctx: AppContext): Client {
       (ctx.messageStats.byUser.get(userId) || 0) + 1
     );
 
-    // Handle permission replies before anything else (no rate limit)
-    const canApprovePermissions = ctx.ownerUserId
-      ? userId === ctx.ownerUserId
-      : ctx.allowedUsers.has(userId);
+    // Handle permission replies before anything else (no rate limit).
+    // isOwner returns false when ownerUserId is null — fail closed in
+    // bootstrap mode so no allowlisted user can approve tool calls.
     const permMatch = PERMISSION_REPLY_RE.exec(message.content);
-    if (permMatch && canApprovePermissions) {
+    if (permMatch && isOwner(ctx, userId)) {
       notifyMcp(ctx, {
         method: "notifications/claude/channel/permission",
         params: {

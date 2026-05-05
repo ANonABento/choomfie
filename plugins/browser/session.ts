@@ -16,6 +16,69 @@ const DATA_DIR =
 const SCREENSHOT_DIR = join(DATA_DIR, "browser/screenshots");
 const USER_DATA_BASE = join(DATA_DIR, "browser/sessions");
 
+export interface BrowseUrlValidation {
+  ok: boolean;
+  url: string;
+  reason: string;
+}
+
+/**
+ * Validate a URL before navigating. Blocks file://, chrome://, javascript:, and
+ * (unless explicitly opted in) localhost / RFC 1918 / link-local hosts to
+ * prevent prompt-injection-driven SSRF and local-file exfiltration through the
+ * browser_screenshot + reply(files=…) chain.
+ *
+ * Set CHOOMFIE_BROWSER_ALLOW_PRIVATE=1 to allow private/loopback hosts (useful
+ * for local dev, opt-in only).
+ */
+export function validateBrowseUrl(rawUrl: string): BrowseUrlValidation {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return { ok: false, url: "", reason: `Invalid URL: ${rawUrl}` };
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return {
+      ok: false,
+      url: "",
+      reason: `URL scheme not allowed: ${parsed.protocol} (only http/https)`,
+    };
+  }
+
+  if (process.env.CHOOMFIE_BROWSER_ALLOW_PRIVATE === "1") {
+    return { ok: true, url: parsed.toString(), reason: "" };
+  }
+
+  // Strip brackets from IPv6 hostnames (Bun/Node may include them).
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (
+    host === "localhost" ||
+    host === "0.0.0.0" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    host === "::1" ||
+    host === "::" ||
+    /^fe[89ab][0-9a-f]:/i.test(host) ||
+    /^fc[0-9a-f][0-9a-f]:/i.test(host) ||
+    /^fd[0-9a-f][0-9a-f]:/i.test(host)
+  ) {
+    return {
+      ok: false,
+      url: "",
+      reason: `Private/loopback host blocked: ${host} (set CHOOMFIE_BROWSER_ALLOW_PRIVATE=1 to allow)`,
+    };
+  }
+
+  return { ok: true, url: parsed.toString(), reason: "" };
+}
+
 interface Session {
   context: BrowserContext;
   page: Page;
@@ -55,8 +118,13 @@ export async function browse(
   sessionName: string,
   url: string
 ): Promise<string> {
+  const validation = validateBrowseUrl(url);
+  if (!validation.ok) {
+    throw new Error(validation.reason);
+  }
+
   const { page } = await getSession(sessionName);
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.goto(validation.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
   // Wait a bit for dynamic content
   await page.waitForTimeout(1000);
   return await snapshot(sessionName);

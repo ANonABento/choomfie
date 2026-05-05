@@ -9,10 +9,79 @@ import {
   type TextChannel,
   type ThreadChannel,
 } from "discord.js";
+import { realpathSync } from "node:fs";
+import { resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
 import type { ToolDef } from "../types.ts";
 import { text, err } from "../types.ts";
 import { onReplySent } from "../typing.ts";
 import { refreshChannel } from "../conversation.ts";
+
+/**
+ * Allowed prefixes for files attached via the reply tool.
+ * Without this allowlist, prompt-injected Claude could attach arbitrary
+ * local files (e.g. ~/.ssh/id_rsa) and exfiltrate them through Discord.
+ */
+function allowedAttachmentRoots(dataDir: string): string[] {
+  return [
+    resolve(dataDir, "inbox"),
+    resolve(dataDir, "browser/screenshots"),
+    resolve(dataDir, "socials"),
+    resolve(tmpdir()),
+  ];
+}
+
+export interface AttachmentValidation {
+  ok: boolean;
+  resolved: string;
+  reason: string;
+}
+
+/**
+ * Validate that filePath resolves to a file inside one of the allowed roots.
+ * Uses realpath to defeat symlink escape.
+ */
+export function validateAttachmentPath(
+  filePath: string,
+  dataDir: string
+): AttachmentValidation {
+  if (typeof filePath !== "string" || !filePath.trim()) {
+    return { ok: false, resolved: "", reason: "Attachment path must be a non-empty string." };
+  }
+
+  const absolute = resolve(filePath);
+
+  let canonical: string;
+  try {
+    canonical = realpathSync(absolute);
+  } catch (e) {
+    return {
+      ok: false,
+      resolved: "",
+      reason: `Attachment not accessible: ${(e as Error).message}`,
+    };
+  }
+
+  const roots = allowedAttachmentRoots(dataDir);
+  for (const root of roots) {
+    let canonicalRoot: string;
+    try {
+      canonicalRoot = realpathSync(root);
+    } catch {
+      // Root may not exist yet (e.g. inbox before first attachment); skip it.
+      continue;
+    }
+    if (canonical === canonicalRoot || canonical.startsWith(canonicalRoot + sep)) {
+      return { ok: true, resolved: canonical, reason: "" };
+    }
+  }
+
+  return {
+    ok: false,
+    resolved: "",
+    reason: `Attachment path is outside allowed roots (DATA_DIR/inbox, DATA_DIR/browser/screenshots, DATA_DIR/socials, tmpdir): ${filePath}`,
+  };
+}
 
 /** Discord embed color constants */
 const COLORS = {
@@ -158,9 +227,16 @@ export const discordTools: ToolDef[] = [
       }
 
       if (args.files && Array.isArray(args.files)) {
-        opts.files = (args.files as string[]).map((f) => ({
-          attachment: f,
-        }));
+        const validated: { attachment: string }[] = [];
+        for (const f of args.files as unknown[]) {
+          if (typeof f !== "string") {
+            return err(`Invalid file path entry: ${typeof f}`);
+          }
+          const v = validateAttachmentPath(f, ctx.DATA_DIR);
+          if (!v.ok) return err(v.reason);
+          validated.push({ attachment: v.resolved });
+        }
+        opts.files = validated;
       }
 
       const sent = await textChannel.send(opts as any);

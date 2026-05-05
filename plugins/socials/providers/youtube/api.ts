@@ -6,9 +6,9 @@
  * Writes (comments): Requires OAuth 2.0 (socials.youtube.clientId + clientSecret).
  */
 
-import type { PluginContext } from "@choomfie/shared";
+import { writeSecretFileSync, type PluginContext } from "@choomfie/shared";
 import type { YouTubeProvider, VideoResult, TranscriptSegment } from "../types.ts";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, mkdirSync, existsSync } from "node:fs";
 import { randomBytes, createHash } from "node:crypto";
 
 // --- Constants ---
@@ -145,7 +145,7 @@ export class YouTubeCommentClient {
 
   private saveTokens(): void {
     if (!this.tokens) return;
-    writeFileSync(this.tokensPath, JSON.stringify(this.tokens, null, 2));
+    writeSecretFileSync(this.tokensPath, JSON.stringify(this.tokens, null, 2));
   }
 
   isAuthenticated(): boolean {

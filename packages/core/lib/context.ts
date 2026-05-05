@@ -2,15 +2,19 @@
  * Context factory — loads env/config and creates the AppContext object.
  */
 
+import { SECRET_FILE_MODE, writeSecretFile } from "@choomfie/shared";
 import { MemoryStore } from "./memory.ts";
 import { ConfigManager } from "./config.ts";
 import { ReminderScheduler } from "./reminders.ts";
 import { BirthdayScheduler } from "./birthdays.ts";
 import type { AppContext } from "./types.ts";
 
-/** Write current access state to disk. */
+// Re-exported for tests + existing callers.
+export { SECRET_FILE_MODE, writeSecretFile };
+
+/** Write current access state to disk with secret-file perms. */
 export async function saveAccess(ctx: AppContext) {
-  await Bun.write(
+  await writeSecretFile(
     ctx.accessPath,
     JSON.stringify(
       {

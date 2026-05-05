@@ -82,7 +82,9 @@ registerButtonHandler("permission", async (interaction, parts, ctx) => {
     return;
   }
 
-  if (ctx.ownerUserId && interaction.user.id !== ctx.ownerUserId) {
+  // Reject if no owner is configured (bootstrap mode) — there is no one
+  // authorized to approve. Permission requests should fail closed, not open.
+  if (!ctx.ownerUserId || interaction.user.id !== ctx.ownerUserId) {
     await interaction.reply({
       content: "Only the owner can approve permission requests.",
       flags: MessageFlags.Ephemeral,

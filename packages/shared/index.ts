@@ -40,6 +40,13 @@ export { VERSION } from "./version.ts";
 // Paths
 export { findMonorepoRoot } from "./paths.ts";
 
+// Secret-file helpers
+export {
+  SECRET_FILE_MODE,
+  writeSecretFile,
+  writeSecretFileSync,
+} from "./secret-file.ts";
+
 // Interaction registries
 export {
   registerButtonHandler,

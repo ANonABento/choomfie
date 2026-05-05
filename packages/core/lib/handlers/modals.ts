@@ -11,7 +11,7 @@ import {
 } from "discord.js";
 import { registerModalHandler } from "../interactions.ts";
 import { parseNaturalTime, isValidCron, normalizeTimeZone } from "../time.ts";
-import { createAndScheduleReminder } from "./shared.ts";
+import { createAndScheduleReminder, isOwner } from "./shared.ts";
 
 // --- Modal builders ---
 
@@ -195,6 +195,16 @@ registerModalHandler("modal-remind", async (interaction, _parts, ctx) => {
 });
 
 registerModalHandler("modal-persona", async (interaction, _parts, ctx) => {
+  // Defense-in-depth: the slash command is owner-gated, but a future code
+  // path that surfaces this modal must not accidentally grant write access.
+  if (!isOwner(ctx, interaction.user.id)) {
+    await interaction.reply({
+      content: "Only the owner can create personas.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
   const key = interaction.fields
     .getTextInputValue("key")
     .toLowerCase()
@@ -210,6 +220,14 @@ registerModalHandler("modal-persona", async (interaction, _parts, ctx) => {
 });
 
 registerModalHandler("modal-memory", async (interaction, _parts, ctx) => {
+  if (!isOwner(ctx, interaction.user.id)) {
+    await interaction.reply({
+      content: "Only the owner can save memories.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
   const key = interaction.fields.getTextInputValue("key");
   const value = interaction.fields.getTextInputValue("value");
 
