@@ -1,0 +1,57 @@
+profile:
+  name: choomfie
+
+model:
+  default: gpt-5.3-codex-spark
+  provider: openai-codex
+  aliases:
+    heavy:
+      model: gpt-5.5
+      provider: openai-codex
+
+gateway:
+  enabled: true
+  platforms:
+    discord:
+      enabled: true
+
+discord:
+  allow_mentions:
+    everyone: false
+    roles: false
+    users: true
+    replied_user: true
+
+agent:
+  gateway_auto_continue_freshness: 3600
+
+sessions:
+  auto_prune: true
+  retention_days: 30
+
+compression:
+  enabled: true
+  threshold: 0.5
+  target_ratio: 0.2
+  protect_last_n: 20
+
+plugins:
+  enabled:
+    - choomfie_commands
+    - choomfie_reminders
+    - choomfie_tutor
+
+tools:
+  enabled:
+    - web
+    - browser
+    - github
+    - memory
+    - session_search
+    - todo
+
+terminal:
+  cwd: .
+  env_passthrough:
+    - DISCORD_BOT_TOKEN
+    - CHOOMFIE_LEGACY_DB

@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Claude Code-powered Choomfie launcher.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0")")/.." && pwd)"
+
+if [ ! -d "$ROOT_DIR/node_modules" ]; then
+  echo "Installing dependencies..."
+  (cd "$ROOT_DIR" && bun install --no-summary)
+fi
+
+USE_TMUX=false
+USE_DAEMON=false
+ALWAYS_ON=false
+EXTRA_ARGS=()
+
+for arg in "$@"; do
+  case "$arg" in
+    --tmux) USE_TMUX=true ;;
+    --daemon) USE_DAEMON=true ;;
+    --always-on) ALWAYS_ON=true; USE_TMUX=true ;;
+    *) EXTRA_ARGS+=("$arg") ;;
+  esac
+done
+
+if [ "$USE_DAEMON" = true ]; then
+  QUOTED_ARGS=""
+  for a in "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"; do
+    QUOTED_ARGS="$QUOTED_ARGS $(printf %q "$a")"
+  done
+  INNER_CMD="cd $(printf %q "$ROOT_DIR") && exec bun packages/core/daemon.ts$QUOTED_ARGS"
+else
+  INNER_CMD="cd $(printf %q "$ROOT_DIR") && exec claude --plugin-dir $(printf %q "$ROOT_DIR") --dangerously-load-development-channels server:choomfie"
+fi
+
+if [ "$USE_TMUX" = true ]; then
+  if ! command -v tmux >/dev/null 2>&1; then
+    echo "Error: tmux not found."
+    exit 1
+  fi
+
+  if [ "$ALWAYS_ON" = true ] && command -v caffeinate >/dev/null 2>&1; then
+    pkill -f "caffeinate.*choomfie" 2>/dev/null || true
+    caffeinate -dims &
+    CAFFEINATE_PID=$!
+    trap "kill $CAFFEINATE_PID 2>/dev/null" EXIT
+  fi
+
+  SESSION_NAME="choomfie-claude-code"
+  if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+    tmux attach -t "$SESSION_NAME"
+  else
+    tmux new-session -d -s "$SESSION_NAME" "$INNER_CMD"
+    tmux attach -t "$SESSION_NAME"
+  fi
+else
+  cd "$ROOT_DIR"
+  if [ "$USE_DAEMON" = true ]; then
+    exec bun packages/core/daemon.ts "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"
+  fi
+  exec claude --plugin-dir "$ROOT_DIR" --dangerously-load-development-channels server:choomfie
+fi

@@ -1,0 +1,8 @@
+name: choomfie_commands
+version: 0.1.0
+description: Choomfie Discord command policy and status/help tool surface for Hermes.
+provides_tools:
+  - choomfie_status
+  - choomfie_help
+provides_hooks:
+  - pre_gateway_dispatch

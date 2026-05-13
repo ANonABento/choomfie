@@ -21,7 +21,9 @@
     "prepare": "husky || true",
     "deploy-commands": "bun packages/core/scripts/deploy-commands.ts",
     "daemon": "bun packages/core/daemon.ts",
-    "install:launchd": "packages/core/scripts/install-launchd.sh"
+    "install:launchd": "packages/core/scripts/install-launchd.sh",
+    "hermes:sync": "bin/choomfie sync",
+    "hermes:doctor": "bin/choomfie doctor"
   },
   "lint-staged": {
     "*.ts": "eslint --fix"

@@ -1,0 +1,21 @@
+name: choomfie
+version: 0.1.0
+description: Choomfie personal Discord agent distribution for Hermes.
+hermes_requires: ">=0.12.0"
+author: ANonABento
+license: MIT
+distribution_owned:
+  - SOUL.md
+  - skills/
+  - cron/
+  - distribution.yaml
+env_requires:
+  - name: DISCORD_BOT_TOKEN
+    description: Discord bot token for Hermes gateway.
+    required: true
+  - name: ANTHROPIC_API_KEY
+    description: Optional provider key if using Anthropic directly through Hermes.
+    required: false
+  - name: OPENAI_API_KEY
+    description: Optional provider key if using OpenAI directly through Hermes.
+    required: false

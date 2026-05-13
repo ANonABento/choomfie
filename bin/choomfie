@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+# Hermes-first Choomfie launcher.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0")")/.." && pwd)"
+HERMES_HOME="${CHOOMFIE_HERMES_HOME:-$HOME/.choomfie-hermes}"
+PROFILE_NAME="${CHOOMFIE_HERMES_PROFILE:-choomfie}"
+OVERLAY_DIR="${CHOOMFIE_HERMES_OVERLAY:-$ROOT_DIR/hermes-overlay}"
+
+usage() {
+  cat <<EOF
+Usage:
+  choomfie                  Start Hermes gateway for the Choomfie profile
+  choomfie start [args...]  Start Hermes gateway for the Choomfie profile
+  choomfie status [args...] Show Hermes gateway status
+  choomfie stop [args...]   Stop Hermes gateway for this profile
+  choomfie restart [args...] Restart Hermes gateway for this profile
+  choomfie install [args...] Install Hermes gateway service
+  choomfie uninstall [args...] Uninstall Hermes gateway service
+  choomfie list [args...]   List Hermes gateways
+  choomfie setup [args...]  Run Hermes gateway setup
+  choomfie migrate-legacy [args...] Run Hermes gateway legacy migration
+  choomfie chat             Open Hermes chat for the Choomfie profile
+  choomfie doctor           Check Hermes/overlay setup
+  choomfie sync             Sync overlay files into isolated Hermes state
+  choomfie update           Pull overlay changes into isolated Hermes state
+  choomfie claude-code [args...] Start the Claude Code-powered runtime
+  choomfie claude [args...]      Alias for claude-code
+
+Stop scope:
+  choomfie stop targets the Choomfie profile gateway. Hermes flags such as
+  --all or --system can broaden scope; check before confirming them.
+
+Environment:
+  CHOOMFIE_HERMES_HOME      Defaults to $HOME/.choomfie-hermes
+  CHOOMFIE_HERMES_PROFILE   Defaults to choomfie
+  HERMES_BIN                Defaults to hermes
+EOF
+}
+
+claude_code() {
+  exec "$ROOT_DIR/bin/choomfie-claude-code" "$@"
+}
+
+hermes_cmd() {
+  local hermes_bin="${HERMES_BIN:-hermes}"
+  HERMES_HOME="$HERMES_HOME" "$hermes_bin" -p "$PROFILE_NAME" "$@"
+}
+
+yaml_section_bool_is_true() {
+  local file="$1"
+  local section="$2"
+  local key="$3"
+  awk -F: -v section="$section" -v key="$key" '
+    $1 ~ "^" section "$" { in_section = 1; next }
+    in_section && $0 ~ "^[^[:space:]]" { in_section = 0 }
+    in_section && $1 ~ "^[[:space:]]*" key "[[:space:]]*$" {
+      value = tolower($2)
+      sub(/[[:space:]]*#.*/, "", value)
+      gsub(/[[:space:]]+/, "", value)
+      if (value == "true") found = 1
+    }
+    END { exit(found ? 0 : 1) }
+  ' "$file"
+}
+
+yaml_section_number_value() {
+  local file="$1"
+  local section="$2"
+  local key="$3"
+  awk -F: -v section="$section" -v key="$key" '
+    $1 ~ "^" section "$" { in_section = 1; next }
+    in_section && $0 ~ "^[^[:space:]]" { in_section = 0 }
+    in_section && $1 ~ "^[[:space:]]*" key "[[:space:]]*$" {
+      value = $2
+      sub(/[[:space:]]*#.*/, "", value)
+      gsub(/[[:space:]]+/, "", value)
+      print value
+      exit
+    }
+  ' "$file"
+}
+
+gateway_cmd() {
+  local action="$1"
+  shift || true
+  sync_overlay
+  hermes_cmd gateway "$action" "$@"
+}
+
+apply_profile_defaults() {
+  if ! command -v "${HERMES_BIN:-hermes}" >/dev/null 2>&1; then
+    echo "Skipping profile defaults: hermes CLI not found" >&2
+    return 0
+  fi
+
+  hermes_cmd config set model.default gpt-5.3-codex-spark >/dev/null
+  hermes_cmd config set model.provider openai-codex >/dev/null
+  hermes_cmd config set sessions.auto_prune true >/dev/null
+  hermes_cmd config set sessions.retention_days 30 >/dev/null
+  hermes_cmd config set compression.enabled true >/dev/null
+  hermes_cmd config set compression.threshold 0.5 >/dev/null
+  hermes_cmd config set compression.target_ratio 0.2 >/dev/null
+  hermes_cmd config set compression.protect_last_n 20 >/dev/null
+}
+
+sync_and_harden() {
+  sync_overlay
+  apply_profile_defaults
+}
+
+doctor() {
+  local ok=true
+  local profile_dir="$HERMES_HOME/profiles/$PROFILE_NAME"
+  local config_file="$profile_dir/config.yaml"
+  local env_file="$profile_dir/.env"
+  echo "Choomfie Hermes doctor"
+  echo "  repo: $ROOT_DIR"
+  echo "  overlay: $OVERLAY_DIR"
+  echo "  hermes home: $HERMES_HOME"
+  echo "  profile: $PROFILE_NAME"
+
+  if ! command -v "${HERMES_BIN:-hermes}" >/dev/null 2>&1; then
+    echo "  missing: hermes CLI (set HERMES_BIN or install Hermes)"
+    ok=false
+  else
+    echo "  hermes: $("${HERMES_BIN:-hermes}" --version 2>/dev/null || echo found)"
+  fi
+
+  if [ ! -f "$OVERLAY_DIR/distribution.yaml" ] || [ ! -f "$OVERLAY_DIR/SOUL.md" ]; then
+    echo "  missing: overlay distribution.yaml or SOUL.md"
+    ok=false
+  fi
+
+  if [ ! -f "$config_file" ]; then
+    echo "  profile: not synced yet (run choomfie sync)"
+    ok=false
+  else
+    echo "  profile: synced"
+
+    if yaml_section_bool_is_true "$config_file" "sessions" "auto_prune"; then
+      echo "  sessions auto-prune: enabled"
+    else
+      echo "  sessions auto-prune: disabled or missing"
+      ok=false
+    fi
+
+    retention_days="$(yaml_section_number_value "$config_file" "sessions" "retention_days")"
+    if [[ "$retention_days" =~ ^[0-9]+$ ]] && [ "$retention_days" -le 45 ]; then
+      echo "  session retention: ${retention_days} days"
+    else
+      echo "  session retention: missing or above 45 days"
+      ok=false
+    fi
+
+    if yaml_section_bool_is_true "$config_file" "compression" "enabled"; then
+      echo "  compression: enabled"
+    else
+      echo "  compression: missing or disabled"
+      ok=false
+    fi
+
+    if grep -Eq '^[[:space:]]*-[[:space:]]*(memory|session_search|todo|file|terminal|code_execution)([[:space:]]*#.*)?$' "$config_file"; then
+      echo "  tools: includes stateful/core tools"
+    else
+      echo "  tools: limited; verify this is intentional for Choomfie"
+    fi
+  fi
+
+  if [ -f "$env_file" ]; then
+    if grep -Eq '^(DISCORD_BOT_TOKEN|DISCORD_TOKEN)=.+[^[:space:]]' "$env_file"; then
+      echo "  discord token: configured"
+    else
+      echo "  discord token: missing in profile .env"
+      ok=false
+    fi
+
+    if grep -Eq '^DISCORD_ALLOWED_USERS=.+[^[:space:]]' "$env_file"; then
+      echo "  discord allowlist: configured"
+    elif grep -Eq '^(DISCORD_ALLOW_ALL|DISCORD_OPEN_ACCESS)=true' "$env_file"; then
+      echo "  discord allowlist: open access enabled"
+      ok=false
+    else
+      echo "  discord allowlist: missing"
+      ok=false
+    fi
+  else
+    echo "  profile .env: missing (copy .env.EXAMPLE)"
+    ok=false
+  fi
+
+  if [ -x "$OVERLAY_DIR/scripts/token-budget.sh" ]; then
+    echo "  token budget watcher: installed"
+  else
+    echo "  token budget watcher: missing"
+    ok=false
+  fi
+
+  if [ "$ok" = true ]; then
+    echo "Doctor passed."
+  else
+    echo "Doctor found setup gaps."
+    return 1
+  fi
+}
+
+sync_overlay() {
+  "$OVERLAY_DIR/scripts/sync.sh" "$OVERLAY_DIR" "$HERMES_HOME" "$PROFILE_NAME"
+}
+
+cmd="${1:-gateway}"
+case "$cmd" in
+  -h|--help|help)
+    usage
+    ;;
+  claude-code|claude)
+    shift
+    claude_code "$@"
+    ;;
+  legacy)
+    echo "Error: 'choomfie legacy' has been removed. Use 'choomfie claude-code'." >&2
+    exit 2
+    ;;
+  doctor)
+    doctor
+    ;;
+  sync|update)
+    sync_and_harden
+    ;;
+  start)
+    shift
+    sync_and_harden
+    hermes_cmd gateway start "$@"
+    ;;
+  install|setup|migrate-legacy)
+    shift
+    sync_and_harden
+    hermes_cmd gateway "$cmd" "$@"
+    ;;
+  status|uninstall|list)
+    shift
+    gateway_cmd "$cmd" "$@"
+    ;;
+  restart)
+    shift
+    sync_and_harden
+    hermes_cmd gateway restart "$@"
+    ;;
+  stop)
+    shift
+    echo "Note: 'choomfie stop' targets the Choomfie profile gateway. Flags such as --all or --system can broaden scope." >&2
+    gateway_cmd stop "$@"
+    ;;
+  chat)
+    shift
+    sync_overlay
+    hermes_cmd chat "$@"
+    ;;
+  gateway|"")
+    shift || true
+    sync_and_harden
+    hermes_cmd gateway start "$@"
+    ;;
+  *)
+    sync_overlay
+    hermes_cmd "$@"
+    ;;
+esac

@@ -1,0 +1,5 @@
+name: choomfie_tutor
+version: 0.1.0
+description: Choomfie language tutor state and quiz flow scaffold for Hermes.
+provides_tools:
+  - choomfie_tutor_session

@@ -1,0 +1,5 @@
+name: choomfie-policy
+description: Choomfie gateway policy notes and migration telemetry hook.
+events:
+  - gateway:startup
+  - command:*
