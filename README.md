@@ -165,6 +165,8 @@ hermes -p choomfie insights --days 1 --source discord
 
 The watcher stores the latest sample at `~/.choomfie-hermes/profiles/choomfie/state/token-budget-last-sample.txt`, warns at 2,000,000 tokens/day, and exits hard at 3,000,000 tokens/day. Override thresholds with `CHOOMFIE_TOKEN_WARN_THRESHOLD` and `CHOOMFIE_TOKEN_HARD_THRESHOLD`.
 
+Discord sessions use a lean default tool profile to reduce schema overhead: `web`, `terminal`, `file`, `skills`, `todo`, `memory`, `session_search`, `clarify`, `cronjob`, and `messaging` stay enabled; browser, code execution, vision, image generation, TTS, delegation, and computer-use are disabled unless explicitly re-enabled.
+
 Session hygiene controls:
 
 ```text

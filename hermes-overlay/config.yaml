@@ -23,7 +23,8 @@ discord:
     replied_user: true
 
 agent:
-  gateway_auto_continue_freshness: 3600
+  gateway_auto_continue_freshness: 900
+  max_turns: 50
 
 sessions:
   auto_prune: true

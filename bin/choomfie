@@ -103,6 +103,10 @@ apply_profile_defaults() {
   hermes_cmd config set compression.threshold 0.5 >/dev/null
   hermes_cmd config set compression.target_ratio 0.2 >/dev/null
   hermes_cmd config set compression.protect_last_n 20 >/dev/null
+  hermes_cmd config set agent.gateway_auto_continue_freshness 900 >/dev/null
+  hermes_cmd config set agent.max_turns 50 >/dev/null
+  hermes_cmd tools enable --platform discord web terminal file skills todo memory session_search clarify cronjob messaging >/dev/null || true
+  hermes_cmd tools disable --platform discord browser code_execution vision image_gen tts delegation computer_use >/dev/null || true
 }
 
 sync_and_harden() {
