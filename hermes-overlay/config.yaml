@@ -25,6 +25,10 @@ discord:
 agent:
   gateway_auto_continue_freshness: 900
   max_turns: 50
+  personalities:
+    choomfie:
+      description: Default Choomfie voice.
+      system_prompt: Be casual, friendly, and fun. Talk like a cyberpunk buddy; use slang, be direct, and be a ride-or-die friend.
 
 sessions:
   auto_prune: true

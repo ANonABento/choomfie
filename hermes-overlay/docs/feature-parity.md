@@ -9,7 +9,7 @@ Status key: Hermes-owned, Choomfie-owned, sidecar, deferred, retired.
 | Personality/defaults | Choomfie-owned | `SOUL.md`, `config.yaml`, and Choomfie skills are distribution-owned overlay files. |
 | `/status` and `/help` | Choomfie-owned on Hermes | `choomfie_commands` plugin exposes status/help tools; full Discord slash registration still needs live Hermes validation. |
 | `/memory` | deferred | Export/import tooling exists; curated Hermes memory write path needs a live Hermes memory provider choice. |
-| `/persona` | deferred | Hermes profiles cover most needs; lightweight style switching is not implemented yet. |
+| `/personality` / `/persona` | partial | Hermes mode uses native `/personality` plus `agent.personalities`, not the old Claude Code mode persona CRUD store. The default `choomfie` personality is configured; `/persona`, `/newpersona`, and modal CRUD remain Claude Code mode only unless Hermes supports pre-Discord plugin command registration. |
 | `/lesson` tutor flow | Choomfie-owned scaffold | Tutor skill and plugin cover start/resume/quiz/correct/retry contract; full SRS/buttons remain strongest in Claude Code mode until ported. |
 | `/voice` | sidecar/deferred | Keep Claude Code mode voice until manual Hermes voice evaluation proves DAVE/E2EE, STT/TTS, streaming, interruption, and multi-speaker parity. |
 | Reminders | Choomfie-owned on Hermes cron scaffold | Reminder skill and plugin normalize UX to Hermes cron/delivery; live cron creation and buttons need Hermes E2E. |

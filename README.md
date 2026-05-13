@@ -269,8 +269,9 @@ Available command coverage differs by runtime while Hermes parity is still being
 | `/savememory` | Save a memory |
 | `/github <check>` | Check PRs, issues, notifications |
 | `/status` | Bot status |
-| `/persona [switch]` | List or switch personas |
-| `/newpersona` | Create a persona |
+| `/personality [name]` | List or switch Hermes personality overlays |
+| `/persona [switch]` | Claude Code mode only; use `/personality` in Hermes mode |
+| `/newpersona` | Claude Code mode only |
 | `/plugins` | List, enable, or disable plugins |
 | `/voice` | Voice provider setup |
 | `/lesson` | Start a structured lesson |
