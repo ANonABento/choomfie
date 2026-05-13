@@ -7,6 +7,7 @@ Choomfie now has a Hermes-first overlay while Claude Code mode remains available
 ```bash
 choomfie              # sync overlay, then start Hermes gateway
 choomfie chat         # sync overlay, then open Hermes chat
+choomfie configure-discord # configure Discord token/allowlist for both runtimes
 choomfie doctor       # check Hermes CLI, overlay, profile, and Discord token
 choomfie sync         # copy overlay into isolated Hermes state
 choomfie claude-code  # start the Claude Code-powered runtime
@@ -37,6 +38,6 @@ Review the markdown draft before importing into Hermes. The export categorizes r
 
 ## Deferred Until E2E
 
-Voice, full Discord slash command registration, reminder buttons, persona switching, and full tutor SRS/buttons remain strongest in `choomfie claude-code` until live Hermes parity is proven.
+Voice, reminder buttons, Claude Code mode persona CRUD, and full tutor SRS/buttons remain strongest in `choomfie claude-code` until live Hermes parity is proven. Hermes mode uses native `/personality` for personality overlays.
 
 See [feature parity](../hermes-overlay/docs/feature-parity.md).

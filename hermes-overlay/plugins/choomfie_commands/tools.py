@@ -24,13 +24,14 @@ def choomfie_help(args=None, **kwargs):
                 "/status",
                 "/help",
                 "/memory",
-                "/persona",
+                "/personality",
                 "/lesson",
                 "/voice",
                 "/remind",
             ],
             "notes": [
                 "Hermes owns gateway, sessions, approvals, provider routing, and delivery.",
+                "Use /personality in Hermes mode; /persona is Claude Code mode only.",
                 "Use choomfie claude-code for unported voice or Discord UX until parity is proven.",
             ],
         }

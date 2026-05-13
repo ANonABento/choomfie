@@ -3,5 +3,5 @@ async def handle(event_type, context):
         print("[choomfie] Hermes gateway starting with Choomfie overlay", flush=True)
     elif event_type.startswith("command:"):
         command = event_type.split(":", 1)[1]
-        if command in {"voice", "lesson", "memory", "persona"}:
+        if command in {"voice", "lesson", "memory", "personality"}:
             print(f"[choomfie] command routed through migration surface: {command}", flush=True)

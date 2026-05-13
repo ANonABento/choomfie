@@ -101,7 +101,7 @@ Claude Code CLI/subscription path and mature Choomfie features.
   expose the Claude Code-powered path.
 - `packages/core/scripts/hermes-memory.ts` exports Claude Code mode memory into
   curated categories and renders a markdown import draft instead of raw-dumping
-  rows.
+  rows into Hermes.
 - `docs/hermes-migration.md` and `hermes-overlay/docs/feature-parity.md`
   document setup, ownership, deferred items, and manual E2E checks.
 - Automated coverage includes Hermes launcher smoke tests and memory migration
@@ -114,7 +114,7 @@ Claude Code CLI/subscription path and mature Choomfie features.
 | Discord gateway connection | `discord.js` worker | `discord.py` adapter in unified gateway | Hermes | Do not rebuild gateway lifecycle, reconnect, token locking, or generic delivery in Choomfie. |
 | Discord message sessions | Channel activity + in-memory local history; Claude/MCP notifications | Persistent session keys and SQLite session storage | Hermes | Do not keep a parallel Choomfie session DB except where Claude Code mode needs it. |
 | Discord auth/pairing | Owner auto-detect, allowlist, `!pair` | Allowlists, role auth, DM pairing, default-deny, token locks | Hermes with Choomfie policy defaults | Do not port Choomfie's allowlist format directly unless needed for migration import. |
-| Slash commands | `/remind`, `/memory`, `/persona`, `/plugins`, `/voice`, etc. | Gateway slash command dispatch and command registry | Shared: Hermes dispatch, Choomfie command behavior | Do not build a second command dispatcher; add Choomfie commands through Hermes extension points. |
+| Slash commands | `/remind`, `/memory`, `/persona`, `/plugins`, `/voice`, etc. | Gateway slash command dispatch and command registry, including native `/personality` | Shared: Hermes dispatch, Choomfie command behavior | Do not build a second command dispatcher; add Choomfie behavior through Hermes extension points and avoid advertising plugin commands as native slash commands until Hermes registers them before Discord sync. |
 | Discord buttons/modals | Choomfie-specific reminders/personas/voice setup | Approvals, confirm prompts, model picker, UI views | Shared | Reuse Hermes interaction primitives; only implement Choomfie-specific flows. |
 | Typing / busy behavior | Typing indicator state machine | Typing loops, active-agent guards, queued interrupts | Hermes | Do not maintain Choomfie's local typing state once on Hermes gateway. |
 | Attachments/media | Downloads attachments into Choomfie inbox | Media/document caching and multi-platform delivery | Hermes | Do not duplicate generic attachment caching. Choomfie may add domain-specific import behavior. |
@@ -175,7 +175,7 @@ Port or configure:
 - Choomfie display name, status/help language, and response style.
 - Mention/reply/free-channel behavior.
 - Owner/allowlist defaults and migration.
-- `/status`, `/memory`, `/persona`, `/lesson`, `/voice` surface commands.
+- `/status`, `/personality`, `/memory`, `/lesson`, `/voice` surface commands.
 - Approval and confirmation flows.
 - Thread behavior and home-channel defaults.
 

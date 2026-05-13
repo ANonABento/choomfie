@@ -7,6 +7,7 @@ ROOT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0")")/..
 HERMES_HOME="${CHOOMFIE_HERMES_HOME:-$HOME/.choomfie-hermes}"
 PROFILE_NAME="${CHOOMFIE_HERMES_PROFILE:-choomfie}"
 OVERLAY_DIR="${CHOOMFIE_HERMES_OVERLAY:-$ROOT_DIR/hermes-overlay}"
+CLAUDE_DATA_DIR="${CHOOMFIE_DATA_DIR:-$HOME/.claude/plugins/data/choomfie-inline}"
 
 usage() {
   cat <<EOF
@@ -22,6 +23,7 @@ Usage:
   choomfie setup [args...]  Run Hermes gateway setup
   choomfie migrate-legacy [args...] Run Hermes gateway legacy migration
   choomfie chat             Open Hermes chat for the Choomfie profile
+  choomfie configure-discord Configure Discord token/allowlist for both runtimes
   choomfie doctor           Check Hermes/overlay setup
   choomfie sync             Sync overlay files into isolated Hermes state
   choomfie update           Pull overlay changes into isolated Hermes state
@@ -35,6 +37,7 @@ Stop scope:
 Environment:
   CHOOMFIE_HERMES_HOME      Defaults to $HOME/.choomfie-hermes
   CHOOMFIE_HERMES_PROFILE   Defaults to choomfie
+  CHOOMFIE_DATA_DIR         Defaults to $HOME/.claude/plugins/data/choomfie-inline
   HERMES_BIN                Defaults to hermes
 EOF
 }
@@ -114,6 +117,117 @@ apply_profile_defaults() {
 sync_and_harden() {
   sync_overlay
   apply_profile_defaults
+}
+
+set_env_value() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  local tmp
+
+  mkdir -p "$(dirname "$file")"
+  tmp="$(mktemp)"
+  if [ -f "$file" ]; then
+    awk -v key="$key" -v value="$value" '
+      BEGIN { done = 0 }
+      $0 ~ "^" key "=" {
+        print key "=" value
+        done = 1
+        next
+      }
+      { print }
+      END {
+        if (!done) print key "=" value
+      }
+    ' "$file" > "$tmp"
+  else
+    printf '%s=%s\n' "$key" "$value" > "$tmp"
+  fi
+  mv "$tmp" "$file"
+  chmod 600 "$file"
+}
+
+read_env_value() {
+  local file="$1"
+  local key="$2"
+  [ -f "$file" ] || return 1
+  awk -F= -v key="$key" '$1 == key { print substr($0, length(key) + 2); exit }' "$file"
+}
+
+detect_discord_owner() {
+  local token="$1"
+  local app_json
+  command -v curl >/dev/null 2>&1 || return 1
+  app_json="$(curl -s -H "Authorization: Bot $token" https://discord.com/api/v10/oauth2/applications/@me 2>/dev/null || true)"
+  echo "$app_json" | grep -o '"owner"[^}]*"id"[^"]*"[^"]*"' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4
+}
+
+configure_discord() {
+  local claude_env="$CLAUDE_DATA_DIR/.env"
+  local profile_dir="$HERMES_HOME/profiles/$PROFILE_NAME"
+  local hermes_env="$profile_dir/.env"
+  local token="${DISCORD_TOKEN:-${DISCORD_BOT_TOKEN:-}}"
+  local owner_id=""
+  local non_interactive=false
+
+  for arg in "$@"; do
+    case "$arg" in
+      --non-interactive) non_interactive=true ;;
+      *) echo "Unknown configure-discord option: $arg" >&2; return 2 ;;
+    esac
+  done
+
+  mkdir -p "$CLAUDE_DATA_DIR" "$profile_dir"
+
+  if [ -z "$token" ]; then
+    token="$(read_env_value "$claude_env" DISCORD_TOKEN || true)"
+  fi
+  if [ -z "$token" ]; then
+    token="$(read_env_value "$hermes_env" DISCORD_BOT_TOKEN || true)"
+  fi
+
+  if [ -z "$token" ] && [ "$non_interactive" = false ]; then
+    echo ""
+    echo "You need a Discord bot token. If you do not have one yet:"
+    echo "  1. Go to https://discord.com/developers/applications"
+    echo "  2. Create New Application > Bot > Reset Token > Copy"
+    echo "  3. Enable MESSAGE CONTENT INTENT under Bot > Privileged Intents"
+    echo "  4. Invite bot: OAuth2 > URL Generator > bot scope > Send Messages + Read Message History"
+    echo ""
+    read -rp "Paste your Discord bot token (or press Enter to skip): " token
+  fi
+
+  if [ -z "$token" ]; then
+    echo "Discord token not configured. Re-run 'choomfie configure-discord' when ready."
+    return 0
+  fi
+
+  set_env_value "$claude_env" DISCORD_TOKEN "$token"
+  set_env_value "$hermes_env" DISCORD_BOT_TOKEN "$token"
+  set_env_value "$hermes_env" CHOOMFIE_LEGACY_DB "$CLAUDE_DATA_DIR/choomfie.db"
+
+  if [ -f "$CLAUDE_DATA_DIR/access.json" ] && grep -q '"owner"' "$CLAUDE_DATA_DIR/access.json"; then
+    owner_id="$(grep -o '"owner"[[:space:]]*:[[:space:]]*"[^"]*"' "$CLAUDE_DATA_DIR/access.json" | cut -d'"' -f4)"
+  else
+    owner_id="$(detect_discord_owner "$token" || true)"
+    if [ -n "$owner_id" ]; then
+      cat > "$CLAUDE_DATA_DIR/access.json" <<EOJSON
+{
+  "policy": "allowlist",
+  "owner": "$owner_id",
+  "allowed": ["$owner_id"]
+}
+EOJSON
+      chmod 600 "$CLAUDE_DATA_DIR/access.json"
+    fi
+  fi
+
+  if [ -n "$owner_id" ]; then
+    set_env_value "$hermes_env" DISCORD_ALLOWED_USERS "$owner_id"
+    echo "Discord configured for owner $owner_id."
+  else
+    echo "Discord token configured. Set DISCORD_ALLOWED_USERS in $hermes_env before starting Hermes mode."
+  fi
 }
 
 doctor() {
@@ -230,6 +344,10 @@ case "$cmd" in
     ;;
   doctor)
     doctor
+    ;;
+  configure-discord)
+    shift
+    configure_discord "$@"
     ;;
   sync|update)
     sync_and_harden

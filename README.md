@@ -123,6 +123,7 @@ choomfie status --deep                        # detailed gateway status
 choomfie restart                              # restart gateway service
 choomfie stop                                 # stop Choomfie gateway
 choomfie chat                                 # open Hermes chat with Choomfie profile
+choomfie configure-discord                    # configure Discord token and allowlist for both runtimes
 choomfie doctor                               # Choomfie overlay/profile doctor
 journalctl --user -u hermes-gateway-choomfie -f
 ```
@@ -260,6 +261,17 @@ In servers, `@mention` the bot or reply to its messages. In DMs, just talk.
 
 Available command coverage differs by runtime while Hermes parity is still being proven.
 
+Hermes mode native commands:
+
+| Command | Description |
+| --- | --- |
+| `/status` | Bot status |
+| `/help` | Show commands |
+| `/personality [name]` | List or switch Hermes personality overlays |
+| `/plugins` | List, enable, or disable plugins |
+
+Claude Code mode commands:
+
 | Command | Description |
 | --- | --- |
 | `/remind` | Set a reminder |
@@ -268,15 +280,11 @@ Available command coverage differs by runtime while Hermes parity is still being
 | `/memory [search]` | List or search memories |
 | `/savememory` | Save a memory |
 | `/github <check>` | Check PRs, issues, notifications |
-| `/status` | Bot status |
-| `/personality [name]` | List or switch Hermes personality overlays |
-| `/persona [switch]` | Claude Code mode only; use `/personality` in Hermes mode |
-| `/newpersona` | Claude Code mode only |
-| `/plugins` | List, enable, or disable plugins |
+| `/persona [switch]` | List or switch Claude Code mode personas |
+| `/newpersona` | Create a Claude Code mode persona |
 | `/voice` | Voice provider setup |
 | `/lesson` | Start a structured lesson |
 | `/progress` | Show learning progress |
-| `/help` | Show commands |
 
 ### Claude Code Skills
 
