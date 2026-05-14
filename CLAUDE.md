@@ -113,7 +113,7 @@ Plugins live in `plugins/<name>/index.ts` as workspace packages and export a `Pl
 - `onInteraction(interaction, ctx)` — hook into every interaction (buttons/commands/modals)
 - `destroy()` — cleanup on shutdown
 
-Plugins are workspace packages (`@choomfie/voice`, `@choomfie/browser`, `@choomfie/tutor`, `@choomfie/socials`) that import shared types from `@choomfie/shared` instead of relative `../../lib/` paths. The plugin loader in `packages/core/lib/plugins.ts` uses an explicit workspace package map. `discoverPlugins()` currently also advertises `rss`, but there is no `plugins/rss` workspace package, so enabling it logs a load failure.
+Plugins are workspace packages (`@choomfie/voice`, `@choomfie/browser`, `@choomfie/tutor`, `@choomfie/socials`) that import shared types from `@choomfie/shared` instead of relative `../../lib/` paths. The plugin loader in `packages/core/lib/plugins.ts` uses an explicit workspace package map, and `discoverPlugins()` returns the names from that map.
 
 Enable plugins via `/plugins` command from Discord, or in `config.json`: `"plugins": ["voice", "socials"]`
 
