@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# Compatibility shim for the Claude Code-powered launcher.
-
-set -euo pipefail
-
-ROOT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0")")/../../.." && pwd)"
-exec "$ROOT_DIR/bin/choomfie-claude-code" "$@"

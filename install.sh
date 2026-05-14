@@ -48,7 +48,6 @@ echo "[2/4] Installing dependencies..."
 echo "[3/4] Installing 'choomfie' command..."
 mkdir -p "$BIN_DIR"
 chmod +x "$CHOOMFIE_DIR/bin/choomfie" "$CHOOMFIE_DIR/bin/choomfie-claude-code"
-chmod +x "$CHOOMFIE_DIR/packages/core/bin/choomfie"
 chmod +x "$CHOOMFIE_DIR/hermes-overlay/scripts/"*.sh
 ln -sf "$CHOOMFIE_DIR/bin/choomfie" "$BIN_DIR/choomfie"
 ln -sf "$CHOOMFIE_DIR/bin/choomfie-claude-code" "$BIN_DIR/choomfie-claude-code"
