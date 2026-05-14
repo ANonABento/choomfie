@@ -41,3 +41,5 @@ Review the markdown draft before importing into Hermes. The export categorizes r
 Voice, reminder buttons, Claude Code mode persona CRUD, and full tutor SRS/buttons remain strongest in `choomfie claude-code` until live Hermes parity is proven. Hermes mode uses native `/personality` for personality overlays.
 
 See [feature parity](../hermes-overlay/docs/feature-parity.md).
+
+For the next parity slice, see [Choomfie Hermes sync roadmap](choomfie-hermes-sync-roadmap.md) and [reminders handoff](choomfie-reminders-handoff.md).

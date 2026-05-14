@@ -16,6 +16,8 @@ Status key: Hermes-owned, Choomfie-owned, sidecar, deferred, retired.
 | Bento/background work | Choomfie-owned workflow | Skill maps claiming/reporting to Hermes cron/delegation/delivery. |
 | Browser/socials/GitHub | mixed | Prefer Hermes generic tools; keep Choomfie-specific approvals and Discord UX. |
 
+Next parity slice: [Choomfie Hermes sync roadmap](../../docs/choomfie-hermes-sync-roadmap.md) and [reminders handoff](../../docs/choomfie-reminders-handoff.md).
+
 ## Manual E2E Checks
 
 - Start: `choomfie doctor`, then `choomfie`.
