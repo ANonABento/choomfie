@@ -27,6 +27,9 @@ Usage:
   choomfie doctor           Check Hermes/overlay setup
   choomfie sync             Sync overlay files into isolated Hermes state
   choomfie update           Pull overlay changes into isolated Hermes state
+  choomfie reset [scope]    Wipe stored state (interactive picker if scope omitted).
+                            Scopes: core, archival, memory, reminders, birthdays,
+                            webhooks, all. Local destructive command; stops Choomfie if running.
   choomfie claude-code [args...] Start the Claude Code-powered runtime
   choomfie claude [args...]      Alias for claude-code
 
@@ -351,6 +354,14 @@ case "$cmd" in
     ;;
   sync|update)
     sync_and_harden
+    ;;
+  reset)
+    shift
+    if ! command -v bun >/dev/null 2>&1; then
+      echo "Error: 'bun' is required for choomfie reset." >&2
+      exit 1
+    fi
+    exec bun "$ROOT_DIR/packages/core/scripts/reset.ts" "$@"
     ;;
   start)
     shift
