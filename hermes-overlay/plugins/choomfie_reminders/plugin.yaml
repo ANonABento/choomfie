@@ -1,5 +1,10 @@
 name: choomfie_reminders
 version: 0.1.0
-description: Choomfie reminder UX mapping onto Hermes cron and delivery.
+description: Choomfie reminder UX backed by Hermes cron and delivery.
 provides_tools:
   - choomfie_reminder_plan
+  - choomfie_reminder_create
+  - choomfie_reminder_list
+  - choomfie_reminder_cancel
+  - choomfie_reminder_snooze
+  - choomfie_reminder_ack

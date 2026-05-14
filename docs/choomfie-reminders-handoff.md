@@ -38,11 +38,27 @@ Claude Code mode has mature reminder behavior:
   - Nag mode via `nag_interval`.
   - Ack/snooze buttons via `packages/core/lib/handlers/reminder-buttons.ts`.
 
-Hermes mode currently has only scaffolding:
+Hermes mode implementation in this repo:
 
 - Skill: `hermes-overlay/skills/reminders/SKILL.md`.
 - Plugin: `hermes-overlay/plugins/choomfie_reminders`.
-- Tool: `choomfie_reminder_plan`, which returns a normalized plan but does not create/list/cancel real jobs.
+- Tools:
+  - `choomfie_reminder_plan`
+  - `choomfie_reminder_create`
+  - `choomfie_reminder_list`
+  - `choomfie_reminder_cancel`
+  - `choomfie_reminder_snooze`
+  - `choomfie_reminder_ack`
+- State: `~/.choomfie-hermes/profiles/choomfie/state/choomfie-reminders.json` maps Choomfie numeric ids to Hermes cron job ids, generated script paths, and reminder metadata.
+- Delivery jobs use Hermes `cronjob` with `no_agent=True` and a generated profile-local script under `~/.choomfie-hermes/profiles/choomfie/scripts/choomfie-reminders/`. This avoids LLM/tool recursion during reminder delivery and sends the exact reminder text through Hermes delivery.
+- Listing reminders reconciles active one-shot Choomfie records against Hermes cron. If Hermes has already removed a delivered one-shot job, Choomfie marks it `fired`, records `last_fired_at`, and removes the generated script.
+
+Current known limits:
+
+- Native Discord slash commands are not used for Hermes reminders because plugin command registration is not available before Hermes slash sync.
+- Native Discord buttons are not implemented in the overlay; use text commands such as "ack reminder 3" and "snooze reminder 3 for 1h".
+- Nag support is represented in profile-local metadata. There is not yet a Hermes fired-reminder callback in this overlay that can create a separate post-fire nag job.
+- DM delivery is only safe when the reminder is created from the target DM/origin context. The overlay does not infer arbitrary DM targets.
 
 Hermes primitives available:
 
@@ -163,15 +179,13 @@ Reason for the Choomfie index:
 - Choomfie users expect small numeric reminder ids.
 - Listing and canceling should not require parsing arbitrary Hermes cron job names.
 
-Create job prompt should be self-contained and short:
+Create jobs are script-only Hermes cron jobs. The generated script should be self-contained and print the reminder text:
 
-```text
-Reminder for <user/display>: <message>
-
-Send this as a reminder. Do not ask follow-up questions. Keep the response concise.
+```python
+print("Reminder: <message>")
 ```
 
-Use `skills=["choomfie-reminders"]` if useful, but avoid recursive cron creation.
+Do not attach `skills=["choomfie-reminders"]` to reminder delivery jobs. Live testing showed that cron-run skill loading did not find the local skill and LLM-driven delivery could recursively call reminder creation tools.
 
 Acceptance:
 
@@ -179,6 +193,8 @@ Acceptance:
 - `choomfie_reminder_list` shows it.
 - `choomfie_reminder_cancel` removes the corresponding Hermes cron job and marks Choomfie state canceled.
 - Claude Code mode reminder files are untouched.
+
+Implemented in `hermes-overlay/plugins/choomfie_reminders`.
 
 ### Phase 2: Recurrence And Timezone Normalization
 
@@ -194,13 +210,15 @@ Add normalization helpers in `hermes-overlay/plugins/choomfie_reminders/tools.py
   - `monthly`
   - `every 2h`
 - Prefer Hermes-supported schedule strings directly when possible.
-- Preserve timezone in metadata and prompt even when Hermes schedule stores an absolute value.
+- Preserve timezone in metadata even when Hermes schedule stores an absolute value or interval.
 
 Acceptance:
 
 - Recurring `daily` or `every 2h` reminders create interval/cron Hermes jobs.
 - Listing clearly marks recurring reminders.
 - Invalid timezone or unparseable schedule returns a clear error.
+
+Implemented normalization currently supports `30m`, `in 30 minutes`, `tomorrow at 9am`, ISO timestamps, `daily at 9am`, `weekly on monday at 9am`, `monthly on day 1 at 9am`, and `every 2h`. The live Hermes profile has cron-expression support, so named daily/weekly/monthly reminders are stored as Hermes cron expressions in the Choomfie profile timezone. Other timezone-specific recurring requests should use an interval such as `every 24h` until Hermes exposes per-job timezone handling.
 
 ### Phase 3: Snooze/Ack/Nag State
 
@@ -223,6 +241,8 @@ Important:
 
 - Do not leave orphan nag jobs after ack/cancel.
 - List should show nagging reminders separately if state supports it.
+
+Implemented text ack/snooze and local nag metadata. Separate post-fire nag jobs remain deferred until Hermes exposes a stable fired-reminder callback for profile plugins.
 
 ### Phase 4: Discord UX
 
@@ -307,7 +327,7 @@ Manual Hermes-mode reminder checks:
 - Hermes plugin commands are not reliable as native Discord slash commands today.
 - Recurrence and timezone semantics may not exactly match Choomfie's TypeScript natural-time parser.
 - Ack/snooze buttons may need Hermes-side interaction support that is not available through repo-local plugin APIs.
-- Cron jobs run in fresh sessions; prompts must be self-contained and must not rely on current chat history.
+- Reminder delivery cron jobs are script-only (`no_agent=True`) so they do not rely on current chat history and cannot recursively call Choomfie reminder tools.
 
 ## Definition Of Done
 
@@ -318,6 +338,14 @@ Manual Hermes-mode reminder checks:
 - Static validation passes.
 - Live gateway restarts cleanly.
 - At least one manual reminder is created, listed, canceled, and one is allowed to fire in Discord.
+
+## Live Validation Notes
+
+- Script-only Discord delivery was verified with Hermes cron job `450a7b3d3754`; its output file contained `Reminder: codex script-only discord reminder smoke 2026-05-14-0033`, and `agent.log` recorded delivery to `discord:123456789012345678` via the live adapter.
+- The earlier LLM-driven live test (`394441a2268a`) exposed why reminder jobs must not attach `skills=["choomfie-reminders"]`: the cron run could not resolve the local skill and then recursively called `choomfie_reminder_create`.
+- Fired one-shot reconciliation was verified with live profile job `627c022b027a`: after removing the Hermes cron job directly, `choomfie_reminder_list` returned zero active reminders and history showed the Choomfie record as `fired`.
+- Named recurrence was verified with live profile job `4d1735747089`: `daily at 9am` created Hermes schedule `0 9 * * *`, produced next run `2026-05-14T09:00:00-04:00`, listed correctly, then canceled and left no scheduled jobs.
+- The exact user-originated Discord natural-language flow was verified from the allowed `Alex` Discord DM on `2026-05-13`: "remind me in 3 mins to test hermes reminders" created Choomfie id `1` / Hermes job `dd83b3b4771e`, "list my reminders" invoked `choomfie_reminder_list`, "cancel reminder 1" removed the cron job, and "remind me in 30 seconds to test hermes delivery" was retried as the supported minimum `1m`, creating Choomfie id `2` / Hermes job `9a55206feea5`. The job fired at `2026-05-13 22:04:56 EDT`, cron output contained `Reminder: test hermes delivery`, `agent.log` recorded delivery to `discord:123456789012345678` via the live adapter, and reconciliation marked id `2` fired and removed the generated script.
 
 ## Handoff Goal Prompt
 

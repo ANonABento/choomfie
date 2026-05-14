@@ -12,7 +12,7 @@ Status key: Hermes-owned, Choomfie-owned, sidecar, deferred, retired.
 | `/personality` / `/persona` | partial | Hermes mode uses native `/personality` plus `agent.personalities`, not the old Claude Code mode persona CRUD store. The default `choomfie` personality is configured; `/persona`, `/newpersona`, and modal CRUD remain Claude Code mode only. |
 | `/lesson` tutor flow | Choomfie-owned scaffold | Tutor skill and plugin cover start/resume/quiz/correct/retry contract; full SRS/buttons remain strongest in Claude Code mode until ported. |
 | `/voice` | sidecar/deferred | Keep Claude Code mode voice until manual Hermes voice evaluation proves DAVE/E2EE, STT/TTS, streaming, interruption, and multi-speaker parity. |
-| Reminders | Choomfie-owned on Hermes cron scaffold | Reminder skill and plugin normalize UX to Hermes cron/delivery; live cron creation and buttons need Hermes E2E. |
+| Reminders | Choomfie-owned on Hermes cron | `choomfie_reminder_create/list/cancel/snooze/ack` create Hermes script-only cron jobs and store profile-local Choomfie ids in `state/choomfie-reminders.json`. Text ack/snooze is supported. Named daily/weekly/monthly recurrence uses Hermes cron expressions in the Choomfie profile timezone. Native Discord buttons remain deferred until Hermes exposes a stable profile interaction hook. |
 | Bento/background work | Choomfie-owned workflow | Skill maps claiming/reporting to Hermes cron/delegation/delivery. |
 | Browser/socials/GitHub | mixed | Prefer Hermes generic tools; keep Choomfie-specific approvals and Discord UX. |
 
@@ -22,7 +22,7 @@ Next parity slice: [Choomfie Hermes sync roadmap](../../docs/choomfie-hermes-syn
 
 - Start: `choomfie doctor`, then `choomfie`.
 - Discord text: DM, server mention, reply, thread reply, typing indicator, safe mentions, and session persistence.
-- Slash/command UX: `/status`, `/help`, `/personality`, `/memory`, `/lesson`, `/voice`, reminder create/list/cancel.
+- Slash/command UX: `/status`, `/help`, `/personality`, `/memory`, `/lesson`, `/voice`, reminder create/list/cancel/snooze/ack by natural text.
 - Approvals: trigger a risky command and verify Discord approval UI or Hermes approval fallback.
-- Reminders: one-shot, recurring, snooze, ack, nag mode, original-channel delivery, DM fallback.
+- Reminders: one-shot, recurring, text snooze, text ack, nag metadata, original-channel delivery, explicit delivery target fallback.
 - Voice: receive, DAVE/E2EE, STT latency/accuracy, TTS quality, streaming, interruption/barge-in, multi-speaker behavior, persona fillers.

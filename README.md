@@ -261,6 +261,18 @@ In servers, `@mention` the bot or reply to its messages. In DMs, just talk.
 
 Available command coverage differs by runtime while Hermes parity is still being proven.
 
+Hermes mode reminders are agent-mediated through natural Discord text, not native slash commands yet. Ask Choomfie things like:
+
+```text
+remind me in 30 minutes to check the deploy
+what reminders do I have?
+cancel reminder 3
+snooze reminder 3 for 1h
+ack reminder 3
+```
+
+Hermes reminder state lives in `~/.choomfie-hermes/profiles/choomfie/state/choomfie-reminders.json`. Choomfie maps small numeric reminder ids to Hermes cron job ids and generated profile-local reminder scripts. Reminder delivery uses Hermes script-only cron jobs, so the exact reminder text is delivered without starting another agent turn. Recurring reminders use Hermes interval schedules or cron expressions in the Choomfie profile timezone. Requested timezone and original schedule text are preserved in Choomfie metadata.
+
 Hermes mode native commands:
 
 | Command | Description |
