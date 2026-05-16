@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0 — OpenAI-Compatible Endpoint (2026-05-16)
+
+### Added
+
+- Local OpenAI-compatible endpoint at `http://127.0.0.1:4141/v1`.
+- API key issue/list/revoke commands with hash-only key storage.
+- OpenAI-shaped models, chat completions, embeddings, files, and Responses subsets.
+- Chat Completions streaming with data-only SSE and `[DONE]` termination.
+- Choomfie extension routes for app-scoped memory, Discord notify, and skill invocation.
+- Claude Code supervisor sidecar lifecycle and Hermes launcher sidecar lifecycle.
+- Hermes routing support with standard-route pass-through and non-streaming CLI chat fallback.
+
 ## 0.5.0 — Monorepo (2026-04-02)
 
 ### Breaking Changes

@@ -31,19 +31,24 @@ import {
   type PendingToolCallMap,
 } from "./lib/supervisor-boundary.ts";
 import { errorMessage } from "@choomfie/shared";
+import { ConfigManager } from "./lib/config.ts";
+import type { IpcOpenAINotify } from "./lib/ipc-types.ts";
 
 // --- Config ---
 const WORKER_READY_TIMEOUT = 30_000; // 30s for worker to send "ready"
 const TOOL_CALL_TIMEOUT = 120_000; // 2min per tool call
 const RESTART_PENDING_DRAIN_TIMEOUT = 5_000; // planned restarts wait for active calls to finish
 const WORKER_PATH = `${import.meta.dir}/worker.ts`;
+const OPENAI_SERVER_PATH = `${import.meta.dir}/openai-server.ts`;
 
 // --- State ---
 let worker: ReturnType<typeof spawnWorker> | null = null;
+let openAIEndpoint: ReturnType<typeof Bun.spawn> | null = null;
 let workerReady = false;
 let currentTools: IpcToolDef[] = [];
 let currentInstructions = "";
 let toolCallId = 0;
+const pendingOpenAINotify = new Set<string>();
 let intentionalRestart = false; // suppress auto-respawn during restart tool
 let crashCount = 0;
 let lastCrashTime = 0;
@@ -64,6 +69,162 @@ const DATA_DIR =
   `${process.env.HOME}/.claude/plugins/data/choomfie-inline`;
 
 const pidPath = `${DATA_DIR}/choomfie.pid`;
+
+function startOpenAIEndpointIfEnabled() {
+  const config = new ConfigManager(DATA_DIR).getOpenAIEndpointConfig();
+  if (!config.enabled) return null;
+
+  console.error(
+    `Supervisor: starting OpenAI endpoint on ${config.host}:${config.port}`,
+  );
+  const child = Bun.spawn(["bun", OPENAI_SERVER_PATH], {
+    stdio: ["ignore", "ignore", "inherit"],
+    ipc: handleOpenAIEndpointMessage,
+    env: {
+      ...process.env,
+      CHOOMFIE_DATA_DIR: DATA_DIR,
+    },
+  });
+
+  child.exited.then((code) => {
+    if (openAIEndpoint !== child) return;
+    openAIEndpoint = null;
+    console.error(`Supervisor: OpenAI endpoint exited (code ${code})`);
+  });
+
+  return child;
+}
+
+async function stopOpenAIEndpoint() {
+  if (!openAIEndpoint) return;
+
+  const child = openAIEndpoint;
+  openAIEndpoint = null;
+  try {
+    child.kill();
+  } catch {}
+
+  const timeout = new Promise((resolve) => setTimeout(resolve, 5000));
+  await Promise.race([child.exited, timeout]);
+
+  try {
+    child.kill("SIGKILL");
+  } catch {}
+}
+
+function sendOpenAINotifyResult(
+  id: string,
+  result: { ok: boolean; mode?: "owner_dm" | "channel"; error?: string },
+) {
+  try {
+    openAIEndpoint?.send({
+      type: "openai_notify_result",
+      id,
+      ...result,
+    });
+  } catch {}
+}
+
+function handleOpenAIEndpointMessage(msg: unknown) {
+  if (!msg || typeof msg !== "object") return;
+  const notify = msg as Partial<IpcOpenAINotify>;
+  if (
+    notify.type !== "openai_notify" &&
+    (notify as Record<string, unknown>).type !== "openai_skills_list" &&
+    (notify as Record<string, unknown>).type !== "openai_skill_invoke"
+  ) return;
+  if (typeof notify.id !== "string") return;
+
+  const type = (notify as Record<string, unknown>).type;
+  if (type === "openai_skills_list") {
+    try {
+      openAIEndpoint?.send({
+        type: "openai_skills_result",
+        id: notify.id,
+        ok: true,
+        skills: currentTools.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+        })),
+      });
+    } catch {}
+    return;
+  }
+
+  if (type === "openai_skill_invoke") {
+    const invoke = notify as Record<string, unknown>;
+    const name = typeof invoke.name === "string" ? invoke.name : "";
+    const args = invoke.args && typeof invoke.args === "object" && !Array.isArray(invoke.args)
+      ? invoke.args as Record<string, unknown>
+      : {};
+    if (!currentTools.some((tool) => tool.name === name)) {
+      try {
+        openAIEndpoint?.send({
+          type: "openai_skills_result",
+          id: notify.id,
+          ok: false,
+          error: `Unknown skill: ${name}`,
+        });
+      } catch {}
+      return;
+    }
+    callWorkerTool(name, args)
+      .then((result) => {
+        try {
+          openAIEndpoint?.send({
+            type: "openai_skills_result",
+            id: notify.id,
+            ok: true,
+            result,
+          });
+        } catch {}
+      })
+      .catch((error) => {
+        try {
+          openAIEndpoint?.send({
+            type: "openai_skills_result",
+            id: notify.id,
+            ok: false,
+            error: errorMessage(error),
+          });
+        } catch {}
+      });
+    return;
+  }
+
+  if (!worker || !workerReady) {
+    sendOpenAINotifyResult(notify.id, {
+      ok: false,
+      error: "Worker is not ready",
+    });
+    return;
+  }
+
+  if (typeof notify.content !== "string" || typeof notify.app !== "string") {
+    sendOpenAINotifyResult(notify.id, {
+      ok: false,
+      error: "Invalid notification payload",
+    });
+    return;
+  }
+
+  pendingOpenAINotify.add(notify.id);
+  try {
+    worker.send({
+      type: "openai_notify",
+      id: notify.id,
+      app: notify.app,
+      content: notify.content,
+      channel_id: typeof notify.channel_id === "string" ? notify.channel_id : undefined,
+    });
+  } catch (error) {
+    pendingOpenAINotify.delete(notify.id);
+    sendOpenAINotifyResult(notify.id, {
+      ok: false,
+      error: errorMessage(error),
+    });
+  }
+}
 
 async function acquirePid() {
   try {
@@ -179,6 +340,17 @@ function handleWorkerMessage(msg: WorkerMessage) {
             method: msg.method,
             params: msg.params,
           } as McpNotification);
+        }
+        break;
+
+      case "openai_notify_result":
+        if (pendingOpenAINotify.has(msg.id)) {
+          pendingOpenAINotify.delete(msg.id);
+          sendOpenAINotifyResult(msg.id, {
+            ok: msg.ok,
+            mode: msg.mode,
+            error: msg.error,
+          });
         }
         break;
 
@@ -413,6 +585,7 @@ function createMcp(): Server {
 // --- Main ---
 
 await acquirePid();
+openAIEndpoint = startOpenAIEndpointIfEnabled();
 
 // Spawn worker FIRST — wait for it to send tools + instructions
 // before connecting MCP, so the initialize handshake serves real data.
@@ -448,6 +621,9 @@ const shutdown = async () => {
   if (shutdownCalled) return;
   shutdownCalled = true;
   console.error("Supervisor: shutting down");
+
+  // Stop the optional OpenAI endpoint sidecar before the supervisor exits.
+  await stopOpenAIEndpoint();
 
   // Tell worker to shut down gracefully (even if not ready yet)
   if (worker) {

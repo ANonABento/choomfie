@@ -12,6 +12,10 @@ import {
   DEFAULT_LOCAL_CONFIG as DEFAULT_LOCAL_RUNTIME_CONFIG,
   type LocalRuntimeConfig,
 } from "./orchestrator/local-runtime.ts";
+import {
+  resolveOpenAIEndpointConfig,
+  type OpenAIEndpointConfig,
+} from "./openai/config.ts";
 
 export interface Persona {
   name: string;
@@ -74,6 +78,7 @@ export interface Config {
   voice: VoiceConfig;
   socials?: SocialsConfig;
   local?: LocalConfig;
+  openaiEndpoint: OpenAIEndpointConfig;
   [key: string]: unknown;
 }
 
@@ -96,6 +101,7 @@ const DEFAULT_CONFIG: Config = {
   autoSummarize: true,
   plugins: [],
   voice: { stt: "auto", tts: "auto", ttsSpeed: 0.7 },
+  openaiEndpoint: resolveOpenAIEndpointConfig(),
 };
 
 function mergeConfig(saved: Partial<Config>): Config {
@@ -109,6 +115,10 @@ function mergeConfig(saved: Partial<Config>): Config {
     saved.socials && typeof saved.socials === "object" ? saved.socials : undefined;
   const savedLocal =
     saved.local && typeof saved.local === "object" ? saved.local : undefined;
+  const savedOpenAIEndpoint =
+    saved.openaiEndpoint && typeof saved.openaiEndpoint === "object"
+      ? saved.openaiEndpoint
+      : undefined;
 
   return {
     ...DEFAULT_CONFIG,
@@ -138,6 +148,7 @@ function mergeConfig(saved: Partial<Config>): Config {
           },
         }
       : {}),
+    openaiEndpoint: resolveOpenAIEndpointConfig(savedOpenAIEndpoint),
   };
 }
 
@@ -305,6 +316,12 @@ export class ConfigManager {
 
   isLocalEnabled(): boolean {
     return this.getLocalConfig().enabled;
+  }
+
+  // --- OpenAI-compatible endpoint ---
+
+  getOpenAIEndpointConfig(): OpenAIEndpointConfig {
+    return resolveOpenAIEndpointConfig(this.config.openaiEndpoint);
   }
 
   // --- Full config ---

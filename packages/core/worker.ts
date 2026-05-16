@@ -25,6 +25,10 @@ type SendableTextChannel = {
   send(message: string): Promise<unknown>;
 };
 
+type SendableUser = {
+  send(message: string): Promise<unknown>;
+};
+
 function isSendableTextChannel(channel: unknown): channel is SendableTextChannel {
   if (!channel || typeof channel !== "object") return false;
   const candidate = channel as Record<string, unknown>;
@@ -102,6 +106,32 @@ process.on("message", async (msg: SupervisorMessage) => {
     } catch {}
   } else if (msg.type === "permission_request") {
     await mcpProxy.handlePermissionRequest(msg);
+  } else if (msg.type === "openai_notify") {
+    try {
+      const content = `[${msg.app}] ${msg.content}`;
+      if (msg.channel_id) {
+        const ch = await ctx.discord.channels.fetch(msg.channel_id);
+        if (!isSendableTextChannel(ch)) {
+          throw new Error("Notification channel is not sendable");
+        }
+        await ch.send(content);
+        process.send?.({ type: "openai_notify_result", id: msg.id, ok: true, mode: "channel" });
+      } else {
+        if (!ctx.ownerUserId) {
+          throw new Error("No Discord owner is configured for notification DM");
+        }
+        const user = await ctx.discord.users.fetch(ctx.ownerUserId) as SendableUser;
+        await user.send(content);
+        process.send?.({ type: "openai_notify_result", id: msg.id, ok: true, mode: "owner_dm" });
+      }
+    } catch (error) {
+      process.send?.({
+        type: "openai_notify_result",
+        id: msg.id,
+        ok: false,
+        error: errorMessage(error),
+      });
+    }
   } else if (msg.type === "shutdown") {
     await shutdown();
   }

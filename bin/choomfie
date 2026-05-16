@@ -8,6 +8,8 @@ HERMES_HOME="${CHOOMFIE_HERMES_HOME:-$HOME/.choomfie-hermes}"
 PROFILE_NAME="${CHOOMFIE_HERMES_PROFILE:-choomfie}"
 OVERLAY_DIR="${CHOOMFIE_HERMES_OVERLAY:-$ROOT_DIR/hermes-overlay}"
 CLAUDE_DATA_DIR="${CHOOMFIE_DATA_DIR:-$HOME/.claude/plugins/data/choomfie-inline}"
+OPENAI_ENDPOINT_PID="$CLAUDE_DATA_DIR/openai-endpoint.pid"
+OPENAI_ENDPOINT_LOG="$CLAUDE_DATA_DIR/openai-endpoint.log"
 
 usage() {
   cat <<EOF
@@ -23,6 +25,9 @@ Usage:
   choomfie setup [args...]  Run Hermes gateway setup
   choomfie migrate-legacy [args...] Run Hermes gateway legacy migration
   choomfie chat             Open Hermes chat for the Choomfie profile
+  choomfie api-key issue <app> --scopes chat,models
+  choomfie api-key list
+  choomfie api-key revoke <id-or-prefix>
   choomfie configure-discord Configure Discord token/allowlist for both runtimes
   choomfie doctor           Check Hermes/overlay setup
   choomfie sync             Sync overlay files into isolated Hermes state
@@ -157,6 +162,80 @@ read_env_value() {
   awk -F= -v key="$key" '$1 == key { print substr($0, length(key) + 2); exit }' "$file"
 }
 
+openai_endpoint_enabled() {
+  case "${CHOOMFIE_OPENAI_ENABLED:-}" in
+    true|1|yes|on) return 0 ;;
+    false|0|no|off) return 1 ;;
+  esac
+
+  local config_file="$CLAUDE_DATA_DIR/config.json"
+  [ -f "$config_file" ] || return 1
+  command -v bun >/dev/null 2>&1 || return 1
+  bun -e '
+    import { readFileSync } from "node:fs";
+    const config = JSON.parse(readFileSync(process.argv[1], "utf-8"));
+    process.exit(config.openaiEndpoint?.enabled ? 0 : 1);
+  ' -- "$config_file" >/dev/null 2>&1
+}
+
+openai_endpoint_is_running() {
+  [ -f "$OPENAI_ENDPOINT_PID" ] || return 1
+  local pid
+  pid="$(cat "$OPENAI_ENDPOINT_PID" 2>/dev/null || true)"
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" >/dev/null 2>&1
+}
+
+start_openai_endpoint_sidecar() {
+  openai_endpoint_enabled || return 0
+  if ! command -v bun >/dev/null 2>&1; then
+    echo "OpenAI endpoint enabled but bun is not available." >&2
+    return 1
+  fi
+
+  mkdir -p "$CLAUDE_DATA_DIR"
+  if openai_endpoint_is_running; then
+    return 0
+  fi
+
+  if [ -f "$OPENAI_ENDPOINT_PID" ]; then
+    rm -f "$OPENAI_ENDPOINT_PID"
+  fi
+
+  CHOOMFIE_DATA_DIR="$CLAUDE_DATA_DIR" nohup bun "$ROOT_DIR/packages/core/openai-server.ts" \
+    >>"$OPENAI_ENDPOINT_LOG" 2>&1 &
+  echo "$!" > "$OPENAI_ENDPOINT_PID"
+}
+
+stop_openai_endpoint_sidecar() {
+  [ -f "$OPENAI_ENDPOINT_PID" ] || return 0
+  local pid
+  pid="$(cat "$OPENAI_ENDPOINT_PID" 2>/dev/null || true)"
+  if [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1; then
+    kill "$pid" >/dev/null 2>&1 || true
+    for _ in $(seq 1 30); do
+      if ! kill -0 "$pid" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 0.1
+    done
+    if kill -0 "$pid" >/dev/null 2>&1; then
+      kill -KILL "$pid" >/dev/null 2>&1 || true
+    fi
+  fi
+  rm -f "$OPENAI_ENDPOINT_PID"
+}
+
+print_openai_endpoint_status() {
+  if openai_endpoint_is_running; then
+    echo "  openai endpoint: running (pid $(cat "$OPENAI_ENDPOINT_PID"))"
+  elif openai_endpoint_enabled; then
+    echo "  openai endpoint: enabled, not running"
+  else
+    echo "  openai endpoint: disabled"
+  fi
+}
+
 detect_discord_owner() {
   local token="$1"
   local app_json
@@ -243,6 +322,7 @@ doctor() {
   echo "  overlay: $OVERLAY_DIR"
   echo "  hermes home: $HERMES_HOME"
   echo "  profile: $PROFILE_NAME"
+  print_openai_endpoint_status
 
   if ! command -v "${HERMES_BIN:-hermes}" >/dev/null 2>&1; then
     echo "  missing: hermes CLI (set HERMES_BIN or install Hermes)"
@@ -352,6 +432,10 @@ case "$cmd" in
     shift
     configure_discord "$@"
     ;;
+  api-key)
+    shift
+    exec bun "$ROOT_DIR/packages/core/scripts/api-key.ts" "$@"
+    ;;
   sync|update)
     sync_and_harden
     ;;
@@ -366,6 +450,7 @@ case "$cmd" in
   start)
     shift
     sync_and_harden
+    start_openai_endpoint_sidecar
     hermes_cmd gateway start "$@"
     ;;
   install|setup|migrate-legacy)
@@ -373,19 +458,27 @@ case "$cmd" in
     sync_and_harden
     hermes_cmd gateway "$cmd" "$@"
     ;;
-  status|uninstall|list)
+  status)
+    shift
+    gateway_cmd "$cmd" "$@"
+    print_openai_endpoint_status
+    ;;
+  uninstall|list)
     shift
     gateway_cmd "$cmd" "$@"
     ;;
   restart)
     shift
+    stop_openai_endpoint_sidecar
     sync_and_harden
     hermes_cmd gateway restart "$@"
+    start_openai_endpoint_sidecar
     ;;
   stop)
     shift
     echo "Note: 'choomfie stop' targets the Choomfie profile gateway. Flags such as --all or --system can broaden scope." >&2
     gateway_cmd stop "$@"
+    stop_openai_endpoint_sidecar
     ;;
   chat)
     shift
@@ -395,6 +488,7 @@ case "$cmd" in
   gateway|"")
     shift || true
     sync_and_harden
+    start_openai_endpoint_sidecar
     hermes_cmd gateway start "$@"
     ;;
   *)

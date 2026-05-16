@@ -316,6 +316,7 @@ YAML parsing to core for this feature.
     "enabled": false,
     "host": "127.0.0.1",
     "port": 4141,
+    "allowPublicBind": false,
     "requireAuth": true,
     "corsOrigins": ["http://localhost:*", "http://127.0.0.1:*"],
     "maxConcurrent": 5,
@@ -364,6 +365,7 @@ Environment overrides:
 - `CHOOMFIE_OPENAI_ENABLED`
 - `CHOOMFIE_OPENAI_HOST`
 - `CHOOMFIE_OPENAI_PORT`
+- `CHOOMFIE_OPENAI_ALLOW_PUBLIC_BIND`
 - `CHOOMFIE_OPENAI_REQUIRE_AUTH`
 - `CHOOMFIE_OPENAI_ROUTING_MODE`
 - `CHOOMFIE_OPENAI_HERMES_BASE_URL`
