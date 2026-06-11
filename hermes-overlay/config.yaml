@@ -1,13 +1,14 @@
 profile:
   name: choomfie
 
+# Brain = local Choomfie OpenAI endpoint (Claude Agent SDK on your Claude Code
+# subscription). base_url takes precedence; bearer key = OPENAI_API_KEY in .env.
+# Swap to any other model later by repointing base_url/provider — persona,
+# memory, and tools stay identical.
 model:
-  default: gpt-5.3-codex-spark
-  provider: openai-codex
-  aliases:
-    heavy:
-      model: gpt-5.5
-      provider: openai-codex
+  default: choomfie-claude-code   # opus alias; use choomfie-claude-sonnet for lighter/cheaper
+  provider: custom
+  base_url: http://127.0.0.1:4141/v1
 
 gateway:
   enabled: true

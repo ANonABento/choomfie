@@ -1,42 +1,67 @@
 # Choomfie
 
-Choomfie is a personal Discord agent with two first-class runtimes:
+A personal Discord agent with two interchangeable runtimes:
 
-- **Hermes mode** (`choomfie`): always-on Discord gateway, persistent service lifecycle, sessions, delivery, approvals, cron, skills/plugins, and provider routing through [Hermes Agent](https://github.com/NousResearch/hermes-agent).
-- **Claude Code mode** (`choomfie claude-code`, or `choomfie claude`): direct Claude Code CLI runtime. Use this when you want Choomfie to run through your Claude Code plan/CLI session instead of Hermes provider auth.
+- **Hermes mode** (`choomfie`) — always-on Discord gateway as a managed service: sessions, delivery, approvals, cron, skills/plugins, and provider routing via [Hermes Agent](https://github.com/NousResearch/hermes-agent). Best for long-running operation.
+- **Claude Code mode** (`choomfie claude-code`) — runs Choomfie directly through your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI plan. Best for Claude Code subscription usage and the mature voice/tutor/social plugin stack.
 
-The split is intentional. Hermes is the better long-running service substrate. Claude Code mode fills the gap where you want the native Claude Code CLI path, especially for coding-agent behavior and Claude Code subscription usage. In practical terms, Claude Code mode bypasses Hermes' Anthropic provider setup and uses the already-authenticated `claude` CLI session instead.
+> Hermes *can* use Anthropic as a provider, but that is not the same as running inside Claude Code. Claude Code mode uses the `claude` CLI directly and bypasses Hermes provider auth entirely.
 
-## Which Mode Should I Use?
+## Contents
 
-| Use case | Command | Why |
-| --- | --- | --- |
-| Always-on Discord bot | `choomfie` | Runs the Hermes gateway as a service with isolated Choomfie profile state. |
-| Use Codex/OpenRouter/Anthropic/API providers through Hermes | `choomfie` | Hermes owns provider routing, sessions, cron, and delivery. |
-| Use your Claude Code plan directly | `choomfie claude-code` | Runs through the Claude Code CLI path rather than Hermes' Anthropic provider runtime. |
-| Need mature Choomfie voice/tutor/social/plugin behavior while Hermes parity is still evolving | `choomfie claude-code` | Claude Code mode uses the existing Bun/Claude Code worker and plugin stack. |
-| Quick local Claude Code session | `choomfie claude` | Short alias for `choomfie claude-code`. |
+- [Quick Start](#quick-start) · [Which Mode?](#which-mode) · [Lifecycle](#lifecycle)
+- [Requirements](#requirements) · [Install](#install)
+- [Hermes Mode](#hermes-mode) · [Claude Code Mode](#claude-code-mode)
+- [Discord Access](#discord-access) · [Usage & Commands](#usage--commands)
+- [OpenAI-Compatible Endpoint](#openai-compatible-endpoint) · [Cost & Session Controls](#cost--session-controls)
+- [Architecture](#architecture) · [Plugins](#plugins) · [Memory Migration](#memory-migration)
+- [Project Structure](#project-structure) · [Troubleshooting](#troubleshooting) · [Docs](#docs)
 
-Important distinction: Hermes can use Anthropic as a provider, but that is not the same as running inside Claude Code. Claude Code mode uses the Claude Code CLI directly; Hermes mode uses Hermes' provider/runtime layer.
+## Quick Start
+
+```bash
+git clone https://github.com/ANonABento/choomfie.git
+cd choomfie
+./install.sh          # installs deps, prompts for Discord token, installs CLIs to ~/.local/bin
+
+choomfie              # Hermes mode: sync overlay + start gateway
+# or
+choomfie claude-code  # Claude Code mode: run via your Claude Code plan
+```
+
+## Which Mode?
+
+| Use case | Command |
+| --- | --- |
+| Always-on Discord bot as a service | `choomfie` |
+| Codex / OpenRouter / Anthropic / Nous providers via Hermes | `choomfie` |
+| Use your Claude Code plan directly | `choomfie claude-code` |
+| Mature voice / tutor / social / plugin behavior | `choomfie claude-code` |
+| Quick local session | `choomfie claude` (alias) |
+
+## Lifecycle
+
+There is **no `choomfie end`** — use these:
+
+| Action | Command |
+| --- | --- |
+| Start gateway | `choomfie` or `choomfie start` |
+| Status | `choomfie status` (`--deep` for detail) |
+| Restart gateway | `choomfie restart` |
+| **Stop gateway** | `choomfie stop` |
+| Exit Claude Code mode | quit the CLI (`Ctrl+C` / `/exit`) |
+| Wipe stored state | `choomfie reset [scope]` |
+| Follow logs | `journalctl --user -u hermes-gateway-choomfie -f` |
+
+`choomfie stop` targets only the Choomfie profile gateway. Hermes flags like `--all` or `--system` broaden the scope — check the target before confirming them. Unknown verbs are forwarded to `hermes` as-is, so `choomfie stop` is the correct way to shut down.
 
 ## Requirements
 
-Common:
+**Common:** [Bun](https://bun.sh) · a Discord bot token ([setup guide](docs/discord-setup.md))
 
-- [Bun](https://bun.sh)
-- A Discord bot token ([setup guide](docs/discord-setup.md))
+**Hermes mode:** [Hermes Agent](https://github.com/NousResearch/hermes-agent) + at least one inference provider (OpenAI Codex OAuth, Nous Portal, OpenRouter, Anthropic API key, …). Choomfie keeps Hermes state isolated under `~/.choomfie-hermes`.
 
-For Hermes mode:
-
-- [Hermes Agent](https://github.com/NousResearch/hermes-agent)
-- At least one Hermes inference provider:
-  - OpenAI Codex OAuth, Nous Portal, OpenRouter, Anthropic API key, etc.
-  - This repo keeps Choomfie Hermes state isolated under `~/.choomfie-hermes`.
-
-For Claude Code mode:
-
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
-- A signed-in Claude Code account/plan
+**Claude Code mode:** [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) + a signed-in account/plan.
 
 ## Install
 
@@ -46,93 +71,121 @@ cd choomfie
 ./install.sh
 ```
 
-The installer:
+The installer installs Bun deps, prompts for a Discord token, writes Claude Code data under `~/.claude/plugins/data/choomfie-inline`, writes the Hermes profile under `~/.choomfie-hermes/profiles/choomfie`, and installs `choomfie` + `choomfie-claude-code` into `~/.local/bin`. Reload your shell if `~/.local/bin` is not on your `PATH`.
 
-- installs Bun dependencies
-- prompts for a Discord bot token
-- writes Claude Code mode data under `~/.claude/plugins/data/choomfie-inline`
-- writes Hermes profile env under `~/.choomfie-hermes/profiles/choomfie`
-- installs `choomfie` and `choomfie-claude-code` into `~/.local/bin`
+## Hermes Mode
 
-If `~/.local/bin` is not on your `PATH`, reload your shell after install.
-
-## Hermes Mode Setup
-
-Install Hermes separately:
+Install Hermes:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
-source ~/.bashrc
-hermes --version
-```
-
-Sync Choomfie's Hermes overlay:
-
-```bash
-cd ~/choomfie
-choomfie sync
+source ~/.bashrc && hermes --version
 ```
 
 Configure the isolated Choomfie profile:
 
 ```bash
-cp ~/.choomfie-hermes/profiles/choomfie/.env.EXAMPLE ~/.choomfie-hermes/profiles/choomfie/.env
-$EDITOR ~/.choomfie-hermes/profiles/choomfie/.env
+cd ~/choomfie
+choomfie sync                                                            # sync overlay into Hermes state
+cp ~/.choomfie-hermes/profiles/choomfie/.env.EXAMPLE \
+   ~/.choomfie-hermes/profiles/choomfie/.env
+$EDITOR ~/.choomfie-hermes/profiles/choomfie/.env                        # set DISCORD_BOT_TOKEN + DISCORD_ALLOWED_USERS
+HERMES_HOME=~/.choomfie-hermes hermes -p choomfie model                  # pick a provider/model
 ```
 
-At minimum, set:
+Provider options: **OpenAI Codex** (imports Codex CLI creds), **OpenRouter** (broad routing, pay-per-use), **Anthropic API key** (direct billing), **Nous Portal** (subscription tooling).
 
-```bash
-DISCORD_BOT_TOKEN=...
-DISCORD_ALLOWED_USERS=your-discord-user-id
-```
-
-Then choose a Hermes model/provider:
-
-```bash
-HERMES_HOME=~/.choomfie-hermes hermes -p choomfie model
-```
-
-Good provider options:
-
-- **OpenAI Codex**: can import existing Codex CLI credentials and stores a separate Hermes auth session.
-- **OpenRouter**: broad model routing, pay-per-use.
-- **Anthropic API key**: direct Anthropic billing.
-- **Nous Portal**: if you use Nous subscription tooling.
-
-Check the profile:
+Verify, then install and start the service:
 
 ```bash
 choomfie doctor
-HERMES_HOME=~/.choomfie-hermes hermes -p choomfie doctor
-```
-
-Install and start the gateway service:
-
-```bash
 choomfie install
 choomfie start
 ```
 
-Useful Hermes commands:
+Update flow:
 
 ```bash
-choomfie                                      # sync overlay and start gateway service
-choomfie status                               # gateway status
-choomfie status --deep                        # detailed gateway status
-choomfie restart                              # restart gateway service
-choomfie stop                                 # stop Choomfie gateway
-choomfie chat                                 # open Hermes chat with Choomfie profile
-choomfie configure-discord                    # configure Discord token and allowlist for both runtimes
-choomfie doctor                               # Choomfie overlay/profile doctor
-journalctl --user -u hermes-gateway-choomfie -f
+hermes update --backup
+cd ~/choomfie && git pull && choomfie sync && choomfie doctor && choomfie restart
 ```
 
-`choomfie stop` targets the Choomfie profile gateway. Hermes flags such as `--all` or `--system` can broaden stop scope, so check the target before confirming them.
+### Pinning the upstream Hermes build
+
+```bash
+choomfie hermes-update            # pull upstream to latest + reinstall
+choomfie hermes-update --check    # show pin drift + what's new upstream
+choomfie hermes-update --pin      # record the installed commit as known-good
+choomfie hermes-update --to-pin   # roll back to the pinned commit
+```
+
+## Claude Code Mode
+
+Runs Choomfie through Claude Code's native CLI path — independent of Hermes provider auth.
+
+```bash
+choomfie claude-code          # foreground session
+choomfie claude               # short alias
+choomfie claude-code --tmux   # run in tmux
+choomfie claude-code --daemon # Discord-only daemon backed by Agent SDK sessions
+```
+
+Internally this launches `claude --plugin-dir . --dangerously-load-development-channels server:choomfie`. On first run, if the installer didn't set the token, run `/choomfie:configure <discord-bot-token>`. Data lives under `~/.claude/plugins/data/choomfie-inline`.
+
+## Discord Access
+
+Restrict Choomfie to trusted users. **Never set an open allow-all policy** unless you intend anyone reachable by the bot to drive an agent with tool access.
+
+**Hermes mode** — set in `~/.choomfie-hermes/profiles/choomfie/.env`:
+
+```bash
+DISCORD_ALLOWED_USERS=123456789012345678
+```
+
+**Claude Code mode** — stored in `~/.claude/plugins/data/choomfie-inline/access.json`. To pair a user:
+
+1. They DM the bot `!pair`, then share the 5-letter code.
+2. Run `/choomfie:access pair <code>` in Claude Code.
+3. Run `/choomfie:access policy allowlist` to lock down.
+
+## Usage & Commands
+
+In servers, `@mention` the bot or reply to its messages. In DMs, just talk. Command coverage differs by runtime while Hermes parity is still being proven.
+
+**Hermes native commands:**
+
+| Command | Description |
+| --- | --- |
+| `/status` | Bot status |
+| `/help` | Show commands |
+| `/personality [name]` | List or switch personality overlays |
+| `/plugins` | List, enable, or disable plugins |
+
+In Hermes mode, reminders are natural-language (not slash commands yet) — e.g. *"remind me in 30 minutes to check the deploy"*, *"what reminders do I have?"*, *"cancel reminder 3"*. State lives in `~/.choomfie-hermes/profiles/choomfie/state/choomfie-reminders.json`; delivery uses Hermes script-only cron jobs so reminder text fires without starting a new agent turn.
+
+**Claude Code mode commands:**
+
+| Command | Description |
+| --- | --- |
+| `/remind` · `/reminders` · `/cancel <id>` | Set / list / cancel reminders |
+| `/memory [search]` · `/savememory` | List/search and save memories |
+| `/github <check>` | Check PRs, issues, notifications |
+| `/persona [switch]` · `/newpersona` | List/switch and create personas |
+| `/voice` | Voice provider setup |
+| `/lesson` · `/progress` | Start a lesson / show learning progress |
+
+**Claude Code terminal skills** (run in the CLI, not Discord):
+
+| Skill | Description |
+| --- | --- |
+| `/choomfie:configure <token>` | Set Discord bot token |
+| `/choomfie:access` | Manage access policy and allowlist |
+| `/choomfie:memory` | View/manage memories |
+| `/choomfie:status` | Full config overview |
 
 ## OpenAI-Compatible Endpoint
 
-Choomfie can expose a local OpenAI-compatible API for clients such as ExampleApp:
+Choomfie can expose a local OpenAI-compatible API (e.g. for ExampleApp):
 
 ```bash
 choomfie api-key issue exampleapp --scopes chat,models,memory,notify
@@ -146,38 +199,19 @@ OPENAI_BASE_URL=http://127.0.0.1:4141/v1
 OPENAI_MODEL=choomfie-claude-sonnet
 ```
 
-See [docs/openai-endpoint.md](docs/openai-endpoint.md) for endpoint setup,
-supported routes, Hermes routing behavior, and Choomfie extension endpoints.
-Verification notes live in
-[docs/openai-endpoint-verification.md](docs/openai-endpoint-verification.md).
+See [docs/openai-endpoint.md](docs/openai-endpoint.md) for routes, routing behavior, and extension endpoints; [docs/openai-endpoint-verification.md](docs/openai-endpoint-verification.md) for verification notes.
 
-Update flow:
+## Cost & Session Controls
 
-```bash
-hermes update --backup
-cd ~/choomfie
-git pull
-choomfie sync
-choomfie doctor
-choomfie restart
-```
-
-## Hermes Cost And Session Controls
-
-The Choomfie Hermes overlay defaults routine traffic to `gpt-5.3-codex-spark` through `openai-codex`. Use a heavier model only when a task needs it:
+The Hermes overlay defaults routine traffic to `gpt-5.3-codex-spark` via `openai-codex`. Use a heavier model only when needed:
 
 ```bash
-hermes -p choomfie chat -q "..." --model gpt-5.5 --provider openai-codex
-```
-
-To switch the default persistently:
-
-```bash
-hermes -p choomfie config set model.default <model>
+hermes -p choomfie chat -q "..." --model gpt-5.5 --provider openai-codex   # one-off
+hermes -p choomfie config set model.default <model>                        # persistent
 hermes -p choomfie config set model.provider <provider>
 ```
 
-Daily Discord token budget checks:
+**Token budget** — daily checks warn at 2M tokens/day and hard-stop at 3M (override via `CHOOMFIE_TOKEN_WARN_THRESHOLD` / `CHOOMFIE_TOKEN_HARD_THRESHOLD`):
 
 ```bash
 choomfie sync
@@ -185,216 +219,63 @@ choomfie sync
 hermes -p choomfie insights --days 1 --source discord
 ```
 
-The watcher stores the latest sample at `~/.choomfie-hermes/profiles/choomfie/state/token-budget-last-sample.txt`, warns at 2,000,000 tokens/day, and exits hard at 3,000,000 tokens/day. Override thresholds with `CHOOMFIE_TOKEN_WARN_THRESHOLD` and `CHOOMFIE_TOKEN_HARD_THRESHOLD`.
+Discord sessions use a lean tool profile (web, terminal, file, skills, todo, memory, session_search, clarify, cronjob, messaging) — browser, code execution, vision, image gen, TTS, delegation, and computer-use are off unless re-enabled.
 
-Discord sessions use a lean default tool profile to reduce schema overhead: `web`, `terminal`, `file`, `skills`, `todo`, `memory`, `session_search`, `clarify`, `cronjob`, and `messaging` stay enabled; browser, code execution, vision, image generation, TTS, delegation, and computer-use are disabled unless explicitly re-enabled.
-
-Session hygiene controls:
-
-```text
-/compress
-/new
-/reset
-```
+**Session hygiene** — `/compress`, `/new`, `/reset` in chat; auto-prune is on (`retention_days: 30`). Prune manually with:
 
 ```bash
 hermes -p choomfie sessions prune --older-than 30 --yes
 ```
 
-The overlay enables `sessions.auto_prune: true`, sets `sessions.retention_days: 30`, and keeps compression enabled. For 200+ message sessions or noisy Discord threads, prefer `/compress` or a fresh session before continuing.
-
-## Claude Code Mode Setup
-
-Claude Code mode runs Choomfie through Claude Code's native CLI path:
-
-```bash
-choomfie claude-code
-```
-
-Short alias:
-
-```bash
-choomfie claude
-```
-
-This is the mode to use when you want Choomfie to use your Claude Code plan directly. It does not depend on Hermes' Anthropic provider path or Hermes provider auth. Internally it starts Claude Code with Choomfie's local channel/plugin loaded:
-
-```bash
-claude --plugin-dir . --dangerously-load-development-channels server:choomfie
-```
-
-On first run, configure the Discord token if the installer did not already do it:
-
-```text
-/choomfie:configure <discord-bot-token>
-```
-
-Claude Code mode options:
-
-```bash
-choomfie claude-code          # foreground Claude Code session
-choomfie claude-code --tmux   # run in tmux
-choomfie claude-code --daemon # Discord-only daemon backed by Agent SDK sessions
-```
-
-Claude Code mode data lives under:
-
-```text
-~/.claude/plugins/data/choomfie-inline
-```
-
-## Discord Access
-
-Choomfie should be restricted to trusted users.
-
-Hermes mode uses:
-
-```bash
-DISCORD_ALLOWED_USERS=123456789012345678
-```
-
-in:
-
-```text
-~/.choomfie-hermes/profiles/choomfie/.env
-```
-
-Claude Code mode uses:
-
-```text
-~/.claude/plugins/data/choomfie-inline/access.json
-```
-
-To pair another user in Claude Code mode:
-
-1. They DM the bot `!pair`.
-2. Copy the 5-letter code.
-3. Run `/choomfie:access pair <code>` in Claude Code.
-4. Run `/choomfie:access policy allowlist` to lock down.
-
-Never set a public/open allow-all policy unless you intentionally want anyone who can reach the bot to interact with an agent that has tool access.
-
-## Usage
-
-In servers, `@mention` the bot or reply to its messages. In DMs, just talk.
-
-### Discord Commands
-
-Available command coverage differs by runtime while Hermes parity is still being proven.
-
-Hermes mode reminders are agent-mediated through natural Discord text, not native slash commands yet. Ask Choomfie things like:
-
-```text
-remind me in 30 minutes to check the deploy
-what reminders do I have?
-cancel reminder 3
-snooze reminder 3 for 1h
-ack reminder 3
-```
-
-Hermes reminder state lives in `~/.choomfie-hermes/profiles/choomfie/state/choomfie-reminders.json`. Choomfie maps small numeric reminder ids to Hermes cron job ids and generated profile-local reminder scripts. Reminder delivery uses Hermes script-only cron jobs, so the exact reminder text is delivered without starting another agent turn. Recurring reminders use Hermes interval schedules or cron expressions in the Choomfie profile timezone. Requested timezone and original schedule text are preserved in Choomfie metadata.
-
-Hermes mode native commands:
-
-| Command | Description |
-| --- | --- |
-| `/status` | Bot status |
-| `/help` | Show commands |
-| `/personality [name]` | List or switch Hermes personality overlays |
-| `/plugins` | List, enable, or disable plugins |
-
-Claude Code mode commands:
-
-| Command | Description |
-| --- | --- |
-| `/remind` | Set a reminder |
-| `/reminders` | List active reminders |
-| `/cancel <id>` | Cancel a reminder |
-| `/memory [search]` | List or search memories |
-| `/savememory` | Save a memory |
-| `/github <check>` | Check PRs, issues, notifications |
-| `/persona [switch]` | List or switch Claude Code mode personas |
-| `/newpersona` | Create a Claude Code mode persona |
-| `/voice` | Voice provider setup |
-| `/lesson` | Start a structured lesson |
-| `/progress` | Show learning progress |
-
-### Claude Code Skills
-
-These are terminal slash commands for Claude Code mode:
-
-| Skill | Description |
-| --- | --- |
-| `/choomfie:configure <token>` | Set Discord bot token |
-| `/choomfie:access` | Manage access policy and allowlist |
-| `/choomfie:memory` | View/manage memories |
-| `/choomfie:status` | Full config overview |
+For 200+ message sessions, prefer `/compress` or a fresh session.
 
 ## Architecture
 
-### Hermes Mode
+**Hermes mode** — Hermes owns the long-running infra (gateway, reconnects, sessions, approvals, cron, delivery, provider routing); Choomfie owns the product layer (personality, memory policy, reminder UX, tutor/voice behavior).
 
 ```text
-Discord
-  -> Hermes Discord adapter / gateway / sessions / delivery
-  -> Choomfie Hermes profile, SOUL.md, skills, plugins, hooks
-  -> Hermes provider routing and tools
+Discord → Hermes adapter/gateway/sessions/delivery
+        → Choomfie profile (SOUL.md, skills, plugins, hooks)
+        → Hermes provider routing + tools
 ```
 
-Hermes owns the long-running infrastructure: gateway, reconnects, sessions, approvals, cron, delivery, and provider/model routing. Choomfie owns the product layer: personality, defaults, memory policy, reminder UX, tutor behavior, voice preferences, and workflow opinions.
-
-### Claude Code Mode
+**Claude Code mode** — direct CLI path with an immortal supervisor over a disposable worker.
 
 ```text
-Claude Code <-- MCP stdio --> supervisor.ts (immortal)
-                                  |  Bun IPC
-                              worker.ts (disposable)
-                                  |
-                    Discord + Plugins + Tools
+Claude Code ←MCP stdio→ supervisor.ts (immortal)
+                          │ Bun IPC
+                        worker.ts (disposable) → Discord + plugins + tools
 ```
 
-Claude Code mode owns the direct Claude Code CLI path. It is useful when you want to use your Claude Code plan/session and the mature Choomfie Bun worker/plugin behavior.
-
-### Daemon Mode
+**Daemon mode** (`choomfie claude-code --daemon`) — Discord-only autonomous operation.
 
 ```text
-daemon.ts (immortal, Agent SDK)
-  -> Claude Session (disposable, auto-cycled)
-       -> supervisor.ts -> worker.ts -> Discord
+daemon.ts (immortal, Agent SDK) → Claude session (disposable, auto-cycled)
+                                 → supervisor.ts → worker.ts → Discord
 ```
 
-Daemon mode is available through Claude Code mode arguments when you want Discord-only autonomous operation.
+See [docs/supervisor-architecture.md](docs/supervisor-architecture.md) for details.
 
 ## Plugins
 
-Plugins are strongest in Claude Code mode today. Hermes equivalents are being ported as overlay skills/plugins where it makes sense.
+Strongest in Claude Code mode today; Hermes equivalents are being ported as overlay skills/plugins.
 
 | Plugin | Description |
 | --- | --- |
-| **Voice** | Full-duplex voice chat. Local STT/TTS, VAD, interruption handling, streaming, multi-speaker behavior. |
+| **Voice** | Full-duplex voice chat: local STT/TTS, VAD, interruption handling, streaming, multi-speaker. |
 | **Browser** | Playwright browsing: navigate, click, type, screenshot, evaluate JS. |
-| **Tutor** | Language learning with structured lessons, SRS, quizzes, and module-specific tools. |
+| **Tutor** | Language learning: structured lessons, SRS, quizzes, module tools. |
 | **Socials** | YouTube, Reddit, LinkedIn workflows. |
 
-### Voice Setup
-
-```bash
-# Local STT
-brew install whisper-cpp
-
-# Local TTS
-pip install kokoro-onnx soundfile
-```
-
-Cloud voice providers can be configured with API keys in the relevant runtime env file.
+**Voice setup** — `brew install whisper-cpp` (local STT), `pip install kokoro-onnx soundfile` (local TTS). Cloud providers via API keys in the runtime env. See [docs/voice-plugin.md](docs/voice-plugin.md).
 
 ## Memory Migration
 
-Hermes mode does not blindly import Claude Code mode's SQLite memory. Export and review it first:
+Hermes mode does not blindly import Claude Code's SQLite memory — export and review first:
 
 ```bash
 bun packages/core/scripts/hermes-memory.ts export ~/.claude/plugins/data/choomfie-inline/choomfie.db /tmp/choomfie-memory.json
-bun packages/core/scripts/hermes-memory.ts draft /tmp/choomfie-memory.json /tmp/choomfie-memory.md
+bun packages/core/scripts/hermes-memory.ts draft  /tmp/choomfie-memory.json /tmp/choomfie-memory.md
 ```
 
 Review the draft before importing into Hermes memory/profile files.
@@ -402,95 +283,31 @@ Review the draft before importing into Hermes memory/profile files.
 ## Project Structure
 
 ```text
-package.json
-install.sh
-bin/
-  choomfie                  # Hermes-first launcher
-  choomfie-claude-code      # Claude Code mode launcher
-hermes-overlay/
-  SOUL.md
-  config.yaml
-  skills/
-  plugins/
-  hooks/
+bin/choomfie               # Hermes-first launcher
+bin/choomfie-claude-code   # Claude Code mode launcher
+hermes-overlay/            # SOUL.md, config.yaml, skills/, plugins/, hooks/
 packages/
-  shared/
-  core/
-    server.ts
-    supervisor.ts
-    worker.ts
-    daemon.ts
-    lib/
-    skills/
-    scripts/
-    test/
-plugins/
-  voice/
-  browser/
-  tutor/
-  socials/
+  shared/                  # @choomfie/shared — types + utils
+  core/                    # server/supervisor/worker/daemon + lib/, skills/, scripts/, test/
+plugins/                   # voice/, browser/, tutor/, socials/
 docs/
 ```
 
 ## Troubleshooting
 
-### `choomfie doctor` says Hermes is missing
-
-Install Hermes:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
-source ~/.bashrc
-```
-
-### Hermes starts but Discord ignores me
-
-Set `DISCORD_ALLOWED_USERS` in:
-
-```text
-~/.choomfie-hermes/profiles/choomfie/.env
-```
-
-Then restart:
-
-```bash
-choomfie restart
-```
-
-### Hermes has Discord but no model
-
-Run:
-
-```bash
-HERMES_HOME=~/.choomfie-hermes hermes -p choomfie model
-```
-
-### I want Claude Code plan usage
-
-Use:
-
-```bash
-choomfie claude-code
-```
-
-That starts the Claude Code CLI runtime. Do not use Hermes Anthropic provider setup for this path.
-
-### The old `choomfie legacy` command does not work
-
-It was removed. Use:
-
-```bash
-choomfie claude-code
-```
+| Symptom | Fix |
+| --- | --- |
+| `choomfie doctor` says Hermes is missing | Install Hermes (see [Hermes Mode](#hermes-mode)) and `source ~/.bashrc`. |
+| Hermes runs but Discord ignores you | Set `DISCORD_ALLOWED_USERS` in the profile `.env`, then `choomfie restart`. |
+| Hermes has Discord but no model | `HERMES_HOME=~/.choomfie-hermes hermes -p choomfie model`. |
+| You want Claude Code plan usage | Use `choomfie claude-code` — do not configure the Hermes Anthropic provider for this. |
+| `choomfie legacy` doesn't work | Removed. Use `choomfie claude-code`. |
 
 ## Docs
 
-- [Discord Setup](docs/discord-setup.md)
-- [Hermes Migration](docs/hermes-migration.md)
-- [Supervisor Architecture](docs/supervisor-architecture.md)
-- [Voice Plugin](docs/voice-plugin.md)
-- [Tutor Plugin](docs/tutor-plugin-spec.md)
-- [Roadmap](docs/roadmap.md)
+- [Discord Setup](docs/discord-setup.md) · [Hermes Migration](docs/hermes-migration.md)
+- [Supervisor Architecture](docs/supervisor-architecture.md) · [Voice Plugin](docs/voice-plugin.md)
+- [Tutor Plugin](docs/tutor-plugin-spec.md) · [Roadmap](docs/roadmap.md)
 
 ## License
 
