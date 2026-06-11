@@ -32,6 +32,12 @@ Usage:
   choomfie doctor           Check Hermes/overlay setup
   choomfie sync             Sync overlay files into isolated Hermes state
   choomfie update           Pull overlay changes into isolated Hermes state
+  choomfie hermes-update [--check|--pin|--to-pin]
+                            Manage the upstream Hermes version Choomfie runs on.
+                            No flag: git-pull upstream to latest + reinstall.
+                            --check: show pin drift + what's new upstream.
+                            --pin:   record the installed commit as known-good.
+                            --to-pin: check out / roll back to the pinned commit.
   choomfie reset [scope]    Wipe stored state (interactive picker if scope omitted).
                             Scopes: core, archival, memory, reminders, birthdays,
                             webhooks, all. Local destructive command; stops Choomfie if running.
@@ -57,6 +63,120 @@ claude_code() {
 hermes_cmd() {
   local hermes_bin="${HERMES_BIN:-hermes}"
   HERMES_HOME="$HERMES_HOME" "$hermes_bin" -p "$PROFILE_NAME" "$@"
+}
+
+HERMES_PIN_FILE="${CHOOMFIE_HERMES_PIN:-$OVERLAY_DIR/hermes.pin}"
+
+# Read the pinned upstream Hermes ref (first non-comment, non-blank line).
+read_hermes_pin() {
+  [ -f "$HERMES_PIN_FILE" ] || return 1
+  awk '!/^[[:space:]]*#/ && NF { print $1; exit }' "$HERMES_PIN_FILE"
+}
+
+# Resolve the on-disk Hermes git checkout from `hermes --version` ("Project: <dir>").
+hermes_project_dir() {
+  command -v "${HERMES_BIN:-hermes}" >/dev/null 2>&1 || return 1
+  local dir
+  dir="$("${HERMES_BIN:-hermes}" --version 2>/dev/null | awk -F': ' '/^Project:/ { print $2; exit }')"
+  [ -n "$dir" ] && [ -d "$dir/.git" ] || return 1
+  printf '%s\n' "$dir"
+}
+
+# Print pin vs installed Hermes commit drift. Returns non-zero on drift/unknown.
+hermes_drift_status() {
+  local indent="${1:-}"
+  local pin installed dir
+  pin="$(read_hermes_pin || true)"
+  if [ -z "$pin" ]; then
+    echo "${indent}hermes pin: none (run 'choomfie hermes-update --pin' to record one)"
+    return 1
+  fi
+  dir="$(hermes_project_dir || true)"
+  if [ -z "$dir" ]; then
+    echo "${indent}hermes pin: $pin (installed checkout not found)"
+    return 1
+  fi
+  installed="$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)"
+  local pin_full
+  pin_full="$(git -C "$dir" rev-parse "$pin" 2>/dev/null || echo "$pin")"
+  if [ "$installed" = "$pin_full" ]; then
+    echo "${indent}hermes pin: matches (${pin_full:0:9})"
+    return 0
+  fi
+  local behind ahead drift=""
+  behind="$(git -C "$dir" rev-list --count "$installed".."$pin_full" 2>/dev/null || true)"
+  ahead="$(git -C "$dir" rev-list --count "$pin_full".."$installed" 2>/dev/null || true)"
+  [ -n "$ahead" ] && [ "$ahead" -gt 0 ] 2>/dev/null && drift="${ahead} ahead"
+  [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null && drift="${drift:+$drift, }${behind} behind"
+  echo "${indent}hermes pin: DRIFTED (installed ${installed:0:9}, pinned ${pin_full:0:9}${drift:+; $drift})"
+  return 1
+}
+
+# Pull upstream Hermes, validate, and (optionally) re-pin. See hermes.pin for the flow.
+hermes_update() {
+  local mode="latest"
+  for arg in "$@"; do
+    case "$arg" in
+      --check)  mode="check" ;;
+      --to-pin) mode="to-pin" ;;
+      --pin)    mode="pin" ;;
+      *) echo "Unknown hermes-update option: $arg" >&2; return 2 ;;
+    esac
+  done
+
+  if ! command -v "${HERMES_BIN:-hermes}" >/dev/null 2>&1; then
+    echo "hermes CLI not found (set HERMES_BIN or install Hermes)." >&2
+    return 1
+  fi
+
+  case "$mode" in
+    check)
+      hermes_drift_status "  "
+      echo "  upstream:"
+      hermes_cmd update --check 2>&1 | sed 's/^/    /'
+      ;;
+    pin)
+      local dir installed
+      dir="$(hermes_project_dir)" || { echo "Hermes checkout not found." >&2; return 1; }
+      installed="$(git -C "$dir" rev-parse HEAD)"
+      local pin_full
+      pin_full="$(git -C "$dir" rev-parse "$(read_hermes_pin || echo NONE)" 2>/dev/null || true)"
+      if [ "$installed" = "$pin_full" ]; then
+        echo "Pin already at ${installed:0:9}; nothing to do."
+        return 0
+      fi
+      # Preserve the comment header; replace only the ref line.
+      local tmp; tmp="$(mktemp)"
+      awk -v ref="$installed" '
+        /^[[:space:]]*#/ || !NF { print; next }
+        !done { print ref; done = 1; next }
+      ' "$HERMES_PIN_FILE" > "$tmp"
+      mv "$tmp" "$HERMES_PIN_FILE"
+      echo "Pinned Hermes to ${installed:0:9} ($(git -C "$dir" describe --tags --always 2>/dev/null || echo "$installed"))."
+      echo "Commit hermes-overlay/hermes.pin to share this known-good build."
+      ;;
+    to-pin)
+      local dir pin
+      dir="$(hermes_project_dir)" || { echo "Hermes checkout not found." >&2; return 1; }
+      pin="$(read_hermes_pin)" || { echo "No pin recorded in $HERMES_PIN_FILE." >&2; return 1; }
+      echo "Checking out pinned Hermes $pin in $dir ..."
+      git -C "$dir" fetch --quiet origin 2>/dev/null || true
+      git -C "$dir" checkout --quiet "$pin"
+      echo "Reinstalling Hermes dependencies for the pinned ref ..."
+      hermes_cmd update --no-backup --yes 2>&1 | sed 's/^/  /' || \
+        echo "  (hermes update reinstall reported issues; verify with 'choomfie doctor')"
+      hermes_drift_status "  " || true
+      ;;
+    latest)
+      echo "Pulling latest upstream Hermes ..."
+      hermes_cmd update --yes 2>&1 | sed 's/^/  /'
+      echo
+      echo "Validate the lean Choomfie profile, then record the new known-good build:"
+      echo "  choomfie doctor"
+      echo "  choomfie hermes-update --pin"
+      hermes_drift_status "  " || true
+      ;;
+  esac
 }
 
 yaml_section_bool_is_true() {
@@ -106,8 +226,13 @@ apply_profile_defaults() {
     return 0
   fi
 
-  hermes_cmd config set model.default gpt-5.3-codex-spark >/dev/null
-  hermes_cmd config set model.provider openai-codex >/dev/null
+  # Brain = the local OpenAI-compatible sidecar, which runs the Claude Agent SDK
+  # on your Claude Code subscription login (see start_openai_endpoint_sidecar).
+  # base_url takes precedence over provider; the bearer key is read from
+  # OPENAI_API_KEY in the profile .env (cli.py custom-endpoint key resolution).
+  hermes_cmd config set model.default "${CHOOMFIE_BRAIN_MODEL:-choomfie-claude-code}" >/dev/null
+  hermes_cmd config set model.provider custom >/dev/null
+  hermes_cmd config set model.base_url "http://127.0.0.1:${CHOOMFIE_OPENAI_PORT:-4141}/v1" >/dev/null
   hermes_cmd config set sessions.auto_prune true >/dev/null
   hermes_cmd config set sessions.retention_days 30 >/dev/null
   hermes_cmd config set compression.enabled true >/dev/null
@@ -202,7 +327,12 @@ start_openai_endpoint_sidecar() {
     rm -f "$OPENAI_ENDPOINT_PID"
   fi
 
-  CHOOMFIE_DATA_DIR="$CLAUDE_DATA_DIR" nohup bun "$ROOT_DIR/packages/core/openai-server.ts" \
+  # Strip API-key/token env so the Agent SDK authenticates with the Claude Code
+  # subscription login (~/.claude) instead of billing the pay-per-token API.
+  # Keep CLAUDE_CODE_OAUTH_TOKEN if present — that IS the subscription path.
+  env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+    CHOOMFIE_DATA_DIR="$CLAUDE_DATA_DIR" \
+    nohup bun "$ROOT_DIR/packages/core/openai-server.ts" \
     >>"$OPENAI_ENDPOINT_LOG" 2>&1 &
   echo "$!" > "$OPENAI_ENDPOINT_PID"
 }
@@ -329,6 +459,7 @@ doctor() {
     ok=false
   else
     echo "  hermes: $("${HERMES_BIN:-hermes}" --version 2>/dev/null || echo found)"
+    hermes_drift_status "  " || true
   fi
 
   if [ ! -f "$OVERLAY_DIR/distribution.yaml" ] || [ ! -f "$OVERLAY_DIR/SOUL.md" ]; then
@@ -438,6 +569,11 @@ case "$cmd" in
     ;;
   sync|update)
     sync_and_harden
+    hermes_drift_status "  " || true
+    ;;
+  hermes-update)
+    shift
+    hermes_update "$@"
     ;;
   reset)
     shift
