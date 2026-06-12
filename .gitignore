@@ -17,3 +17,15 @@ voices-*.bin
 .claude/worktrees/
 .worktrees/
 .claude/
+
+# Runtime data — real copies live OUTSIDE the repo (~/.claude/..., ~/.choomfie-hermes/).
+# These are defense-in-depth in case a data dir is ever pointed inside the tree.
+config.json
+access.json
+openai-api-keys.json
+daemon-state.json
+handoffs.json
+*.port
+inbox/
+.choomfie-hermes/
+.choomfie-data/
