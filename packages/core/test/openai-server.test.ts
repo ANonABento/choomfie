@@ -125,7 +125,7 @@ test("models endpoint requires a bearer token with models or chat scope", async 
   expect(accepted.status).toBe(200);
   expect(body.object).toBe("list");
   expect(body.data).toContainEqual({
-    id: "choomfie-claude-sonnet",
+    id: "sonnet",
     object: "model",
     created: 0,
     owned_by: "choomfie:claude_code",
@@ -220,7 +220,7 @@ test("chat completions return an OpenAI-shaped non-streaming response through an
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "choomfie-claude-sonnet",
+      model: "sonnet",
       messages: [
         { role: "system", content: "be brief" },
         { role: "user", content: [{ type: "text", text: "hello" }] },
@@ -238,7 +238,7 @@ test("chat completions return an OpenAI-shaped non-streaming response through an
 
   expect(response.status).toBe(200);
   expect(body.object).toBe("chat.completion");
-  expect(body.model).toBe("choomfie-claude-sonnet");
+  expect(body.model).toBe("sonnet");
   expect(body.choices[0].message).toEqual({ role: "assistant", content: "hello from choomfie" });
   expect(body.choices[0].finish_reason).toBe("stop");
   expect(body.usage).toEqual({ prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 });
@@ -247,7 +247,7 @@ test("chat completions return an OpenAI-shaped non-streaming response through an
   });
   expect(calls).toEqual([
     {
-      model: "choomfie-claude-sonnet",
+      model: "sonnet",
       backendModel: "claude-sonnet-4-6",
       messages: [
         { role: "system", content: "be brief" },
@@ -341,24 +341,9 @@ test("chat completions reject unsupported tool and multi-choice requests explici
     version: "test",
   });
 
-  const toolResponse = await handler(new Request("http://127.0.0.1:4141/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${issued.token}` },
-    body: JSON.stringify({
-      messages: [{ role: "user", content: "hello" }],
-      tools: [{ type: "function", function: { name: "x" } }],
-    }),
-  }));
-  expect(toolResponse.status).toBe(400);
-  expect(await toolResponse.json()).toEqual({
-    error: {
-      message: "OpenAI tool calls are not supported by this endpoint yet",
-      type: "invalid_request_error",
-      param: "tools",
-      code: "unsupported_feature",
-    },
-  });
-
+  // NOTE: OpenAI `tools` are now ACCEPTED (and ignored) rather than rejected —
+  // the Agent SDK backend runs its own tools. See chat.ts. Only `tool`-role
+  // result messages and n>1 remain unsupported.
   const nResponse = await handler(new Request("http://127.0.0.1:4141/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${issued.token}` },
@@ -1219,7 +1204,7 @@ test("responses endpoint creates, retrieves, lists input items, and deletes stor
     },
     body: JSON.stringify({
       input: "hello",
-      model: "choomfie-claude-sonnet",
+      model: "sonnet",
     }),
   }));
   const created = await create.json() as {
@@ -1650,10 +1635,10 @@ test("OpenAI Node SDK can list models and create a chat completion", async () =>
 
   const models = await client.models.list();
   expect(models.object).toBe("list");
-  expect(models.data.some((model) => model.id === "choomfie-claude-sonnet")).toBe(true);
+  expect(models.data.some((model) => model.id === "sonnet")).toBe(true);
 
   const chat = await client.chat.completions.create({
-    model: "choomfie-claude-sonnet",
+    model: "sonnet",
     messages: [{ role: "user", content: "hello" }],
   });
   expect(chat.object).toBe("chat.completion");
@@ -1687,7 +1672,7 @@ test("OpenAI Node SDK streaming iterator receives chat completion chunks", async
     baseURL: `http://${server.hostname}:${server.port}/v1`,
   });
   const stream = await client.chat.completions.create({
-    model: "choomfie-claude-sonnet",
+    model: "sonnet",
     messages: [{ role: "user", content: "hello" }],
     stream: true,
   });

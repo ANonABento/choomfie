@@ -52,13 +52,12 @@ export function normalizeChatRequest(
 
   const request = parsed.data;
   const model = request.model ?? config.models.default;
-  const alias = config.models.aliases[model];
-  if (!alias) {
-    return {
-      ok: false,
-      response: openAIErrorResponse(400, `Unknown model: ${model}`, "invalid_request_error", "model", "model_not_found"),
-    };
-  }
+  // Dynamic passthrough: a known alias resolves to its mapped model id; any
+  // unknown name is forwarded to the backend as-is (treated as a raw model id).
+  // This lets `choomfie model <anything>` work without pre-registering an alias —
+  // the backend (and the launcher's boot self-test) are the source of truth on
+  // whether the model is real.
+  const backendModel = config.models.aliases[model]?.model ?? model;
 
   if ((request.n ?? 1) > 1) {
     return {
@@ -67,12 +66,11 @@ export function normalizeChatRequest(
     };
   }
 
-  if (request.tools && request.tools.length > 0) {
-    return {
-      ok: false,
-      response: openAIErrorResponse(400, "OpenAI tool calls are not supported by this endpoint yet", "invalid_request_error", "tools", "unsupported_feature"),
-    };
-  }
+  // OpenAI-style tool definitions from the caller (e.g. Hermes injecting its own
+  // tools) are ACCEPTED but not forwarded: the Agent SDK backend is itself an
+  // agent with its own internal tools, so it answers as text rather than emitting
+  // OpenAI tool_calls. A proper Hermes<->Agent-SDK tool bridge is a separate task;
+  // until then, ignoring `tools` lets the conversation flow instead of 400-ing.
 
   if (request.audio || (request.modalities && request.modalities.some((modality) => modality !== "text"))) {
     return {
@@ -109,7 +107,7 @@ export function normalizeChatRequest(
     request,
     messages,
     model,
-    backendModel: alias.model,
+    backendModel,
   };
 }
 

@@ -201,14 +201,38 @@ OPENAI_MODEL=choomfie-claude-sonnet
 
 See [docs/openai-endpoint.md](docs/openai-endpoint.md) for routes, routing behavior, and extension endpoints; [docs/openai-endpoint-verification.md](docs/openai-endpoint-verification.md) for verification notes.
 
-## Cost & Session Controls
+## Choosing the Brain (model)
 
-The Hermes overlay defaults routine traffic to `gpt-5.3-codex-spark` via `openai-codex`. Use a heavier model only when needed:
+Choomfie's "brain" lives in **Hermes's own config** (single source of truth). `choomfie model` is a thin wrapper over it:
 
 ```bash
-hermes -p choomfie chat -q "..." --model gpt-5.5 --provider openai-codex   # one-off
-hermes -p choomfie config set model.default <model>                        # persistent
-hermes -p choomfie config set model.provider <provider>
+choomfie model                    # open Hermes's full provider/model picker
+choomfie model sonnet             # shortcut: configure the subscription sidecar
+choomfie model opus
+choomfie model local              # shortcut: Ollama (free)
+choomfie model claude-haiku-4-5   # set model.default on the current provider
+```
+
+The subscription sidecar is registered as a named Hermes provider (`providers.choomfie`), so the picker lists it and highlights it as **current** rather than defaulting to openrouter.
+
+| Pick | What it does | Billing |
+|------|--------------|---------|
+| `choomfie model` (no name) | Opens Hermes's picker — `Choomfie (subscription)` shows as current; also Nous, OpenRouter, zai, … | per the chosen provider |
+| `opus` / `sonnet` | Points Hermes at the `:4141` sidecar (Claude on your subscription, **headless**) | ⚠️ **Separate metered Agent SDK credit** — see note |
+| `local` | Points at Ollama | Free |
+| `<model-id>` | Changes `model.default` on the current provider | per the current provider |
+
+> **⚠️ Agent SDK billing change (2026-06-15).** As of June 15 2026, Agent SDK / `claude -p` / headless usage on Claude subscriptions **no longer draws from your interactive flat-rate pool**. It draws from a **separate monthly Agent SDK credit** — **$20** (Pro), **$100** (Max 5×), **$200** (Max 20×) — billed at standard API rates. When it runs out, requests bill as pay-per-token usage credits (if enabled) or stop until the credit refreshes. Interactive Claude Code (terminal/chat) is unaffected. So the `opus`/`sonnet` brains draw from this **metered** pool, not the flat rate — use `local` (free) for everyday traffic or `gateway` for a non-Anthropic provider to conserve it. See [Anthropic's docs](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan).
+
+The choice is written straight to the profile's Hermes config (`model.provider/base_url/default`) — there is no separate Choomfie state to drift — and applied on the next `choomfie start`/`restart`. A non-preset model is validated with a 1-token ping at boot and `model.default` reverts to the last working model if it doesn't answer; Hermes's own `fallback_providers` chain (seeded to `local`) covers runtime rate-limit/overload failures.
+
+## Cost & Session Controls
+
+The active brain is set with [`choomfie model`](#choosing-the-brain-model) (default: `opus` on the subscription sidecar). Prefer switching the brain over editing Hermes config directly:
+
+```bash
+choomfie model sonnet                                                      # persistent switch
+hermes -p choomfie chat -q "..." --model gpt-5.5 --provider openai-codex   # one-off, bypasses the brain
 ```
 
 **Token budget** — daily checks warn at 2M tokens/day and hard-stop at 3M (override via `CHOOMFIE_TOKEN_WARN_THRESHOLD` / `CHOOMFIE_TOKEN_HARD_THRESHOLD`):

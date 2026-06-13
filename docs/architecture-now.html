@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Choomfie — Architecture (now)</title>
+<style>
+  :root{
+    --bg:#0a0c10; --panel:#11151c; --panel2:#161b24; --line:#26303d;
+    --ink:#e6edf3; --dim:#8b97a7; --faint:#5c6675;
+    --cyan:#22d3ee; --grn:#34d399; --amber:#fbbf24; --pink:#f472b6; --violet:#a78bfa; --red:#f87171;
+    --glow:0 0 0 1px rgba(255,255,255,.04), 0 12px 40px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:radial-gradient(1200px 700px at 70% -10%,#13202b 0%,var(--bg) 60%);color:var(--ink);
+    font:14px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1100px;margin:0 auto;padding:40px 28px 80px}
+  h1{font-size:26px;margin:0 0 4px;letter-spacing:-.02em}
+  h1 .v{color:var(--cyan)}
+  .sub{color:var(--dim);margin:0 0 28px;font-size:13px}
+  .sub code{color:var(--amber);background:#1c232e;padding:1px 6px;border-radius:5px;font-size:12px}
+
+  .lane{display:flex;align-items:center;gap:18px;margin:0 0 14px}
+  .lane-tag{flex:0 0 92px;text-align:right;color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.12em}
+  .node{flex:1;background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);
+    border-radius:14px;padding:16px 18px;box-shadow:var(--glow);position:relative}
+  .node .role{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--dim);margin-bottom:6px}
+  .node .title{font-size:16px;font-weight:650;letter-spacing:-.01em}
+  .node .title .pill{font-size:10px;font-weight:600;vertical-align:middle;margin-left:8px;padding:2px 8px;border-radius:999px;
+    background:#0e1620;border:1px solid var(--line);color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+  .node .meta{color:var(--dim);font-size:12.5px;margin-top:7px}
+  .node .meta b{color:var(--ink);font-weight:600}
+  .chips{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
+  .chip{font-size:11px;padding:3px 9px;border-radius:7px;background:#0e1620;border:1px solid var(--line);color:#b7c2d0}
+
+  .edge{flex:1;text-align:center;color:var(--faint);font-size:12px;padding:2px 0}
+  .arrow{display:flex;justify-content:center;margin:-2px 0}
+  .arrow .stem{width:2px;height:26px;background:linear-gradient(var(--line),var(--cyan));position:relative}
+  .arrow .stem::after{content:"";position:absolute;left:50%;bottom:-1px;transform:translateX(-50%);
+    border:5px solid transparent;border-top-color:var(--cyan)}
+  .arrow .lbl{position:absolute;left:50%;top:50%;transform:translate(14px,-50%);white-space:nowrap;color:var(--dim);font-size:11.5px}
+  .arrow-wrap{position:relative;display:flex;justify-content:center;margin:2px 0 2px}
+
+  .accent-cyan{border-color:#1d4e57}.accent-cyan .role{color:var(--cyan)}
+  .accent-grn{border-color:#1d5244}.accent-grn .role{color:var(--grn)}
+  .accent-violet{border-color:#3a3160}.accent-violet .role{color:var(--violet)}
+  .accent-amber{border-color:#544318}.accent-amber .role{color:var(--amber)}
+  .accent-dim{opacity:.62;border-style:dashed}.accent-dim .role{color:var(--faint)}
+
+  .split{display:flex;gap:18px;margin-top:34px;flex-wrap:wrap}
+  .card{flex:1;min-width:300px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+  .card h3{margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:var(--dim)}
+  .legend-row{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:12.5px;color:#c5cfdb}
+  .dot{width:11px;height:11px;border-radius:3px;flex:0 0 auto}
+  ul.tight{margin:6px 0 0;padding-left:18px;color:#c5cfdb;font-size:12.5px}
+  ul.tight li{margin:5px 0}
+  ul.tight b{color:var(--ink)}
+  .key{color:var(--amber)}
+
+  .callout{margin-top:30px;border:1px solid var(--line);border-left:3px solid var(--cyan);
+    background:#0e1620;border-radius:10px;padding:14px 18px;color:#c5cfdb;font-size:13px}
+  .callout b{color:var(--ink)}
+  .foot{margin-top:30px;color:var(--faint);font-size:11.5px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Choomfie — architecture <span class="v">/ now</span></h1>
+  <p class="sub">Post Option-B migration. One runtime (Hermes), a swappable brain reached over an OpenAI-compatible wire, running on your Claude <b>subscription</b> — owner-only. Endpoint at <code>127.0.0.1:4141/v1</code>.</p>
+
+  <!-- DISCORD -->
+  <div class="lane">
+    <div class="lane-tag">surface</div>
+    <div class="node accent-cyan">
+      <div class="role">You · Discord</div>
+      <div class="title">Discord (owner-only)</div>
+      <div class="meta">DMs + @mentions. Allowlist locked to <b>just you</b> — the ToS line that keeps single-seat subscription use defensible.</div>
+    </div>
+  </div>
+  <div class="arrow-wrap"><div class="arrow"><div class="stem"><span class="lbl">messages ⟷ replies</span></div></div></div>
+
+  <!-- HERMES -->
+  <div class="lane">
+    <div class="lane-tag">runtime</div>
+    <div class="node accent-grn">
+      <div class="role">Hermes Gateway · Python &nbsp;— single source of truth</div>
+      <div class="title">The Agent <span class="pill">identity lives here</span></div>
+      <div class="meta">Persona, memory, sessions, cron, context compression, tool-routing. This is the part that <b>stays the same no matter which model is behind it.</b></div>
+      <div class="chips">
+        <span class="chip">persona: choomfie</span><span class="chip">sessions + prune</span><span class="chip">compression</span>
+        <span class="chip">cron</span><span class="chip">tools: web · browser · github · memory · todo</span>
+      </div>
+      <div class="chips">
+        <span class="chip">plugin: choomfie_commands</span><span class="chip">plugin: choomfie_reminders</span><span class="chip">plugin: choomfie_tutor</span>
+      </div>
+    </div>
+  </div>
+  <div class="arrow-wrap"><div class="arrow"><div class="stem"><span class="lbl">model.base_url → :4141/v1 &nbsp;·&nbsp; Bearer sk-choomfie-…</span></div></div></div>
+
+  <!-- ENDPOINT -->
+  <div class="lane">
+    <div class="lane-tag">model wire</div>
+    <div class="node accent-violet">
+      <div class="role">Choomfie OpenAI Endpoint · Bun &nbsp;— openai-server.ts</div>
+      <div class="title">OpenAI-compatible shim <span class="pill">swappable seam</span></div>
+      <div class="meta"><b>requireAuth</b> (scoped bearer key) · <b>routing.mode = claude_code</b>. Speaks <code style="color:var(--violet)">/v1/chat/completions</code> so <i>anything</i> can sit on either side.</div>
+    </div>
+  </div>
+  <div class="arrow-wrap"><div class="arrow"><div class="stem"><span class="lbl">query() &nbsp;·&nbsp; env has NO ANTHROPIC_API_KEY</span></div></div></div>
+
+  <!-- BRAIN -->
+  <div class="lane">
+    <div class="lane-tag">brain</div>
+    <div class="node accent-amber">
+      <div class="role">Claude Agent SDK → Claude</div>
+      <div class="title">Claude Opus / Sonnet — on your <span style="color:var(--amber)">subscription</span></div>
+      <div class="meta">SDK <code>query()</code> finds no API key in env → auths via <b>Claude Code OAuth (~/.claude)</b>. <span class="key">This single fact = subscription, not pay-per-token.</span> Repoint <code>base_url</code> and this box becomes any local/API model — persona &amp; memory above don't move.</div>
+    </div>
+  </div>
+
+  <!-- two cards -->
+  <div class="split">
+    <div class="card">
+      <h3>Status legend</h3>
+      <div class="legend-row"><span class="dot" style="background:var(--grn)"></span><b style="color:var(--grn);font-weight:600">Live</b>&nbsp;— Hermes runtime + subscription brain, shipped &amp; verified (PR&nbsp;#74).</div>
+      <div class="legend-row"><span class="dot" style="background:var(--amber)"></span><b style="color:var(--amber);font-weight:600">Swappable</b>&nbsp;— brain behind the :4141 seam; model-agnostic by design.</div>
+      <div class="legend-row"><span class="dot" style="background:var(--faint)"></span><b style="color:var(--faint);font-weight:600">Legacy / porting</b>&nbsp;— old supervisor↔worker MCP stack (voice, socials, birthdays, personas-as-tools) not yet ported into Hermes plugins. The “90%” consolidation left.</div>
+    </div>
+    <div class="card">
+      <h3>Why it’s built this way</h3>
+      <ul class="tight">
+        <li><b>Agent layer ≠ model layer.</b> Identity/memory/tools live in Hermes; the token-predictor is a detail behind a URL.</li>
+        <li><b>Same Choomfie everywhere.</b> Claude Code, Claude API, OpenAI, or a local model — flip <code>base_url</code>, behavior holds.</li>
+        <li><b>Subscription, not metered.</b> Strip <code>ANTHROPIC_API_KEY</code> from the sidecar → SDK rides your Pro/Max OAuth.</li>
+        <li><b>ToS guardrail.</b> Owner-only allowlist. Serving other Discord users would re-distribute a single seat = the line not to cross.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout">
+    <b>Where kaitencode plugs in →</b> kaitencode (the renamed <i>bento-ya</i> kanban/pipeline board) is the <b>work backend</b>. Choomfie’s local-mode design already polls a task queue (<code>bentoyaApiUrl → /tasks/next</code>) when Discord is idle. So the clean integration isn’t “put Choomfie inside kaitencode” — it’s: <b>Hermes runs the agent, kaitencode holds the task pipeline, and idle Choomfie pulls + executes those tasks through the same brain.</b> Two roles, one loop.
+  </div>
+
+  <div class="foot">choomfie/docs/architecture-now.html · generated 2026-06-12 · open in browser, screenshot into Discord</div>
+</div>
+</body>
+</html>

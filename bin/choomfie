@@ -25,6 +25,15 @@ Usage:
   choomfie setup [args...]  Run Hermes gateway setup
   choomfie migrate-legacy [args...] Run Hermes gateway legacy migration
   choomfie chat             Open Hermes chat for the Choomfie profile
+  choomfie model [name]     Switch the brain (stored in Hermes's own config):
+                              (no name)      open Hermes's full provider/model picker
+                                             (the subscription sidecar shows as current)
+                              opus / sonnet  Claude subscription, headless (Agent SDK)
+                                             — SEPARATE metered Agent SDK credit pool,
+                                             not the flat-rate pool (Anthropic, 2026-06-15)
+                              local          Ollama, free
+                              <model-id>     set model.default on the current provider
+                            Applies on next start.
   choomfie api-key issue <app> --scopes chat,models
   choomfie api-key list
   choomfie api-key revoke <id-or-prefix>
@@ -226,13 +235,11 @@ apply_profile_defaults() {
     return 0
   fi
 
-  # Brain = the local OpenAI-compatible sidecar, which runs the Claude Agent SDK
-  # on your Claude Code subscription login (see start_openai_endpoint_sidecar).
-  # base_url takes precedence over provider; the bearer key is read from
-  # OPENAI_API_KEY in the profile .env (cli.py custom-endpoint key resolution).
-  hermes_cmd config set model.default "${CHOOMFIE_BRAIN_MODEL:-choomfie-claude-code}" >/dev/null
-  hermes_cmd config set model.provider custom >/dev/null
-  hermes_cmd config set model.base_url "http://127.0.0.1:${CHOOMFIE_OPENAI_PORT:-4141}/v1" >/dev/null
+  # NOTE: the brain (model.provider / base_url / default + fallback chain) is the
+  # SINGLE SOURCE OF TRUTH in Hermes's own config — seeded once by the overlay on
+  # a fresh profile and changed via `choomfie model`. We deliberately do NOT force
+  # it here: doing so used to revert a user's switch on every launch. Everything
+  # below is product config Choomfie owns and re-asserts on each sync.
   hermes_cmd config set sessions.auto_prune true >/dev/null
   hermes_cmd config set sessions.retention_days 30 >/dev/null
   hermes_cmd config set compression.enabled true >/dev/null
@@ -250,6 +257,141 @@ apply_profile_defaults() {
 sync_and_harden() {
   sync_overlay
   apply_profile_defaults
+}
+
+# --- Brain (model / provider) switching -----------------------------------
+# The brain is the SINGLE SOURCE OF TRUTH in Hermes's own config
+# (model.provider / base_url / default + fallback chain). `choomfie model` is a
+# thin wrapper over it:
+#   choomfie model                    open Hermes's full provider/model picker
+#   choomfie model opus|sonnet|local  configure Hermes's `custom` provider
+#   choomfie model <model-id>         set model.default on the current provider
+# Named presets resolve to a (provider, base_url, model) triple; returns 1 for
+# anything that isn't a preset.
+resolve_brain() {
+  local name="$1"
+  local port="${CHOOMFIE_OPENAI_PORT:-4141}"
+  case "$name" in
+    opus)
+      BRAIN_PROVIDER=choomfie
+      BRAIN_BASE_URL="http://127.0.0.1:$port/v1"
+      BRAIN_MODEL="opus" ;;
+    sonnet)
+      BRAIN_PROVIDER=choomfie
+      BRAIN_BASE_URL="http://127.0.0.1:$port/v1"
+      BRAIN_MODEL="sonnet" ;;
+    haiku)
+      BRAIN_PROVIDER=choomfie
+      BRAIN_BASE_URL="http://127.0.0.1:$port/v1"
+      BRAIN_MODEL="haiku" ;;
+    local)
+      BRAIN_PROVIDER=custom
+      BRAIN_BASE_URL="${CHOOMFIE_LOCAL_BASE_URL:-http://127.0.0.1:11434/v1}"
+      BRAIN_MODEL="${CHOOMFIE_LOCAL_MODEL:-llama3.1}" ;;
+    *)
+      return 1 ;;
+  esac
+}
+
+# Read one field of Hermes's current Model config (default | provider | base_url).
+hermes_model_field() {
+  hermes_cmd config show 2>/dev/null | grep -i "Model:" | head -1 \
+    | sed -n "s/.*'$1': '\([^']*\)'.*/\1/p"
+}
+
+# Boot-time guard. A trusted Claude preset on the subscription sidecar passes
+# untested; anything else is pinged once and, on failure, model.default is
+# reverted to the last-known-good model id. Hermes's own fallback chain handles
+# runtime (rate-limit / overload / connection) failures separately.
+ensure_brain_valid() {
+  local profile_env="$HERMES_HOME/profiles/$PROFILE_NAME/.env"
+  local default provider
+  default="$(hermes_model_field default)"
+  provider="$(hermes_model_field provider)"
+  [ -n "$default" ] || return 0  # nothing configured yet
+
+  # Trusted Choomfie Claude models on the Agent-SDK sidecar — no ping needed.
+  case "$default" in
+    opus|sonnet|haiku)
+      set_env_value "$profile_env" CHOOMFIE_BRAIN_LAST_GOOD "$default"; return 0 ;;
+  esac
+
+  # Only self-test raw/unknown models on the Agent-SDK provider (we know it's the
+  # :4141 sidecar). Other providers (interactive / gateway) are Hermes's job,
+  # including its fallback chain.
+  [ "$provider" = "choomfie" ] || return 0
+  command -v curl >/dev/null 2>&1 || return 0
+
+  local base_url="http://127.0.0.1:${CHOOMFIE_OPENAI_PORT:-4141}/v1"
+  local key auth_args=()
+  key="$(read_env_value "$profile_env" OPENAI_API_KEY || true)"
+  [ -n "$key" ] && auth_args=(-H "Authorization: Bearer $key")
+  for _ in $(seq 1 40); do
+    curl -s -o /dev/null --max-time 1 "${base_url%/v1}/health" 2>/dev/null && break
+    sleep 0.25
+  done
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
+    "${base_url%/}/chat/completions" \
+    -H "Content-Type: application/json" "${auth_args[@]}" \
+    -d "{\"model\":\"$default\",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}" \
+    2>/dev/null || echo 000)"
+  if [ "$code" = "200" ]; then
+    set_env_value "$profile_env" CHOOMFIE_BRAIN_LAST_GOOD "$default"
+    return 0
+  fi
+  local lastgood
+  lastgood="$(read_env_value "$profile_env" CHOOMFIE_BRAIN_LAST_GOOD || echo opus)"
+  echo "⚠ brain '$default' didn't answer (HTTP $code) — reverting model.default to '$lastgood'." >&2
+  hermes_cmd config set model.default "$lastgood" >/dev/null
+}
+
+# `choomfie model [name]` — open Hermes's picker, or apply a named shortcut.
+# Bare invocation opens Hermes's own full provider/model picker (the single
+# source of truth). Named shortcuts write Hermes's `custom` provider directly.
+cmd_model() {
+  local profile_env="$HERMES_HOME/profiles/$PROFILE_NAME/.env"
+
+  if [ $# -eq 0 ]; then
+    # Open Hermes's own provider/model picker. The subscription sidecar is
+    # registered as a named provider (providers.choomfie), so it shows up
+    # highlighted as the current provider instead of defaulting to openrouter.
+    # Quick presets (no picker): choomfie model opus|sonnet|local.
+    hermes_cmd model
+    return $?
+  fi
+
+  local name="$1"; shift
+
+  # 'pick' / 'gateway' are explicit aliases for the picker (same as no args).
+  if [ "$name" = "pick" ] || [ "$name" = "gateway" ]; then
+    hermes_cmd model
+    return $?
+  fi
+
+  # Named presets → configure Hermes's custom provider directly.
+  if resolve_brain "$name"; then
+    hermes_cmd config set model.provider "$BRAIN_PROVIDER" >/dev/null
+    hermes_cmd config set model.base_url "$BRAIN_BASE_URL" >/dev/null
+    hermes_cmd config set model.default "$BRAIN_MODEL" >/dev/null
+    set_env_value "$profile_env" CHOOMFIE_BRAIN_LAST_GOOD "$BRAIN_MODEL"
+    case "$name" in
+      local) echo "✓ brain → local — $BRAIN_MODEL via Ollama (free)." ;;
+      *) echo "✓ brain → $name — $BRAIN_MODEL · Claude subscription, headless."
+         echo "  ⚠ bills to the separate metered Agent SDK credit pool, not the flat rate." ;;
+    esac
+    echo "  Written to Hermes config. Run 'choomfie restart' to load it."
+    return 0
+  fi
+
+  # Anything else → a raw model id on the CURRENT provider.
+  hermes_cmd config set model.default "$name" >/dev/null
+  echo "✓ model.default → $name (current provider)."
+  if ! printf '%s' "$name" | grep -qiE '^(claude-|gpt-|o[0-9]|llama|qwen|mistral|gemma|phi|deepseek)'; then
+    echo "  ⚠ '$name' isn't an obvious model id — it's validated at next start and"
+    echo "    reverted to the last working model if it doesn't answer."
+  fi
+  echo "  Run 'choomfie restart' to load it."
 }
 
 set_env_value() {
@@ -587,6 +729,7 @@ case "$cmd" in
     shift
     sync_and_harden
     start_openai_endpoint_sidecar
+    ensure_brain_valid
     hermes_cmd gateway start "$@"
     ;;
   install|setup|migrate-legacy)
@@ -607,8 +750,9 @@ case "$cmd" in
     shift
     stop_openai_endpoint_sidecar
     sync_and_harden
-    hermes_cmd gateway restart "$@"
     start_openai_endpoint_sidecar
+    ensure_brain_valid
+    hermes_cmd gateway restart "$@"
     ;;
   stop)
     shift
@@ -621,10 +765,15 @@ case "$cmd" in
     sync_overlay
     hermes_cmd chat "$@"
     ;;
+  model)
+    shift
+    cmd_model "$@"
+    ;;
   gateway|"")
     shift || true
     sync_and_harden
     start_openai_endpoint_sidecar
+    ensure_brain_valid
     hermes_cmd gateway start "$@"
     ;;
   *)

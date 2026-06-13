@@ -6,9 +6,43 @@ profile:
 # Swap to any other model later by repointing base_url/provider — persona,
 # memory, and tools stay identical.
 model:
-  default: choomfie-claude-code   # opus alias; use choomfie-claude-sonnet for lighter/cheaper
-  provider: custom
-  base_url: http://127.0.0.1:4141/v1
+  default: opus                   # switch with `choomfie model` (sonnet / haiku / picker)
+  provider: choomfie              # = the Agent-SDK provider below, so the picker selects it
+
+# Choomfie's brains are registered as NAMED providers so Hermes's `model` picker
+# lists them, highlights the current one (model.provider must equal the key), and
+# shows their models (opus/sonnet/haiku, via the sidecar's /v1/models).
+providers:
+  # Claude on your subscription, run headless via the Agent SDK (metered pool).
+  choomfie:
+    name: Choomfie Claude (Agent SDK)
+    base_url: http://127.0.0.1:4141/v1
+    api_key_env: OPENAI_API_KEY
+    default_model: opus
+    models:
+      - opus
+      - sonnet
+      - haiku
+  # Claude via an interactive session (flat-rate pool). The :4142 bridge is not
+  # built yet — registered so the picker shows it; selecting it won't route until
+  # the interactive endpoint exists (deferred task).
+  choomfie-interactive:
+    name: Choomfie Claude (Interactive)
+    base_url: http://127.0.0.1:4142/v1
+    api_key_env: OPENAI_API_KEY
+    default_model: opus
+    models:
+      - opus
+      - sonnet
+      - haiku
+
+# Fallback brain — Hermes tries this when the primary fails (rate-limit /
+# overload / connection). Local + free, so failures don't burn the metered
+# Agent SDK credit. Requires Ollama running; remove if you don't use it.
+fallback_providers:
+  - provider: custom
+    base_url: http://127.0.0.1:11434/v1
+    model: llama3.1
 
 gateway:
   enabled: true

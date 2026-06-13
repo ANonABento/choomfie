@@ -55,19 +55,19 @@ export const DEFAULT_OPENAI_ENDPOINT_CONFIG: OpenAIEndpointConfig = {
     hermesBaseUrl: "http://127.0.0.1:8642/v1",
   },
   models: {
-    default: "choomfie-claude-sonnet",
+    default: "opus",
     aliases: {
-      "choomfie-claude-sonnet": {
+      "opus": {
+        backend: "claude_code",
+        model: "claude-opus-4-8",
+      },
+      "sonnet": {
         backend: "claude_code",
         model: "claude-sonnet-4-6",
       },
-      "choomfie-claude-code": {
+      "haiku": {
         backend: "claude_code",
-        model: "claude-opus-4-6",
-      },
-      "choomfie-local": {
-        backend: "ollama",
-        model: "llama3.1",
+        model: "claude-haiku-4-5",
       },
     },
   },
