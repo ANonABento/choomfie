@@ -11,10 +11,35 @@ import type {
   NormalizedChatMessage,
 } from "./chat.ts";
 
+// A Discord turn is a chat completion, not a coding session, but the agent still
+// needs room to use a tool and then answer. maxTurns:1 made ANY tool use a hard
+// error ("Reached maximum number of turns (1)") instead of a reply — that filled
+// the endpoint log on 2026-07-13. Small enough to bound cost on a runaway loop.
+const MAX_TURNS = 8;
+
+// SDK isolation mode. Previously ["user", "project"], which loaded the global +
+// project CLAUDE.md into EVERY Discord message: measured at 36,584 cache-creation
+// tokens (~$0.22) for a one-word reply. Choomfie's persona comes from Hermes's
+// system prompt, so the dev-repo context was pure overhead on a metered pool.
+const SETTING_SOURCES: [] = [];
+
 function formatTranscript(messages: NormalizedChatMessage[]): string {
   return messages
     .map((message) => `${message.role.toUpperCase()}:\n${message.content}`)
     .join("\n\n");
+}
+
+// Exported for tests — these two encode the cost/failure contract of the brain
+// (see agent-sdk-adapter.test.ts) and are easy to regress silently.
+export function queryOptions(input: ChatBackendInput, includePartialMessages: boolean) {
+  return {
+    model: input.backendModel,
+    maxTurns: MAX_TURNS,
+    includePartialMessages,
+    permissionMode: "bypassPermissions" as const,
+    allowDangerouslySkipPermissions: true,
+    settingSources: SETTING_SOURCES,
+  };
 }
 
 function assistantText(message: SDKAssistantMessage): string {
@@ -30,9 +55,16 @@ function assistantText(message: SDKAssistantMessage): string {
   return text.join("\n");
 }
 
-function usageFromResult(result: SDKResultMessage): ChatBackendOutput["usage"] {
+export function usageFromResult(result: SDKResultMessage): ChatBackendOutput["usage"] {
   const usage = result.usage;
-  const inputTokens = usage.input_tokens ?? 0;
+  // Cache tokens ARE input tokens and are billed. Counting only input_tokens
+  // reported 3 prompt_tokens for a turn that actually consumed ~36.6k, and
+  // hermes-overlay/scripts/token-budget.sh reads these numbers via `hermes
+  // insights` — so the daily 2M warn / 3M hard-stop never tripped.
+  const inputTokens =
+    (usage.input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0) +
+    (usage.cache_read_input_tokens ?? 0);
   const outputTokens = usage.output_tokens ?? 0;
   return {
     prompt_tokens: inputTokens,
@@ -45,14 +77,7 @@ export class ClaudeAgentSDKChatBackend implements ChatBackend {
   async complete(input: ChatBackendInput): Promise<ChatBackendOutput> {
     const sdkQuery = query({
       prompt: formatTranscript(input.messages),
-      options: {
-        model: input.backendModel,
-        maxTurns: 1,
-        includePartialMessages: false,
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
-        settingSources: ["user", "project"],
-      },
+      options: queryOptions(input, false),
     });
 
     const abort = () => sdkQuery.close();
@@ -93,14 +118,7 @@ export class ClaudeAgentSDKChatBackend implements ChatBackend {
   async *stream(input: ChatBackendInput): AsyncIterable<ChatBackendStreamEvent> {
     const sdkQuery = query({
       prompt: formatTranscript(input.messages),
-      options: {
-        model: input.backendModel,
-        maxTurns: 1,
-        includePartialMessages: true,
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
-        settingSources: ["user", "project"],
-      },
+      options: queryOptions(input, true),
     });
 
     const abort = () => sdkQuery.close();
