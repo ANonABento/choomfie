@@ -58,7 +58,8 @@ fi
 
 copy_dir "$OVERLAY_DIR/skills" "$PROFILE_DIR/skills"
 copy_dir "$OVERLAY_DIR/scripts" "$PROFILE_DIR/scripts"
-copy_dir "$OVERLAY_DIR/cron" "$PROFILE_DIR/cron"
+# (no overlay cron/ dir — the copy here was always a no-op, so it was removed
+# along with the matching 'cron/' entry in distribution.yaml)
 copy_children "$OVERLAY_DIR/hooks" "$HERMES_HOME/hooks"
 copy_children "$OVERLAY_DIR/hooks" "$PROFILE_DIR/hooks"
 copy_children "$OVERLAY_DIR/plugins" "$HERMES_HOME/plugins"

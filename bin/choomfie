@@ -86,7 +86,9 @@ read_hermes_pin() {
 hermes_project_dir() {
   command -v "${HERMES_BIN:-hermes}" >/dev/null 2>&1 || return 1
   local dir
-  dir="$("${HERMES_BIN:-hermes}" --version 2>/dev/null | awk -F': ' '/^Project:/ { print $2; exit }')"
+  # Hermes renamed this line from "Project:" to "Install directory:" in v0.19.0;
+  # accept both so the pin/rollback path works across engine versions.
+  dir="$("${HERMES_BIN:-hermes}" --version 2>/dev/null | awk -F': ' '/^(Project|Install directory):/ { print $2; exit }')"
   [ -n "$dir" ] && [ -d "$dir/.git" ] || return 1
   printf '%s\n' "$dir"
 }
@@ -250,7 +252,9 @@ apply_profile_defaults() {
   hermes_cmd config set agent.max_turns 50 >/dev/null
   hermes_cmd config set agent.personalities.choomfie.description "Default Choomfie voice." >/dev/null
   hermes_cmd config set agent.personalities.choomfie.system_prompt "Be casual, friendly, and fun. Talk like a cyberpunk buddy; use slang, be direct, and be a ride-or-die friend." >/dev/null
-  hermes_cmd tools enable --platform discord web terminal file skills todo memory session_search clarify cronjob messaging >/dev/null || true
+  # NOTE: 'messaging' was dropped here — no such toolset in Hermes v0.19+
+  # ("Unknown toolset 'messaging'"), and the `|| true` was silently swallowing it.
+  hermes_cmd tools enable --platform discord web terminal file skills todo memory session_search clarify cronjob >/dev/null || true
   hermes_cmd tools disable --platform discord browser code_execution vision image_gen tts delegation computer_use >/dev/null || true
 }
 

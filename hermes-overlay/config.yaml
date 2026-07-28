@@ -23,18 +23,11 @@ providers:
       - opus
       - sonnet
       - haiku
-  # Claude via an interactive session (flat-rate pool). The :4142 bridge is not
-  # built yet — registered so the picker shows it; selecting it won't route until
-  # the interactive endpoint exists (deferred task).
-  choomfie-interactive:
-    name: Choomfie Claude (Interactive)
-    base_url: http://127.0.0.1:4142/v1
-    api_key_env: OPENAI_API_KEY
-    default_model: opus
-    models:
-      - opus
-      - sonnet
-      - haiku
+  # NOTE: a second "Choomfie Claude (Interactive)" provider on :4142 used to be
+  # registered here for a flat-rate interactive bridge. The :4142 server was never
+  # built, so the picker listed a brain that silently failed to route. Removed
+  # until the bridge actually exists — see
+  # docs/interactive-bridge-and-consolidation-spec.md (the billing spike gates it).
 
 # Fallback brain — Hermes tries this when the primary fails (rate-limit /
 # overload / connection). Local + free, so failures don't burn the metered
@@ -81,14 +74,12 @@ plugins:
     - choomfie_reminders
     - choomfie_tutor
 
-tools:
-  enabled:
-    - web
-    - browser
-    - github
-    - memory
-    - session_search
-    - todo
+# Toolsets are NOT configured here. `apply_profile_defaults` in bin/choomfie is
+# the single source of truth and re-asserts the enable/disable set on every sync.
+# This block used to list a different (and wrong) set — it claimed `browser` was
+# enabled while the launcher disables it, and omitted terminal/file/skills/
+# clarify/cronjob which the launcher enables. Check the live state with:
+#   hermes -p choomfie tools list --platform discord
 
 terminal:
   cwd: .

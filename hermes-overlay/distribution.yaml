@@ -1,13 +1,12 @@
 name: choomfie
 version: 0.1.0
 description: Choomfie personal Discord agent distribution for Hermes.
-hermes_requires: ">=0.12.0"
+hermes_requires: ">=0.19.0"
 author: ANonABento
 license: MIT
 distribution_owned:
   - SOUL.md
   - skills/
-  - cron/
   - distribution.yaml
 env_requires:
   - name: DISCORD_BOT_TOKEN
