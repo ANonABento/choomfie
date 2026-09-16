@@ -35,9 +35,7 @@ Then restart Choomfie:
 choomfie restart
 ```
 
-In Claude Code mode, the supervisor starts the endpoint sidecar. In Hermes mode,
-the `choomfie` launcher starts and stops the same Bun endpoint process alongside
-the Hermes gateway.
+The supervisor starts the endpoint sidecar alongside the worker.
 
 ## Issue A Key
 

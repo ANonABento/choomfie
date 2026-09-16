@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Remove Hermes Runtime
+
+### Removed
+
+- Hermes-mode runtime and dual-runtime architecture. Choomfie is now Claude Code-only (foreground, `--tmux`, or `--daemon`).
+- `hermes-overlay/` (SOUL.md, config.yaml, skills/plugins/hooks, sync tooling).
+- `bin/choomfie` (Hermes-first launcher) — `bin/choomfie-claude-code` is now the single `bin/choomfie` launcher.
+- `packages/core/lib/openai/hermes-adapter.ts` and the `"hermes"` OpenAI-endpoint routing mode; the endpoint now always routes through the Claude Agent SDK.
+- `packages/core/scripts/hermes-memory.ts` (Hermes memory export/draft tooling).
+- Hermes planning/handoff/migration docs (`docs/hermes-*.md`, `docs/choomfie-vs-hermes.md`, `docs/choomfie-handoff-codex.md`, `docs/choomfie-reminders-handoff.md`) and the `hermes:sync` / `hermes:doctor` package scripts.
+
 ## 0.6.0 — OpenAI-Compatible Endpoint (2026-05-16)
 
 ### Added
