@@ -18,7 +18,7 @@ voices-*.bin
 .worktrees/
 .claude/
 
-# Runtime data — real copies live OUTSIDE the repo (~/.claude/..., ~/.choomfie-hermes/).
+# Runtime data — real copies live OUTSIDE the repo (~/.claude/...).
 # These are defense-in-depth in case a data dir is ever pointed inside the tree.
 config.json
 access.json
@@ -27,5 +27,4 @@ daemon-state.json
 handoffs.json
 *.port
 inbox/
-.choomfie-hermes/
 .choomfie-data/

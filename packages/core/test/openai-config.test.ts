@@ -42,8 +42,8 @@ test("OpenAI endpoint config deep-merges saved JSON with defaults", () => {
   expect(config.enabled).toBe(true);
   expect(config.models.default).toBe("custom");
   expect(config.models.aliases.custom).toEqual({ backend: "test", model: "test-model" });
-  expect(config.models.aliases["choomfie-local"]).toEqual(
-    DEFAULT_OPENAI_ENDPOINT_CONFIG.models.aliases["choomfie-local"],
+  expect(config.models.aliases["choomfie-claude-code"]).toEqual(
+    DEFAULT_OPENAI_ENDPOINT_CONFIG.models.aliases["choomfie-claude-code"],
   );
   expect(config.features.streaming).toBe(false);
   expect(config.features.chat).toBe(true);
@@ -63,9 +63,8 @@ test("OpenAI endpoint environment overrides take precedence", () => {
       CHOOMFIE_OPENAI_PORT: "5151",
       CHOOMFIE_OPENAI_ALLOW_PUBLIC_BIND: "true",
       CHOOMFIE_OPENAI_REQUIRE_AUTH: "false",
-      CHOOMFIE_OPENAI_ROUTING_MODE: "hermes",
-      CHOOMFIE_OPENAI_HERMES_BASE_URL: "http://127.0.0.1:8642/v1",
-      CHOOMFIE_OPENAI_DEFAULT_MODEL: "choomfie-local",
+      CHOOMFIE_OPENAI_ROUTING_MODE: "claude_code",
+      CHOOMFIE_OPENAI_DEFAULT_MODEL: "choomfie-claude-code",
       CHOOMFIE_OPENAI_MAX_CONCURRENT: "9",
       CHOOMFIE_OPENAI_REQUEST_TIMEOUT_MS: "5000",
       CHOOMFIE_OPENAI_MAX_FILE_BYTES: "12345",
@@ -77,8 +76,8 @@ test("OpenAI endpoint environment overrides take precedence", () => {
   expect(config.port).toBe(5151);
   expect(config.allowPublicBind).toBe(true);
   expect(config.requireAuth).toBe(false);
-  expect(config.routing.mode).toBe("hermes");
-  expect(config.models.default).toBe("choomfie-local");
+  expect(config.routing.mode).toBe("claude_code");
+  expect(config.models.default).toBe("choomfie-claude-code");
   expect(config.maxConcurrent).toBe(9);
   expect(config.requestTimeoutMs).toBe(5000);
   expect(config.maxFileBytes).toBe(12345);

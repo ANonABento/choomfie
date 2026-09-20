@@ -5,7 +5,8 @@
 set -euo pipefail
 
 CHOOMFIE_DIR="$(cd "$(dirname "$0")" && pwd)"
-HERMES_HOME="${CHOOMFIE_HERMES_HOME:-$HOME/.choomfie-hermes}"
+# Must match resolveDataDir() in packages/shared/paths.ts — same names, same order.
+CLAUDE_DATA_DIR="${CHOOMFIE_DATA_DIR:-${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/choomfie-inline}}"
 BIN_DIR="${HOME}/.local/bin"
 
 echo "=== Choomfie Installer ==="
@@ -33,11 +34,8 @@ if [ ${#missing[@]} -gt 0 ]; then
 fi
 
 echo "[1/4] Prerequisites OK (bun, curl)"
-if ! command -v hermes &>/dev/null; then
-  echo "  Note: hermes CLI not found. Install Hermes before running 'choomfie'."
-fi
 if ! command -v claude &>/dev/null; then
-  echo "  Note: claude CLI not found. Install Claude Code before using 'choomfie claude-code'."
+  echo "  Note: claude CLI not found. Install Claude Code before running 'choomfie'."
 fi
 
 # --- Install dependencies ---
@@ -47,15 +45,48 @@ echo "[2/4] Installing dependencies..."
 # --- Install choomfie command ---
 echo "[3/4] Installing 'choomfie' command..."
 mkdir -p "$BIN_DIR"
-chmod +x "$CHOOMFIE_DIR/bin/choomfie" "$CHOOMFIE_DIR/bin/choomfie-claude-code"
-chmod +x "$CHOOMFIE_DIR/hermes-overlay/scripts/"*.sh
+chmod +x "$CHOOMFIE_DIR/bin/choomfie"
 ln -sf "$CHOOMFIE_DIR/bin/choomfie" "$BIN_DIR/choomfie"
-ln -sf "$CHOOMFIE_DIR/bin/choomfie-claude-code" "$BIN_DIR/choomfie-claude-code"
-rm -f "$BIN_DIR/choomfie-legacy"
-"$CHOOMFIE_DIR/bin/choomfie" sync >/dev/null || true
+rm -f "$BIN_DIR/choomfie-legacy" "$BIN_DIR/choomfie-claude-code"
 
-echo "[4/4] Configuring Discord token and allowlist..."
-"$CHOOMFIE_DIR/bin/choomfie" configure-discord
+echo "[4/4] Configuring Discord token..."
+mkdir -p "$CLAUDE_DATA_DIR"
+env_file="$CLAUDE_DATA_DIR/.env"
+token="${DISCORD_TOKEN:-${DISCORD_BOT_TOKEN:-}}"
+
+if [ -z "$token" ] && [ -f "$env_file" ]; then
+  token="$(awk -F= '$1 == "DISCORD_TOKEN" { print substr($0, length($1) + 2); exit }' "$env_file")"
+fi
+
+if [ -z "$token" ]; then
+  echo ""
+  echo "You need a Discord bot token. If you do not have one yet:"
+  echo "  1. Go to https://discord.com/developers/applications"
+  echo "  2. Create New Application > Bot > Reset Token > Copy"
+  echo "  3. Enable MESSAGE CONTENT INTENT under Bot > Privileged Intents"
+  echo "  4. Invite bot: OAuth2 > URL Generator > bot scope > Send Messages + Read Message History"
+  echo ""
+  read -rp "Paste your Discord bot token (or press Enter to skip): " token
+fi
+
+if [ -n "$token" ]; then
+  tmp="$(mktemp)"
+  if [ -f "$env_file" ]; then
+    awk -v value="$token" '
+      BEGIN { done = 0 }
+      $0 ~ "^DISCORD_TOKEN=" { print "DISCORD_TOKEN=" value; done = 1; next }
+      { print }
+      END { if (!done) print "DISCORD_TOKEN=" value }
+    ' "$env_file" > "$tmp"
+  else
+    printf 'DISCORD_TOKEN=%s\n' "$token" > "$tmp"
+  fi
+  mv "$tmp" "$env_file"
+  chmod 600 "$env_file"
+  echo "Discord token saved. Owner will be auto-detected on first startup."
+else
+  echo "Discord token not configured. Run '/choomfie:configure <token>' from Claude Code once it's running."
+fi
 
 # Check if BIN_DIR is in PATH
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
@@ -79,12 +110,41 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
   fi
 fi
 
+# --- Optional: start at login (macOS) ---
+# An install-time question rather than a config.json setting: this writes a
+# launchd agent and calls launchctl, which the running process has no business
+# doing to your machine on its own.
+autostart="unsupported"
+if [ "$(uname -s)" = "Darwin" ]; then
+  autostart="off"
+  answer="${CHOOMFIE_AUTOSTART:-}"
+  if [ -z "$answer" ] && [ -t 0 ]; then
+    echo ""
+    read -rp "Start Choomfie automatically at login? [y/N]: " answer
+  fi
+  case "$answer" in
+    [yY] | [yY][eE][sS] | 1 | true)
+      echo ""
+      # install-launchd.sh reports its own errors; just record the outcome.
+      if "$CHOOMFIE_DIR/packages/core/scripts/install-launchd.sh"; then
+        autostart="on"
+      fi
+      ;;
+  esac
+fi
+
 echo ""
 echo "=== Done! ==="
 echo ""
 echo "Start Choomfie:"
-echo "  choomfie            # Hermes-backed Discord gateway"
-echo "  choomfie doctor     # check Hermes overlay setup"
-echo "  choomfie claude-code # Claude Code-powered runtime"
+echo "  choomfie            # run through your Claude Code plan"
+echo "  choomfie --daemon   # always-on autonomous mode"
+echo "  choomfie --tmux     # run in a detached tmux session"
 echo ""
-echo "Hermes profile state: $HERMES_HOME/profiles/choomfie"
+
+case "$autostart" in
+  on)  echo "Auto-start is ON — launchd runs 'choomfie --daemon' at login."
+       echo "  bun run install:launchd --status | --uninstall" ;;
+  off) echo "Auto-start is off. Enable anytime with:"
+       echo "  bun run install:launchd" ;;
+esac

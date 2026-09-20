@@ -30,7 +30,7 @@ import {
   waitForPendingToolCalls,
   type PendingToolCallMap,
 } from "./lib/supervisor-boundary.ts";
-import { errorMessage } from "@choomfie/shared";
+import { errorMessage, resolveDataDir } from "@choomfie/shared";
 import { ConfigManager } from "./lib/config.ts";
 import type { IpcOpenAINotify } from "./lib/ipc-types.ts";
 
@@ -64,9 +64,7 @@ const pendingCalls: PendingToolCallMap = new Map();
 let mcp: Server;
 
 // --- PID file (single-instance guard) ---
-const DATA_DIR =
-  process.env.CLAUDE_PLUGIN_DATA ||
-  `${process.env.HOME}/.claude/plugins/data/choomfie-inline`;
+const DATA_DIR = resolveDataDir();
 
 const pidPath = `${DATA_DIR}/choomfie.pid`;
 

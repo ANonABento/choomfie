@@ -16,7 +16,7 @@ import {
   ButtonStyle,
 } from "discord.js";
 import { VERSION } from "./version.ts";
-import { registerCommand, registerButtonHandler } from "./interactions.ts";
+import { registerCommand, registerButtonHandler } from "./register.ts";
 import { McpProxy } from "./mcp-proxy.ts";
 import { formatDuration, fromSQLiteDatetime } from "./time.ts";
 import { isOwner, requireOwner } from "./handlers/shared.ts";

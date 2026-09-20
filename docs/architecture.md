@@ -147,9 +147,13 @@ Daemon state files:
 - `meta/meta.pid` tracks the daemon process.
 - `choomfie.pid` tracks the supervisor process used by worker health checks.
 - `meta/handoffs.json` stores recent handoff summaries.
-- `meta/daemon-state.json` records turns, tokens, cycles, provider, and worker health for status reporting.
+- `meta/daemon-state.json` records turns, tokens, cycles, and worker health for status reporting.
 
-Provider note: daemon sessions start on Anthropic. Repeated Anthropic API failures switch subsequent session starts to the Ollama-compatible fallback provider.
+Session cycling thresholds come from `config.json` (`daemon.tokenThreshold`,
+`daemon.turnThreshold`), resolved by `daemon.ts` at startup and threaded through
+daemon state. Sessions always run on Anthropic; an authentication or billing
+error stops the retry loop immediately instead of burning the full backoff
+schedule on an error that retrying cannot fix.
 
 ## Voice Pipeline
 

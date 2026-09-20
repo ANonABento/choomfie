@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  buildOllamaEmbeddingRequest,
+  parseOllamaEmbeddingResponse,
+  resolveOllamaEmbeddingConfig,
+} from "./ollama-embeddings.ts";
 
 export const EmbeddingsRequestSchema = z.object({
   input: z.union([z.string(), z.array(z.string())]),
@@ -12,30 +17,31 @@ export interface EmbeddingProvider {
 }
 
 export class OllamaEmbeddingProvider implements EmbeddingProvider {
-  private readonly baseUrl: string;
+  private readonly endpoint: string;
   private readonly defaultModel: string;
 
   constructor(env: Record<string, string | undefined> = process.env) {
-    this.baseUrl = (env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434").replace(/\/$/, "");
-    this.defaultModel = env.OLLAMA_EMBEDDING_MODEL ?? "mxbai-embed-large";
+    const config = resolveOllamaEmbeddingConfig(env);
+    this.endpoint = config.endpoint;
+    this.defaultModel = config.model;
   }
 
   async embed(input: string[], model: string = this.defaultModel): Promise<number[][]> {
     const embeddings: number[][] = [];
     for (const text of input) {
-      const response = await fetch(`${this.baseUrl}/api/embeddings`, {
+      const response = await fetch(this.endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model, prompt: text }),
+        body: buildOllamaEmbeddingRequest(model, text),
       });
       if (!response.ok) {
         throw new Error(`Ollama embeddings request failed with HTTP ${response.status}`);
       }
-      const body = await response.json() as { embedding?: unknown };
-      if (!Array.isArray(body.embedding)) {
+      const embedding = parseOllamaEmbeddingResponse(await response.json());
+      if (!embedding) {
         throw new Error("Ollama embeddings response did not include an embedding");
       }
-      embeddings.push(body.embedding.filter((value): value is number => typeof value === "number"));
+      embeddings.push(embedding);
     }
     return embeddings;
   }

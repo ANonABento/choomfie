@@ -1,4 +1,6 @@
-export type OpenAIRoutingMode = "claude_code" | "hermes";
+import { resolveDataDir } from "@choomfie/shared";
+
+export type OpenAIRoutingMode = "claude_code";
 
 export interface OpenAIModelAliasConfig {
   backend: string;
@@ -19,7 +21,6 @@ export interface OpenAIEndpointConfig {
   responseTtlDays: number;
   routing: {
     mode: OpenAIRoutingMode;
-    hermesBaseUrl: string;
   };
   models: {
     default: string;
@@ -52,7 +53,6 @@ export const DEFAULT_OPENAI_ENDPOINT_CONFIG: OpenAIEndpointConfig = {
   responseTtlDays: 30,
   routing: {
     mode: "claude_code",
-    hermesBaseUrl: "http://127.0.0.1:8642/v1",
   },
   models: {
     default: "choomfie-claude-sonnet",
@@ -64,10 +64,6 @@ export const DEFAULT_OPENAI_ENDPOINT_CONFIG: OpenAIEndpointConfig = {
       "choomfie-claude-code": {
         backend: "claude_code",
         model: "claude-opus-4-6",
-      },
-      "choomfie-local": {
-        backend: "ollama",
-        model: "llama3.1",
       },
     },
   },
@@ -105,7 +101,7 @@ function readPositiveInteger(value: string | undefined): number | undefined {
 }
 
 function readRoutingMode(value: string | undefined): OpenAIRoutingMode | undefined {
-  if (value === "claude_code" || value === "hermes") return value;
+  if (value === "claude_code") return value;
   return undefined;
 }
 
@@ -172,10 +168,6 @@ export function resolveOpenAIEndpointConfig(
   const routingMode = readRoutingMode(env.CHOOMFIE_OPENAI_ROUTING_MODE);
   if (routingMode !== undefined) config.routing.mode = routingMode;
 
-  if (env.CHOOMFIE_OPENAI_HERMES_BASE_URL) {
-    config.routing.hermesBaseUrl = env.CHOOMFIE_OPENAI_HERMES_BASE_URL;
-  }
-
   if (env.CHOOMFIE_OPENAI_DEFAULT_MODEL) {
     config.models.default = env.CHOOMFIE_OPENAI_DEFAULT_MODEL;
   }
@@ -197,9 +189,5 @@ export function resolveOpenAIEndpointConfig(
 }
 
 export function getOpenAIEndpointDataDir(env: Env = process.env): string {
-  return (
-    env.CHOOMFIE_DATA_DIR ||
-    env.CLAUDE_PLUGIN_DATA ||
-    `${env.HOME ?? "."}/.claude/plugins/data/choomfie-inline`
-  );
+  return resolveDataDir(env);
 }

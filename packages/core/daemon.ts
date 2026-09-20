@@ -6,11 +6,10 @@
  * runner for the package entrypoint.
  */
 
+import { ConfigManager } from "./lib/config.ts";
 import {
   DATA_DIR,
   PLUGIN_DIR,
-  TOKEN_THRESHOLD,
-  TURN_THRESHOLD,
   WORKER_HEALTH_INTERVAL,
   WORKER_MAX_CONSECUTIVE_FAILURES,
 } from "./daemon/constants.ts";
@@ -37,13 +36,21 @@ import { getErrorMessage } from "./daemon/error.ts";
 async function main(): Promise<void> {
   if (FLAG_STOP) return stopDaemon();
   if (FLAG_STATUS) return showStatus();
-  if (FLAG_TEST_CYCLE) return testCycle();
-  if (FLAG_BENCHMARK) return benchmark();
+
+  // Cycling thresholds live in config.json (the single settings source for every
+  // mode). Resolved here, at the entry point, so daemon/ never imports lib/.
+  const thresholds = new ConfigManager(DATA_DIR).getDaemonConfig();
+
+  if (FLAG_TEST_CYCLE) return testCycle(thresholds);
+  if (FLAG_BENCHMARK) return benchmark(thresholds);
 
   log("Choomfie daemon starting...");
   log(`Plugin directory: ${PLUGIN_DIR}`);
   log(`Data directory: ${DATA_DIR}`);
-  log(`Thresholds: ${TOKEN_THRESHOLD} tokens, ${TURN_THRESHOLD} turns`);
+  log(
+    `Thresholds: ${thresholds.tokenThreshold} tokens, ` +
+      `${thresholds.turnThreshold} turns`
+  );
   log(
     `Worker health: check every ${WORKER_HEALTH_INTERVAL / 1000}s, ` +
       `max ${WORKER_MAX_CONSECUTIVE_FAILURES} failures before recovery`
@@ -59,7 +66,7 @@ async function main(): Promise<void> {
     log(`Found previous handoff summary (${handoffs.length} total)`);
   }
 
-  const state = createInitialState();
+  const state = createInitialState(thresholds);
   setupShutdown(state);
   await startSession(state, lastSummary);
 

@@ -8,7 +8,7 @@ import {
   ButtonStyle,
   MessageFlags,
 } from "discord.js";
-import { registerButtonHandler } from "../interactions.ts";
+import { registerButtonHandler } from "../register.ts";
 import {
   MS_PER_MIN,
   MS_PER_HOUR,

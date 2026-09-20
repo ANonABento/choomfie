@@ -14,21 +14,25 @@ import {
   INITIAL_RESTART_BACKOFF,
   MAX_ERROR_RETRIES,
   MAX_RESTART_BACKOFF,
-  TOKEN_THRESHOLD,
-  TURN_THRESHOLD,
   WORKER_HEALTH_INTERVAL,
   WORKER_MAX_CONSECUTIVE_FAILURES,
 } from "./constants.ts";
+import {
+  isHeartbeatStale,
+  parseWorkerHeartbeat,
+  workerHealthPath,
+  type WorkerHeartbeat,
+} from "@choomfie/shared";
 import { loadHandoffs, getLastHandoffSummary, saveHandoff } from "./handoffs.ts";
-import { cleanup } from "./lifecycle.ts";
+import { cleanup, todayKey } from "./lifecycle.ts";
 import { log, setSessionId, verbose } from "./log.ts";
 import { createMessageGenerator } from "./message-generator.ts";
 import { getErrorMessage } from "./error.ts";
 import {
-  applyAnthropicFailure,
   createSession,
   extractAssistantText,
   generateSessionId,
+  isUnrecoverableAnthropicError,
 } from "./session-core.ts";
 import { writeDaemonState } from "./state-file.ts";
 import type { HandoffEntry, MetaState } from "./types.ts";
@@ -62,7 +66,7 @@ export async function startSession(
   state.pushMessage = push;
   state.closeGenerator = close;
 
-  state.session = createSession(generator, handoffSummary, state.activeProvider);
+  state.session = createSession(generator, handoffSummary);
 
   void consumeSessionStream(state).catch((error: unknown) => {
     log(`Session stream error: ${getErrorMessage(error)}`);
@@ -135,12 +139,11 @@ export async function handleStreamError(
 
   let error = initialError;
   for (let attempt = 1; attempt <= MAX_ERROR_RETRIES; attempt++) {
-    if (applyAnthropicFailure(state, error)) {
-      log("Anthropic failure threshold reached — switching daemon sessions to Ollama fallback");
-    }
+    const unrecoverable = isUnrecoverableAnthropicError(error);
 
     log(
-      `Session stream failed: ${getErrorMessage(error)} (attempt ${attempt}/${MAX_ERROR_RETRIES})`
+      `Session stream failed: ${getErrorMessage(error)}` +
+        (unrecoverable ? "" : ` (attempt ${attempt}/${MAX_ERROR_RETRIES})`)
     );
 
     stopWorkerHealthMonitor(state);
@@ -154,6 +157,17 @@ export async function handleStreamError(
     state.pushMessage = null;
     state.closeGenerator = null;
     state.resultWaiters = [];
+
+    // Bad credentials or exhausted billing will not fix themselves — retrying
+    // just burns MAX_ERROR_RETRIES rounds of backoff before failing anyway.
+    if (unrecoverable) {
+      log(
+        "Not retrying: this is an authentication or billing error. " +
+          "Re-authenticate Claude Code (`claude` login) or check your plan status, " +
+          "then restart the daemon."
+      );
+      return;
+    }
 
     const delay = state.restartBackoff;
     state.restartBackoff = Math.min(state.restartBackoff * 2, MAX_RESTART_BACKOFF);
@@ -189,7 +203,17 @@ export function handleSessionMessage(state: MetaState, message: SDKMessage): voi
 
         const usage = successResult.usage;
         if (usage) {
-          state.totalInputTokens += usage.input_tokens ?? 0;
+          const inputTokens = usage.input_tokens ?? 0;
+          state.totalInputTokens += inputTokens;
+
+          // Daily counter survives session cycles (which reset
+          // totalInputTokens), so roll it over on date change rather than
+          // rebuilding it per session.
+          const today = todayKey();
+          if (state.tokenUsageToday.date !== today) {
+            state.tokenUsageToday = { date: today, inputTokens: 0 };
+          }
+          state.tokenUsageToday.inputTokens += inputTokens;
         }
 
         log(
@@ -249,7 +273,7 @@ export function startContextMonitor(state: MetaState): void {
 
       log(
         `Context: ${tokens}/${usage.maxTokens} tokens (${pct.toFixed(1)}%), ` +
-          `${state.turnCount}/${TURN_THRESHOLD} turns, ` +
+          `${state.turnCount}/${state.thresholds.turnThreshold} turns, ` +
           `$${state.totalCostUsd.toFixed(4)}`
       );
 
@@ -257,7 +281,9 @@ export function startContextMonitor(state: MetaState): void {
 
       if (shouldCycle(state, tokens)) {
         state.lastCycleReason =
-          state.turnCount >= TURN_THRESHOLD ? "turn_threshold" : "token_threshold";
+          state.turnCount >= state.thresholds.turnThreshold
+            ? "turn_threshold"
+            : "token_threshold";
         log("Threshold reached — initiating session cycle");
         await cycleSession(state, tokens);
       }
@@ -281,8 +307,12 @@ export function startContextMonitor(state: MetaState): void {
 
 export function shouldCycle(state: MetaState, contextTokens?: number): boolean {
   if (state.state !== "ACTIVE") return false;
-  if (state.turnCount >= TURN_THRESHOLD) return true;
-  if (contextTokens !== undefined && contextTokens >= TOKEN_THRESHOLD) return true;
+  if (state.turnCount >= state.thresholds.turnThreshold) return true;
+  if (
+    contextTokens !== undefined &&
+    contextTokens >= state.thresholds.tokenThreshold
+  )
+    return true;
   return false;
 }
 
@@ -415,13 +445,69 @@ export async function checkWorkerProcessAlive(): Promise<boolean> {
     await proc.exited;
     return (
       command.length > 0 &&
-      (command.includes("choomfie") ||
-        command.includes("server.ts") ||
-        command.includes("supervisor"))
+      (command.includes("choomfie") || command.includes("supervisor"))
     );
   } catch {
     return false;
   }
+}
+
+/**
+ * Assess worker health from its heartbeat file, falling back to the process
+ * check when no heartbeat exists yet.
+ *
+ * The process check alone only proves a process exists — a worker whose
+ * gateway dropped or whose event loop is wedged passes it indefinitely. The
+ * heartbeat distinguishes "running" from "working".
+ */
+export async function assessWorkerHealth(): Promise<{
+  healthy: boolean;
+  reason: string;
+  /**
+   * The worker is not doing its job, but respawning it cannot help — e.g. no
+   * Discord token is configured. Same reasoning as isUnrecoverableAnthropicError:
+   * don't burn restarts on a problem restarts don't solve.
+   */
+  cycleWontHelp?: boolean;
+}> {
+  let heartbeat: WorkerHeartbeat | null = null;
+  try {
+    heartbeat = parseWorkerHeartbeat(
+      JSON.parse(await readFile(workerHealthPath(DATA_DIR), "utf-8"))
+    );
+  } catch {
+    heartbeat = null;
+  }
+
+  // No heartbeat yet (worker still booting, or an older build): fall back to
+  // the process check so we never cycle a worker that is simply starting up.
+  if (!heartbeat) {
+    const alive = await checkWorkerProcessAlive();
+    return {
+      healthy: alive,
+      reason: alive ? "process alive (no heartbeat yet)" : "process not alive",
+    };
+  }
+
+  if (isHeartbeatStale(heartbeat)) {
+    const age = Math.round((Date.now() - heartbeat.updatedAt) / 1000);
+    return { healthy: false, reason: `heartbeat stale (${age}s old)` };
+  }
+
+  if (!heartbeat.discordConfigured) {
+    return {
+      healthy: false,
+      cycleWontHelp: true,
+      reason: "no Discord token configured — run /choomfie:configure <token>",
+    };
+  }
+
+  if (!heartbeat.discordReady) {
+    return { healthy: false, reason: "Discord gateway not ready" };
+  }
+
+  const ping = heartbeat.wsPing === null ? "?" : `${heartbeat.wsPing}ms`;
+  return { healthy: true, reason: `heartbeat fresh, gateway up (${ping})` };
 }
 
 export async function checkWorkerHealth(state: MetaState): Promise<void> {
@@ -430,13 +516,20 @@ export async function checkWorkerHealth(state: MetaState): Promise<void> {
     return;
   }
 
-  const processAlive = await checkWorkerProcessAlive();
-  state.workerHealth.processAlive = processAlive;
+  const { healthy, reason, cycleWontHelp } = await assessWorkerHealth();
+  state.workerHealth.processAlive = healthy;
 
-  if (!processAlive) {
+  if (!healthy && cycleWontHelp) {
+    // Degraded, but respawning would just loop forever. Report it and hold.
+    state.workerHealth.consecutiveFailures = 0;
+    log(`Worker health: DEGRADED — ${reason} (not cycling; a restart cannot fix this)`);
+    return;
+  }
+
+  if (!healthy) {
     state.workerHealth.consecutiveFailures++;
     log(
-      `Worker health: process NOT alive ` +
+      `Worker health: UNHEALTHY — ${reason} ` +
         `(failure ${state.workerHealth.consecutiveFailures}/${WORKER_MAX_CONSECUTIVE_FAILURES})`
     );
 
@@ -444,8 +537,8 @@ export async function checkWorkerHealth(state: MetaState): Promise<void> {
       state.workerHealth.consecutiveFailures >= WORKER_MAX_CONSECUTIVE_FAILURES &&
       state.state === "ACTIVE"
     ) {
-      log("Worker appears dead — triggering session cycle to respawn");
-      state.lastCycleReason = "worker_dead";
+      log(`Worker unhealthy (${reason}) — triggering session cycle to respawn`);
+      state.lastCycleReason = "worker_unhealthy";
       stopWorkerHealthMonitor(state);
       await cycleSession(state);
     }
@@ -455,7 +548,7 @@ export async function checkWorkerHealth(state: MetaState): Promise<void> {
   state.workerHealth.consecutiveFailures = 0;
   state.workerHealth.lastHealthyAt = Date.now();
 
-  verbose("Worker health: process alive");
+  verbose(`Worker health: ${reason}`);
 }
 
 export function startWorkerHealthMonitor(state: MetaState): void {

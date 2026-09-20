@@ -2,8 +2,8 @@
   "name": "@choomfie/core",
   "version": "0.4.0",
   "type": "module",
-  "main": "server.ts",
-  "bin": "./server.ts",
+  "main": "supervisor.ts",
+  "bin": "./supervisor.ts",
   "license": "MIT",
   "dependencies": {
     "@choomfie/shared": "workspace:*",

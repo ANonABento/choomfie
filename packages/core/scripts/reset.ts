@@ -14,10 +14,9 @@ import { existsSync, rmSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import { resolveDataDir } from "@choomfie/shared";
 
-const DATA_DIR =
-  process.env.CHOOMFIE_DATA_DIR ||
-  `${process.env.HOME}/.claude/plugins/data/choomfie-inline`;
+const DATA_DIR = resolveDataDir();
 const DB_PATH = `${DATA_DIR}/choomfie.db`;
 const SUPERVISOR_PID_PATH = `${DATA_DIR}/choomfie.pid`;
 const DAEMON_PID_PATH = `${DATA_DIR}/meta/meta.pid`;

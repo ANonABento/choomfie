@@ -10,6 +10,8 @@
 import { createContext } from "./lib/context.ts";
 import { loadPlugins } from "./lib/plugins.ts";
 import { createDiscordClient } from "./lib/discord.ts";
+import { registerAllHandlers } from "./lib/interactions.ts";
+import { startHeartbeat, stopHeartbeat, clearHeartbeat } from "./lib/heartbeat.ts";
 import { getAllTools } from "./lib/tools/index.ts";
 import { buildInstructions } from "./lib/mcp-server.ts";
 import { registerPermissionRelay } from "./lib/permissions.ts";
@@ -41,6 +43,9 @@ function isSendableTextChannel(channel: unknown): channel is SendableTextChannel
 
 // Initialize context (loads env, config, memory, access list)
 const { ctx, discordToken } = await createContext();
+
+// Register built-in buttons / modals / slash commands
+await registerAllHandlers();
 
 // Load plugins
 ctx.plugins = await loadPlugins(ctx.config);
@@ -169,6 +174,9 @@ process.send?.({
   tools: toolDefs,
   instructions,
 });
+// Publish worker liveness + gateway state for the daemon's health monitor
+startHeartbeat(ctx, { discordConfigured: Boolean(discordToken) });
+
 console.error("Choomfie Worker: ready");
 
 // Graceful shutdown
@@ -177,6 +185,8 @@ async function shutdown() {
   if (shutdownCalled) return;
   shutdownCalled = true;
   console.error("Choomfie Worker: shutting down");
+  stopHeartbeat();
+  await clearHeartbeat(ctx.DATA_DIR);
   ctx.reminderScheduler.destroy();
   ctx.birthdayScheduler.destroy();
   destroyTyping();

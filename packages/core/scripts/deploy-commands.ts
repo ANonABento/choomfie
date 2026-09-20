@@ -10,14 +10,15 @@
  */
 
 import { REST, Routes } from "discord.js";
-import { getCommandDefs } from "../lib/interactions.ts";
+import { getCommandDefs, registerAllHandlers } from "../lib/interactions.ts";
 import { deployGuildCommands } from "../lib/command-deploy.ts";
 import { readFile } from "node:fs/promises";
+import { resolveDataDir } from "@choomfie/shared";
 import "@choomfie/tutor";
 
-const DATA_DIR =
-  process.env.CHOOMFIE_DATA_DIR ||
-  `${process.env.HOME}/.claude/plugins/data/choomfie-inline`;
+await registerAllHandlers();
+
+const DATA_DIR = resolveDataDir();
 
 // Load token from .env file or environment
 let token = process.env.DISCORD_TOKEN || "";

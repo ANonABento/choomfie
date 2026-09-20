@@ -26,12 +26,6 @@ import {
 } from "./lib/openai/embeddings.ts";
 import { OpenAIFileStore } from "./lib/openai/files.ts";
 import {
-  DefaultHermesAdapter,
-  HermesCLIChatBackend,
-  isStandardOpenAIPath,
-  type HermesAdapter,
-} from "./lib/openai/hermes-adapter.ts";
-import {
   createResponseObject,
   responseInputToText,
   ResponseStore,
@@ -57,7 +51,6 @@ export interface OpenAIEndpointHandlerOptions {
   authManager?: OpenAIAPIKeyManager;
   appMemory?: AppMemoryStore;
   chatBackend?: ChatBackend;
-  hermesAdapter?: HermesAdapter;
   embeddingProvider?: EmbeddingProvider;
   fileStore?: OpenAIFileStore;
   responseStore?: ResponseStore;
@@ -139,12 +132,7 @@ function notifyMode(req: Request): "auto" | "emit" | "off" | Response {
 export function createOpenAIEndpointHandler(options: OpenAIEndpointHandlerOptions) {
   const authManager = options.authManager ?? new OpenAIAPIKeyManager(options.dataDir);
   const appMemory = options.appMemory ?? new AppMemoryStore(options.dataDir);
-  const hermesAdapter = options.hermesAdapter ?? new DefaultHermesAdapter();
-  const chatBackend = options.chatBackend ?? (
-    options.config.routing.mode === "hermes"
-      ? new HermesCLIChatBackend(hermesAdapter, options.config)
-      : new ClaudeAgentSDKChatBackend()
-  );
+  const chatBackend = options.chatBackend ?? new ClaudeAgentSDKChatBackend();
   const embeddingProvider = options.embeddingProvider ?? new OllamaEmbeddingProvider();
   const fileStore = options.fileStore ?? new OpenAIFileStore(options.dataDir);
   const responseStore = options.responseStore ?? new ResponseStore(options.dataDir);
@@ -236,13 +224,10 @@ export function createOpenAIEndpointHandler(options: OpenAIEndpointHandlerOption
     try {
 
     if (req.method === "GET" && url.pathname === "/health") {
-      const hermesAvailable = options.config.routing.mode === "hermes"
-        ? await hermesAdapter.isAvailable(options.config)
-        : null;
       return jsonResponse({
         status: "ok",
         runtime: "choomfie",
-        backend: hermesAvailable === false ? "hermes_cli_fallback" : options.config.routing.mode,
+        backend: options.config.routing.mode,
         version,
         auth: {
           required: options.config.requireAuth,
@@ -253,20 +238,6 @@ export function createOpenAIEndpointHandler(options: OpenAIEndpointHandlerOption
           "openai_tool_calls_rejected_when_tools_feature_is_disabled",
         ],
       }, 200, corsHeaders);
-    }
-
-    if (
-      options.config.routing.mode === "hermes" &&
-      isStandardOpenAIPath(url.pathname) &&
-      await hermesAdapter.isAvailable(options.config)
-    ) {
-      const authError = requireAuth(routeScopes());
-      if (authError) return authError;
-      const response = await hermesAdapter.passThrough(req, options.config);
-      for (const [key, value] of Object.entries(corsHeaders)) {
-        response.headers.set(key, String(value));
-      }
-      return response;
     }
 
     if (req.method === "GET" && url.pathname === "/v1/models") {
@@ -716,20 +687,6 @@ export function createOpenAIEndpointHandler(options: OpenAIEndpointHandlerOption
           "invalid_request_error",
           "stream",
           "feature_disabled",
-        );
-      }
-
-      if (
-        options.config.routing.mode === "hermes" &&
-        normalized.request.stream &&
-        !(await hermesAdapter.isAvailable(options.config))
-      ) {
-        return errorResponse(
-          400,
-          "Streaming chat completions require the Hermes OpenAI endpoint in Hermes mode",
-          "invalid_request_error",
-          "stream",
-          "unsupported_feature",
         );
       }
 
