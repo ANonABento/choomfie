@@ -15,6 +15,15 @@ export type DaemonThresholds = {
   turnThreshold: number;
 };
 
+/** Which model daemon sessions run on. Empty = the Agent SDK's own default. */
+export type ModelSettings = {
+  model?: string;
+  fallbackModel?: string;
+};
+
+/** Everything daemon/ needs from config.json, resolved by the entry point. */
+export type DaemonSettings = DaemonThresholds & ModelSettings;
+
 export type HandoffEntry = {
   sessionId: string;
   timestamp: string;
@@ -58,4 +67,6 @@ export type MetaState = {
   lastCycleReason: string | null;
   /** Cycling thresholds for this run, from config.json. */
   thresholds: DaemonThresholds;
+  /** Model settings for this run, from config.json. Applied to every session. */
+  models: ModelSettings;
 };

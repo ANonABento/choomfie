@@ -23,6 +23,12 @@ import { isOwner, requireOwner } from "./handlers/shared.ts";
 import { buildGhArgs, runGh } from "./handlers/github.ts";
 import { discoverPlugins } from "./plugins.ts";
 import {
+  MODEL_SETTING_KEY,
+  SETTINGS,
+  findSetting,
+  suggestValues,
+} from "./settings.ts";
+import {
   buildReminderModal,
   buildPersonaModal,
   buildMemoryModal,
@@ -234,6 +240,15 @@ registerCommand("help", {
           inline: false,
         },
         {
+          name: "Settings",
+          value: [
+            "`/config` — view all settings and current values",
+            "`/config setting:<name> value:<v>` — change one",
+            "`/model [model]` — view or change the daemon's model",
+          ].join("\n"),
+          inline: false,
+        },
+        {
           name: "Other",
           value: [
             "`/github <check>` — PRs, issues, notifications",
@@ -415,6 +430,165 @@ registerCommand("savememory", {
   handler: async (interaction, ctx) => {
     if (await requireOwner(interaction, ctx)) return;
     await interaction.showModal(buildMemoryModal());
+  },
+});
+
+// /config — view and change runtime settings (owner only)
+registerCommand("config", {
+  data: new SlashCommandBuilder()
+    .setName("config")
+    .setDescription("View or change settings (owner only)")
+    .addStringOption((o) =>
+      o
+        .setName("setting")
+        .setDescription("Setting to change (omit to list all)")
+        .addChoices(
+          ...SETTINGS.map((setting) => ({ name: setting.key, value: setting.key })),
+        )
+    )
+    .addStringOption((o) =>
+      o
+        .setName("value")
+        .setDescription("New value — or `default` to restore the built-in one")
+        .setAutocomplete(true)
+    )
+    .toJSON(),
+  // Suggests values for whichever setting is currently selected. Not owner-
+  // gated: autocomplete only reveals the same static hints as the command
+  // description, and a non-owner is refused at submit time anyway.
+  autocomplete: async (interaction) => {
+    const key = interaction.options.getString("setting");
+    const setting = key ? findSetting(key) : undefined;
+    if (!setting) {
+      await interaction.respond([]);
+      return;
+    }
+    const typed = interaction.options.getFocused();
+    await interaction.respond(
+      suggestValues(setting, typed).map((value) => ({ name: value, value })),
+    );
+  },
+  handler: async (interaction, ctx) => {
+    if (await requireOwner(interaction, ctx)) return;
+
+    const key = interaction.options.getString("setting");
+    const value = interaction.options.getString("value");
+
+    if (!key) {
+      const lines = SETTINGS.map(
+        (setting) =>
+          `\`${setting.key}\` — **${setting.read(ctx.config)}**\n` +
+          `⤷ ${setting.description}`
+      );
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle("Settings")
+        .setDescription(lines.join("\n\n"))
+        .setFooter({ text: "/config setting:<name> value:<new value>" });
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const setting = findSetting(key);
+    if (!setting) {
+      await interaction.reply({
+        content: `Unknown setting \`${key}\`. Run \`/config\` to see the list.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (value === null) {
+      await interaction.reply({
+        content:
+          `\`${setting.key}\` is currently **${setting.read(ctx.config)}**.\n` +
+          `${setting.description}. Set it with \`value:\` — e.g. \`${setting.example}\`.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const previous = setting.read(ctx.config);
+    const result = setting.write(ctx.config, value);
+    if (!result.ok) {
+      await interaction.reply({
+        content: `Couldn't set \`${setting.key}\`: ${result.error}`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle(`Updated ${setting.key}`)
+      .setDescription(`**${previous}** → **${result.value}**`)
+      .setFooter({
+        text:
+          setting.scope === "immediately"
+            ? "In effect now."
+            : `Takes effect on ${setting.scope}.`,
+      });
+    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+  },
+});
+
+// /model — shortcut for the setting people change most (owner only)
+//
+// Everything here routes through the `daemon.model` Setting rather than
+// touching config directly, so /config and /model cannot disagree about
+// validation, bounds, or what "default" means.
+registerCommand("model", {
+  data: new SlashCommandBuilder()
+    .setName("model")
+    .setDescription("View or change the model daemon sessions use (owner only)")
+    .addStringOption((o) =>
+      o
+        .setName("model")
+        .setDescription("Model alias or id — or `default` for Claude Code's own")
+        .setAutocomplete(true)
+    )
+    .toJSON(),
+  autocomplete: async (interaction) => {
+    const setting = findSetting(MODEL_SETTING_KEY)!;
+    await interaction.respond(
+      suggestValues(setting, interaction.options.getFocused()).map((value) => ({
+        name: value,
+        value,
+      })),
+    );
+  },
+  handler: async (interaction, ctx) => {
+    if (await requireOwner(interaction, ctx)) return;
+
+    const setting = findSetting(MODEL_SETTING_KEY)!;
+    const requested = interaction.options.getString("model");
+
+    if (requested === null) {
+      await interaction.reply({
+        content:
+          `Daemon sessions use **${setting.read(ctx.config)}**.\n` +
+          "Foreground and `--tmux` follow your Claude Code settings, not this.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const previous = setting.read(ctx.config);
+    const result = setting.write(ctx.config, requested);
+    if (!result.ok) {
+      await interaction.reply({
+        content: `Couldn't set the model: ${result.error}`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle("Model updated")
+      .setDescription(`**${previous}** → **${result.value}**`)
+      .setFooter({ text: `Takes effect on ${setting.scope}.` });
+    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   },
 });
 

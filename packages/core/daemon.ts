@@ -37,19 +37,23 @@ async function main(): Promise<void> {
   if (FLAG_STOP) return stopDaemon();
   if (FLAG_STATUS) return showStatus();
 
-  // Cycling thresholds live in config.json (the single settings source for every
+  // Daemon settings live in config.json (the single settings source for every
   // mode). Resolved here, at the entry point, so daemon/ never imports lib/.
-  const thresholds = new ConfigManager(DATA_DIR).getDaemonConfig();
+  const settings = new ConfigManager(DATA_DIR).getDaemonConfig();
 
-  if (FLAG_TEST_CYCLE) return testCycle(thresholds);
-  if (FLAG_BENCHMARK) return benchmark(thresholds);
+  if (FLAG_TEST_CYCLE) return testCycle(settings);
+  if (FLAG_BENCHMARK) return benchmark(settings);
 
   log("Choomfie daemon starting...");
   log(`Plugin directory: ${PLUGIN_DIR}`);
   log(`Data directory: ${DATA_DIR}`);
   log(
-    `Thresholds: ${thresholds.tokenThreshold} tokens, ` +
-      `${thresholds.turnThreshold} turns`
+    `Thresholds: ${settings.tokenThreshold} tokens, ` +
+      `${settings.turnThreshold} turns`
+  );
+  log(
+    `Model: ${settings.model ?? "Claude Code default"}` +
+      (settings.fallbackModel ? ` (fallback: ${settings.fallbackModel})` : "")
   );
   log(
     `Worker health: check every ${WORKER_HEALTH_INTERVAL / 1000}s, ` +
@@ -66,7 +70,7 @@ async function main(): Promise<void> {
     log(`Found previous handoff summary (${handoffs.length} total)`);
   }
 
-  const state = createInitialState(thresholds);
+  const state = createInitialState(settings);
   setupShutdown(state);
   await startSession(state, lastSummary);
 

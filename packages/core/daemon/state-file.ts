@@ -18,6 +18,9 @@ export async function writeDaemonState(state: MetaState): Promise<void> {
     state: state.state,
     sessionId: state.sessionId,
     sessionUptimeSeconds: uptime,
+    // null rather than omitted, so readers can tell "default" from "not reported".
+    model: state.models.model ?? null,
+    fallbackModel: state.models.fallbackModel ?? null,
     turns: { current: state.turnCount, threshold: state.thresholds.turnThreshold },
     tokens: {
       current: state.totalInputTokens,
