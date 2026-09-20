@@ -157,11 +157,32 @@ describe("model settings", () => {
     expect(config.getDaemonConfig().tokenThreshold).toBe(99_000);
     expect(config.getDaemonConfig().turnThreshold).toBe(42);
 
-    // The stale key is gone once anything saves, so the two cannot diverge.
+    // The stale key is gone the moment the config loads — not deferred until
+    // some unrelated setting happens to be changed. A file left half-migrated
+    // shows a `daemon.model` that nothing reads, which is the exact confusion
+    // this migration exists to end.
+    const afterLoad = JSON.parse(readFileSync(join(dir, "config.json"), "utf-8"));
+    expect(afterLoad.model).toBe("sonnet");
+    expect("model" in afterLoad.daemon).toBe(false);
+    expect(afterLoad.daemon.tokenThreshold).toBe(99_000);
+
     config.setModel("haiku");
     const onDisk = JSON.parse(readFileSync(join(dir, "config.json"), "utf-8"));
     expect(onDisk.model).toBe("haiku");
     expect("model" in onDisk.daemon).toBe(false);
+  });
+
+  test("a config with no legacy key is not rewritten on load", () => {
+    // The migration write must be a one-shot. Rewriting on every construction
+    // would mean every process that reads config (supervisor, worker, scripts)
+    // races to write it, for no gain.
+    const dir = mkdtempSync(join(tmpdir(), "choomfie-settings-"));
+    dirs.push(dir);
+    const original = JSON.stringify({ model: "opus", activePersona: "choomfie" });
+    writeFileSync(join(dir, "config.json"), original);
+
+    new ConfigManager(dir);
+    expect(readFileSync(join(dir, "config.json"), "utf-8")).toBe(original);
   });
 
   test("rejects values that cannot be a model id", () => {

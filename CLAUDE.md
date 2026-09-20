@@ -222,9 +222,9 @@ Modal forms triggered from slash commands, defined in `packages/core/lib/handler
 - `packages/core/lib/handlers/github.ts` — `buildGhArgs()` + `runGh()` (used by MCP tool + slash command)
 - `packages/shared/version.ts` — `VERSION` constant from package.json (used by mcp-server, commands, status-tools)
 
-## Tools (96 max)
+## Tools (97 with every plugin enabled)
 
-Tool lists are dynamic: the supervisor always exposes `restart`, the worker exposes 34 core tools, and enabled plugins add their own tools. With all shipped plugins enabled, Choomfie exposes 96 MCP tools total: 95 worker tools plus the supervisor-owned `restart` tool.
+Tool lists are dynamic: the supervisor always exposes `restart`, the worker exposes 34 core tools, and enabled plugins add their own. With all shipped plugins enabled (voice 3, browser 7, tutor 19, socials 33 = 62), Choomfie exposes 97 MCP tools total: 96 worker tools plus the supervisor-owned `restart` tool.
 
 Core Discord: reply (with embeds), react, edit_message, fetch_messages, search_messages, create_thread, create_poll, pin_message, unpin_message
 Core Memory: save_memory, search_memory, list_memories, delete_memory, save_conversation_summary, memory_stats

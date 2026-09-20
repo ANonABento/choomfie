@@ -162,18 +162,45 @@ function mergeConfig(saved: Partial<Config>): Config {
 export class ConfigManager {
   private configPath: string;
   private config: Config;
+  private migratedOnLoad = false;
 
   constructor(dataDir: string) {
     this.configPath = `${dataDir}/config.json`;
     this.config = this.load();
+
+    // Write the migration back immediately instead of waiting for an unrelated
+    // setting change. `mergeConfig` resolves `daemon.model` in memory on every
+    // load, so without this the file keeps showing a key nothing reads — which
+    // is exactly the confusion the migration exists to end. Idempotent: the
+    // rewritten file has no legacy key, so this fires once per install.
+    if (this.migratedOnLoad) {
+      try {
+        this.save();
+      } catch {
+        // Read-only data dir. The in-memory value is already correct, so a
+        // failed cleanup write must not stop the process from booting.
+      }
+      this.migratedOnLoad = false;
+    }
   }
 
   private load(): Config {
     try {
       const raw = readFileSync(this.configPath, "utf-8");
       const saved = JSON.parse(raw) as Partial<Config>;
+      const legacyDaemon = saved.daemon as
+        | { model?: unknown; fallbackModel?: unknown }
+        | undefined;
+      this.migratedOnLoad =
+        !!legacyDaemon &&
+        (legacyDaemon.model !== undefined ||
+          legacyDaemon.fallbackModel !== undefined);
       return mergeConfig(saved);
     } catch {
+      // Unreadable or unparseable file, or a merge that threw. Fall back to
+      // defaults in memory, and clear the migration flag — saving defaults over
+      // a file we failed to understand would destroy personas and settings.
+      this.migratedOnLoad = false;
       return { ...DEFAULT_CONFIG };
     }
   }

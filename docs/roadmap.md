@@ -123,11 +123,11 @@
 
 > See [google-integration-spec.md](google-integration-spec.md) for full spec
 
-### 10a: Birthday Index
-- [ ] SQLite birthday table (name, MM-DD, optional year/notes)
-- [ ] MCP tools: birthday_add, birthday_remove, birthday_list, birthday_upcoming
-- [ ] Daily birthday check → owner DM notification
-- [ ] `/birthdays` slash command with embed
+### 10a: Birthday Index (Mostly done)
+- [x] SQLite birthday table (name, MM-DD, optional year/notes) — `lib/memory.ts`
+- [x] MCP tools: birthday_add, birthday_remove, birthday_list, birthday_upcoming
+- [x] Daily birthday check → owner DM notification — `BirthdayScheduler` in `lib/birthdays.ts`, started from `lib/discord.ts` on ready
+- [ ] `/birthdays` slash command with embed — tools ship, but no slash command is registered
 - [ ] Google Sheets mirror (optional, needs 10b)
 
 ### 10b: Google Auth (gogcli)
@@ -266,13 +266,19 @@
 
 > See [testing.md](testing.md) for full strategy
 
-- [ ] E2E tests — spawn server, verify startup/shutdown/PID lifecycle
-- [ ] E2E tests — MCP tool round-trips over stdio
+Current: 345 tests across 45 files, all in-process — no test spawns a real
+supervisor, worker, or Discord connection. That gap is what the E2E items below
+are for.
+
+- [ ] E2E tests — spawn server, verify startup/shutdown/PID lifecycle (`boot.test.ts` and `regression/pid-guard.test.ts` cover the logic in-process; neither spawns)
+- [ ] E2E tests — MCP tool round-trips over stdio (`mcp-proxy.test.ts` duck-types the proxy; no stdio transport)
 - [ ] E2E tests — Discord message flow (test bot + test server)
-- [ ] Unit tests — reminders, memory, conversation, time, config
-- [ ] Plugin tests — voice, tutor, socials, browser
-- [ ] CI pipeline — run tests + type-check + lint on PRs
-- [ ] Merge gates — block PR on test/lint failure
+- [x] Unit tests — time (`time.test.ts`), config/settings (`settings.test.ts`, `openai-config.test.ts`), reminder timezones (`reminder-timezone.test.ts`)
+- [ ] Unit tests — memory and conversation still uncovered
+- [x] Plugin tests — tutor (12 files) and browser (`browser-url-validation.test.ts`)
+- [ ] Plugin tests — voice and socials are covered only at load/registration level (`plugins.test.ts`, `regression/plugin-load.test.ts`, `regression/tools-register.test.ts`); no behavior tests
+- [x] CI pipeline — run tests + type-check + lint on PRs (`.github/workflows/ci.yml`)
+- [ ] Merge gates — block PR on test/lint failure. `main` has branch protection, but `required_status_checks.contexts` is empty, so CI runs without gating a merge
 
 ## Non-Goals (For Now)
 

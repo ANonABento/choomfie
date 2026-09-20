@@ -176,15 +176,6 @@ export function createOpenAIEndpointHandler(options: OpenAIEndpointHandlerOption
       }
       return key;
     };
-    const routeScopes = (): string[] => {
-      if (req.method === "GET" && url.pathname === "/v1/models") return ["models", "chat"];
-      if (url.pathname === "/v1/chat/completions") return ["chat"];
-      if (url.pathname === "/v1/embeddings") return ["embeddings"];
-      if (url.pathname === "/v1/files" || url.pathname.startsWith("/v1/files/")) return ["files"];
-      if (url.pathname === "/v1/responses" || url.pathname.startsWith("/v1/responses/")) return ["responses"];
-      return [];
-    };
-
     if (req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders });
     }
