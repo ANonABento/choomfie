@@ -13,9 +13,6 @@
  * replacement atomic: a reader sees either the old file or the new one, never a
  * partial one. rename is only atomic within a filesystem, so the temp file is
  * always created next to the target rather than in /tmp.
- *
- * `openai/auth.ts` did this by hand for the API key store; this is that pattern
- * generalized so every writer gets it.
  */
 
 import { writeFileSync, chmodSync, renameSync, mkdirSync, unlinkSync } from "node:fs";

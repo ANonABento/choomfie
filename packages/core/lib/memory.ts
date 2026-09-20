@@ -16,7 +16,7 @@ import {
   buildOllamaEmbeddingRequest,
   parseOllamaEmbeddingResponse,
   resolveOllamaEmbeddingConfig,
-} from "./openai/ollama-embeddings.ts";
+} from "./ollama-embeddings.ts";
 
 export interface CoreMemory {
   key: string;
