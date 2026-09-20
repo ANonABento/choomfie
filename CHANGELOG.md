@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Single-Instance Guard
+
+### Fixed
+
+- **The supervisor's single-instance guard had silently become a no-op.** It identified a running instance by grepping the `ps` command line for `"choomfie"` or `"server.ts"`. Deleting `server.ts` in the runtime consolidation changed the supervisor's command to `bun packages/core/supervisor.ts`, which matches neither — so starting a second supervisor no longer stopped the first. Two supervisors meant two workers connecting the same bot token to the Discord gateway and both writing the same heartbeat file, leaving the daemon monitoring whichever wrote last rather than its own worker. Process identification now lives in `@choomfie/shared`'s `pid-utils.ts`, used by both the supervisor guard and the daemon's worker probe. Matching is on entry-point filenames only — a `"choomfie"` marker matched any command line mentioning the repo or data directory (an ordinary shell reading `meta/`, say), which with a recycled PID would mean signalling an unrelated process or refusing to start on its behalf.
+
+### Changed
+
+- **Running `choomfie` while a daemon is supervising an instance now refuses instead of killing it.** Taking over the PID file is correct when you re-run `choomfie` in a terminal — the old foreground instance is stale. It is wrong when launchd is supervising one: killing that supervisor makes the daemon restart its session and spawn a replacement, and the two ping-pong. The daemon's own supervisor is exempt via `CHOOMFIE_DAEMON_PID`, injected into its session env; anything else gets an actionable error naming `--stop` and `install:launchd --uninstall`.
+
+### Added
+
+- `bin/choomfie` makes the same check *before* launching the Claude CLI, so the message reaches your terminal instead of the MCP subprocess's stderr where Claude Code buries it. Skipped for `--daemon`, where taking over from a previous daemon is the intent.
+- `packages/core/test/regression/pid-guard.test.ts` derives the expected supervisor and daemon command lines from `package.json`'s `start` and `daemon` scripts, so renaming or moving a long-lived entry point fails here rather than silently disarming the guard in production. One-shot scripts (`deploy-commands`, `reset`) are asserted *not* to match, since matching them risks signalling a script that holds no PID file.
+
 ## Unreleased — Boot Deadlock + Real Health Checks
 
 ### Fixed

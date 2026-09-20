@@ -24,6 +24,40 @@ for arg in "$@"; do
   esac
 done
 
+# --- Refuse to fight a running daemon ---
+# supervisor.ts makes this same check, but it runs underneath the claude CLI,
+# so its message lands in MCP logs rather than your terminal. Checking here
+# means you see it. Skipped for --daemon: the daemon's own PID guard
+# deliberately takes over from a previous daemon, which is what you asked for.
+if [ "$USE_DAEMON" = false ]; then
+  # Must match resolveDataDir() in packages/shared/paths.ts.
+  DATA_DIR="${CHOOMFIE_DATA_DIR:-${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/choomfie-inline}}"
+  DAEMON_PID_FILE="$DATA_DIR/meta/meta.pid"
+
+  if [ -f "$DAEMON_PID_FILE" ]; then
+    DAEMON_PID="$(tr -d '[:space:]' < "$DAEMON_PID_FILE" 2>/dev/null || true)"
+    if [ -n "$DAEMON_PID" ] && kill -0 "$DAEMON_PID" 2>/dev/null; then
+      DAEMON_CMD="$(ps -p "$DAEMON_PID" -o command= 2>/dev/null || true)"
+      # Match the daemon entry point only, never "choomfie" — the repo and data
+      # dir are both named that, so any command line mentioning a path under
+      # them would match a recycled PID. Keep in sync with
+      # CHOOMFIE_DAEMON_MARKER in packages/shared/pid-utils.ts.
+      case "$DAEMON_CMD" in
+        *daemon.ts*)
+          echo "Choomfie is already running as a daemon (PID $DAEMON_PID)."
+          echo "Starting another instance would fight it for the Discord connection."
+          echo ""
+          echo "Stop the daemon first:"
+          echo "  bun packages/core/daemon.ts --stop"
+          echo "Or, if it was installed to run at login:"
+          echo "  bun run install:launchd --uninstall"
+          exit 1
+          ;;
+      esac
+    fi
+  fi
+fi
+
 if [ "$USE_DAEMON" = true ]; then
   QUOTED_ARGS=""
   for a in "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"; do

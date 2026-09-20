@@ -115,6 +115,13 @@ export function createSession(
       includePartialMessages: false,
       settingSources: ["user", "project"],
       cwd: PLUGIN_DIR,
+      // Marks the supervisor spawned beneath this session as daemon-owned, so
+      // its single-instance guard doesn't refuse to start. A supervisor
+      // launched any other way while this daemon is alive will refuse.
+      env: {
+        ...process.env,
+        CHOOMFIE_DAEMON_PID: String(process.pid),
+      },
     },
   });
 }

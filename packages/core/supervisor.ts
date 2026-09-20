@@ -15,7 +15,7 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { readFile, writeFile, unlink } from "node:fs/promises";
+import { writeFile, unlink } from "node:fs/promises";
 import { VERSION } from "./lib/version.ts";
 import {
   PERMISSION_REQUEST_METHOD,
@@ -30,7 +30,13 @@ import {
   waitForPendingToolCalls,
   type PendingToolCallMap,
 } from "./lib/supervisor-boundary.ts";
-import { errorMessage, resolveDataDir } from "@choomfie/shared";
+import {
+  errorMessage,
+  isChoomfieProcessAlive,
+  readLiveDaemonPid,
+  readPidFile,
+  resolveDataDir,
+} from "@choomfie/shared";
 import { ConfigManager } from "./lib/config.ts";
 import type { IpcOpenAINotify } from "./lib/ipc-types.ts";
 
@@ -224,29 +230,54 @@ function handleOpenAIEndpointMessage(msg: unknown) {
   }
 }
 
+const daemonPidPath = `${DATA_DIR}/meta/meta.pid`;
+
+/**
+ * Refuse to start when a daemon is already supervising an instance.
+ *
+ * Taking over the PID file is the right move when you re-run `choomfie` in a
+ * terminal — the old foreground instance is stale. It is the wrong move when
+ * launchd (or `choomfie --daemon`) is supervising one: killing that
+ * supervisor makes the daemon restart its session and spawn a replacement,
+ * and the two ping-pong. The daemon's own supervisor is exempt, identified by
+ * CHOOMFIE_DAEMON_PID which the daemon injects into its session's env.
+ */
+async function assertNoSupervisingDaemon() {
+  const daemonPid = await readLiveDaemonPid(daemonPidPath);
+  if (daemonPid === null) return;
+
+  const ownedByThisDaemon =
+    process.env.CHOOMFIE_DAEMON_PID === String(daemonPid);
+  if (ownedByThisDaemon) return;
+
+  console.error(
+    `Choomfie is already running as a daemon (PID ${daemonPid}).\n` +
+      `Starting another instance would fight it for the Discord connection.\n` +
+      `\n` +
+      `Stop the daemon first:\n` +
+      `  bun packages/core/daemon.ts --stop\n` +
+      `Or, if it was installed to run at login:\n` +
+      `  bun run install:launchd --uninstall`
+  );
+  process.exit(1);
+}
+
 async function acquirePid() {
-  try {
-    const oldPid = parseInt(await readFile(pidPath, "utf-8"), 10);
-    if (oldPid && oldPid !== process.pid) {
+  await assertNoSupervisingDaemon();
+
+  const oldPid = await readPidFile(pidPath);
+  if (oldPid && oldPid !== process.pid) {
+    // Only signal something that actually looks like ours.
+    if (await isChoomfieProcessAlive(oldPid)) {
       try {
-        // Check if it's actually a choomfie process before killing
-        const proc = Bun.spawn(["ps", "-p", String(oldPid), "-o", "command="], {
-          stdout: "pipe",
-          stderr: "pipe",
-        });
-        const command = (await new Response(proc.stdout).text()).trim();
-        await proc.exited;
-        if (command && (command.includes("choomfie") || command.includes("server.ts"))) {
-          process.kill(oldPid, "SIGTERM");
-          await new Promise((r) => setTimeout(r, 500));
-        }
+        process.kill(oldPid, "SIGTERM");
+        await new Promise((r) => setTimeout(r, 500));
       } catch {
-        // Process already dead
+        // Already gone.
       }
     }
-  } catch {
-    // No PID file yet
   }
+
   await writeFile(pidPath, String(process.pid));
 }
 
