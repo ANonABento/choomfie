@@ -27,6 +27,7 @@ packages/
     paths.ts                       # findMonorepoRoot() — resilient project root resolution
     interactions.ts                # Registries + register functions ONLY (no dispatch)
     worker-health.ts               # Worker heartbeat contract (writer: core, reader: daemon)
+    pid-utils.ts                   # PID files + Choomfie process identification
     version.ts                     # VERSION
   core/                            # @choomfie/core — Discord bridge, memory, etc.
     package.json
@@ -251,6 +252,7 @@ reminders: id, user_id, chat_id, message, due_at, fired, created_at,
 
 ## Key Details
 
+- Single instance enforced via `choomfie.pid` (supervisor) and `meta/meta.pid` (daemon). Re-running `choomfie` replaces a stale foreground instance, but **refuses** when a daemon is supervising one — the daemon's own supervisor is exempt via `CHOOMFIE_DAEMON_PID`. Process identity comes from `@choomfie/shared`'s `pid-utils.ts`, not ad-hoc `ps` greps
 - Owner auto-detected from Discord app info: during `./install.sh` (primary) or startup fallback if missed
 - Permission relay: owner receives tool approval requests via DM, replies `yes/no <code>` to approve/deny
 - State lives in `~/.claude/plugins/data/choomfie-inline/` (token, access list, database, inbox)

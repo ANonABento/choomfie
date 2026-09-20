@@ -20,6 +20,7 @@ import {
 import {
   isHeartbeatStale,
   parseWorkerHeartbeat,
+  readLiveChoomfiePid,
   workerHealthPath,
   type WorkerHeartbeat,
 } from "@choomfie/shared";
@@ -432,24 +433,7 @@ export async function cycleSession(
 
 export async function checkWorkerProcessAlive(): Promise<boolean> {
   const supervisorPidPath = `${DATA_DIR}/choomfie.pid`;
-  try {
-    const pidStr = await readFile(supervisorPidPath, "utf-8");
-    const pid = parseInt(pidStr.trim(), 10);
-    if (!pid || Number.isNaN(pid)) return false;
-
-    const proc = Bun.spawn(["ps", "-p", String(pid), "-o", "command="], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const command = (await new Response(proc.stdout).text()).trim();
-    await proc.exited;
-    return (
-      command.length > 0 &&
-      (command.includes("choomfie") || command.includes("supervisor"))
-    );
-  } catch {
-    return false;
-  }
+  return (await readLiveChoomfiePid(supervisorPidPath)) !== null;
 }
 
 /**

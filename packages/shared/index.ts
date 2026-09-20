@@ -37,6 +37,17 @@ export {
 // Version
 export { VERSION } from "./version.ts";
 export {
+  CHOOMFIE_PROCESS_MARKERS,
+  CHOOMFIE_DAEMON_MARKER,
+  isChoomfieCommand,
+  isChoomfieDaemonCommand,
+  readLiveDaemonPid,
+  readPidFile,
+  processCommand,
+  isChoomfieProcessAlive,
+  readLiveChoomfiePid,
+} from "./pid-utils.ts";
+export {
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_STALE_MS,
   workerHealthPath,
