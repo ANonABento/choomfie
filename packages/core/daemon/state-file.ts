@@ -22,11 +22,24 @@ export async function writeDaemonState(state: MetaState): Promise<void> {
     model: state.models.model ?? null,
     fallbackModel: state.models.fallbackModel ?? null,
     turns: { current: state.turnCount, threshold: state.thresholds.turnThreshold },
-    tokens: {
-      current: state.totalInputTokens,
+    // Live context size, which is what `shouldCycle` compares against the
+    // threshold. Null until the first check lands. Replaces a `tokens.current`
+    // that reported cumulative input tokens against this same threshold —
+    // a number that measured something else entirely.
+    context: {
+      tokens: state.context.tokens,
+      maxTokens: state.context.maxTokens,
+      percentage: state.context.percentage,
+      checkedAt: state.context.checkedAt,
       threshold: state.thresholds.tokenThreshold,
     },
+    /** Everything the session has ever read in. Only grows; never cycles. */
+    cumulativeInputTokens: state.totalInputTokens,
     tokenUsageToday: state.tokenUsageToday,
+    /** Per-model token and cost breakdown for this session. */
+    modelUsage: state.modelUsage,
+    /** Plan rate-limit windows. Null on an API-key account, or before the first event. */
+    rateLimit: state.rateLimit,
     costUsd: state.totalCostUsd,
     totalCycles: state.totalCycles,
     lastCycleReason: state.lastCycleReason,

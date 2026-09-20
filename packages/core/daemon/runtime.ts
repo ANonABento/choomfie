@@ -3,6 +3,7 @@ import type {
   SDKAssistantMessage,
   SDKCompactBoundaryMessage,
   SDKMessage,
+  SDKRateLimitEvent,
   SDKResultMessage,
   SDKResultSuccess,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -24,6 +25,9 @@ import {
   workerHealthPath,
   type WorkerHeartbeat,
 } from "@choomfie/shared";
+import { CONTROL_POLL_INTERVAL_MS } from "@choomfie/shared";
+import { takeControlRequest } from "./control.ts";
+import { parseRateLimitInfo } from "./rate-limit.ts";
 import { loadHandoffs, getLastHandoffSummary, saveHandoff } from "./handoffs.ts";
 import { cleanup, todayKey } from "./lifecycle.ts";
 import { log, setSessionId, verbose } from "./log.ts";
@@ -36,7 +40,12 @@ import {
   isUnrecoverableAnthropicError,
 } from "./session-core.ts";
 import { writeDaemonState } from "./state-file.ts";
-import type { HandoffEntry, MetaState } from "./types.ts";
+import type {
+  CycleOptions,
+  HandoffEntry,
+  MetaState,
+  StartSessionOptions,
+} from "./types.ts";
 
 function isCompactBoundaryMessage(
   message: SDKMessage
@@ -46,7 +55,8 @@ function isCompactBoundaryMessage(
 
 export async function startSession(
   state: MetaState,
-  handoffSummary?: string
+  handoffSummary?: string,
+  options: StartSessionOptions = {}
 ): Promise<void> {
   state.state = "STARTING";
   state.turnCount = 0;
@@ -56,6 +66,10 @@ export async function startSession(
   state.contextCheckFailures = 0;
   state.lastAssistantText = null;
   state.resultWaiters = [];
+  state.context = { tokens: null, maxTokens: null, percentage: null, checkedAt: null };
+  // Per-session, so it resets with the session. `state.rateLimit` deliberately
+  // does not — plan windows belong to the account and outlive any session.
+  state.modelUsage = {};
 
   const sessionId = generateSessionId();
   state.sessionId = sessionId;
@@ -82,6 +96,7 @@ export async function startSession(
   void writeDaemonState(state);
   startContextMonitor(state);
   startWorkerHealthMonitor(state);
+  startControlMonitor(state);
 
   if (state.messageQueue.length > 0) {
     log(`Replaying ${state.messageQueue.length} queued messages`);
@@ -92,6 +107,30 @@ export async function startSession(
   }
 
   state.restartBackoff = INITIAL_RESTART_BACKOFF;
+
+  // A cycle someone asked for gets reported back where they asked, and says
+  // which of the two it was — after a `/clear` there is no handoff summary, so
+  // "what were we doing?" would be a question the new session cannot answer.
+  if (options.announceTo) {
+    log(`Reporting ${options.requestedCommand ?? "cycle"} back to channel ${options.announceTo}`);
+    push({
+      type: "user",
+      message: {
+        role: "user",
+        content:
+          `A ${options.requestedCommand === "clear" ? "/clear" : "/compact"} was just ` +
+          `requested from Discord and your session has been replaced.\n` +
+          (handoffSummary
+            ? "Context was compacted — the handoff summary above is what carried over. "
+            : "Context was cleared — you have no memory of the previous conversation, " +
+              "though saved memories and reminders are untouched. ") +
+          `Post a brief, casual message in channel ${options.announceTo} confirming you're back. ` +
+          "Use the reply tool with that channel_id. Keep it to one line.",
+      },
+      parent_tool_use_id: null,
+    });
+    return;
+  }
 
   if (handoffSummary && state.totalCycles > 0) {
     log("Notifying Discord of session cycle...");
@@ -202,6 +241,13 @@ export function handleSessionMessage(state: MetaState, message: SDKMessage): voi
         state.turnCount = successResult.num_turns;
         state.totalCostUsd = successResult.total_cost_usd;
 
+        // Session-cumulative snapshot, not a per-turn delta (verified against
+        // the SDK: a model's inputTokens climbs across results rather than
+        // restarting), so it replaces rather than accumulates.
+        if (successResult.modelUsage) {
+          state.modelUsage = successResult.modelUsage;
+        }
+
         const usage = successResult.usage;
         if (usage) {
           const inputTokens = usage.input_tokens ?? 0;
@@ -244,6 +290,31 @@ export function handleSessionMessage(state: MetaState, message: SDKMessage): voi
       break;
     }
 
+    case "rate_limit_event": {
+      const info = (message as SDKRateLimitEvent).rate_limit_info;
+      // Raw dump at verbose: the payload carries fields the SDK's types don't
+      // declare (`unifiedWindows`), and which of them are present varies, so
+      // this is the only way to see what a given CLI build actually sends.
+      verbose(`rate_limit_event: ${JSON.stringify(info)}`);
+
+      // Account-level, not session-level: deliberately *not* reset by
+      // startSession, so `/usage` still has an answer straight after a cycle.
+      const snapshot = parseRateLimitInfo(info);
+      if (snapshot) {
+        const previous = state.rateLimit?.status;
+        state.rateLimit = snapshot;
+        // Only log on a status change — this event fires on nearly every turn.
+        if (snapshot.status !== previous) {
+          const windows = Object.entries(snapshot.windows)
+            .map(([name, w]) => `${name} ${(w.utilization * 100).toFixed(0)}%`)
+            .join(", ");
+          log(`Rate limit ${snapshot.status ?? "unknown"}: ${windows}`);
+        }
+        void writeDaemonState(state);
+      }
+      break;
+    }
+
     case "system": {
       if (isCompactBoundaryMessage(message)) {
         log("Context compaction occurred");
@@ -271,6 +342,17 @@ export function startContextMonitor(state: MetaState): void {
       const pct = usage.percentage;
 
       state.contextCheckFailures = 0;
+      // Kept so the state file can report the number cycling actually watches.
+      // It reported `totalInputTokens` (cumulative across the session) against
+      // `tokenThreshold` (compared below against live context size) — two
+      // different quantities under one label, so /status and `--status` were
+      // both showing a figure that could never reach its own threshold.
+      state.context = {
+        tokens,
+        maxTokens: usage.maxTokens,
+        percentage: pct,
+        checkedAt: Date.now(),
+      };
 
       log(
         `Context: ${tokens}/${usage.maxTokens} tokens (${pct.toFixed(1)}%), ` +
@@ -383,7 +465,8 @@ export function waitForResult(
 
 export async function cycleSession(
   state: MetaState,
-  tokenCount?: number
+  tokenCount?: number,
+  options: CycleOptions = {}
 ): Promise<void> {
   if (state.state !== "ACTIVE") {
     log("Cannot cycle: not in ACTIVE state");
@@ -395,18 +478,30 @@ export async function cycleSession(
   log(`Draining session... (cycle #${state.totalCycles}, reason: ${state.lastCycleReason || "threshold"})`);
 
   stopWorkerHealthMonitor(state);
+  stopControlMonitor(state);
   if (state.contextCheckTimer) {
     clearInterval(state.contextCheckTimer);
     state.contextCheckTimer = null;
   }
 
-  const summary = await captureHandoffSummary(state);
+  // A `/clear` deliberately skips the summary — that is the whole difference
+  // between it and `/compact`. Asking the outgoing session for one anyway would
+  // burn a turn and 30s of timeout producing text nothing will read.
+  const summary = options.skipHandoff
+    ? undefined
+    : await captureHandoffSummary(state);
 
+  // Recorded either way: handoffs.json is the log of what happened to sessions,
+  // and a cleared one is exactly the entry you want when the next session turns
+  // out to be missing context you expected it to have.
   const handoff: HandoffEntry = {
     sessionId: state.sessionId,
     timestamp: new Date().toISOString(),
-    summary,
-    tokenCount: tokenCount ?? state.totalInputTokens,
+    summary:
+      summary ??
+      `Context cleared on request — nothing carried forward. ` +
+        `(${state.turnCount} turns, $${state.totalCostUsd.toFixed(4)})`,
+    tokenCount: tokenCount ?? state.context.tokens ?? state.totalInputTokens,
     turnCount: state.turnCount,
     costUsd: state.totalCostUsd,
   };
@@ -428,7 +523,51 @@ export async function cycleSession(
   state.resultWaiters = [];
 
   await new Promise((resolve) => setTimeout(resolve, 2000));
-  await startSession(state, summary);
+  await startSession(state, summary, {
+    announceTo: options.announceTo,
+    requestedCommand: options.requestedCommand,
+  });
+}
+
+/**
+ * Poll for `/compact` and `/clear` requests written by the worker.
+ *
+ * A separate, faster timer than the health monitor: someone typed a command and
+ * is watching Discord for a response, so 30s is far too long to wait.
+ */
+export function startControlMonitor(state: MetaState): void {
+  stopControlMonitor(state);
+
+  state.controlTimer = setInterval(async () => {
+    // Only consume while ACTIVE. Mid-cycle the request would be dropped on the
+    // floor; left on disk it is picked up seconds later by the new session.
+    if (state.state !== "ACTIVE" || !state.session) return;
+
+    try {
+      const request = await takeControlRequest();
+      if (!request) return;
+
+      log(
+        `Control request: ${request.command}` +
+          (request.requestedBy ? ` from ${request.requestedBy}` : "")
+      );
+      state.lastCycleReason = `requested_${request.command}`;
+      await cycleSession(state, state.context.tokens ?? undefined, {
+        skipHandoff: request.command === "clear",
+        announceTo: request.chatId,
+        requestedCommand: request.command,
+      });
+    } catch (error: unknown) {
+      log(`Control request failed: ${getErrorMessage(error)}`);
+    }
+  }, CONTROL_POLL_INTERVAL_MS);
+}
+
+export function stopControlMonitor(state: MetaState): void {
+  if (state.controlTimer) {
+    clearInterval(state.controlTimer);
+    state.controlTimer = null;
+  }
 }
 
 export async function checkWorkerProcessAlive(): Promise<boolean> {

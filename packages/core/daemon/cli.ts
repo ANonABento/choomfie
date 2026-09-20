@@ -246,7 +246,16 @@ export async function showStatus(): Promise<void> {
         (state.fallbackModel ? ` (fallback: ${state.fallbackModel})` : ""),
     );
     console.error(`  Turns: ${state.turns?.current}/${state.turns?.threshold}`);
-    console.error(`  Tokens: ${state.tokens?.current}/${state.tokens?.threshold}`);
+    const context = state.context;
+    console.error(
+      `  Context: ` +
+        (context?.tokens === null || context?.tokens === undefined
+          ? "not measured yet"
+          : `${context.tokens.toLocaleString()}/${context.threshold?.toLocaleString()} tokens` +
+            (context.percentage === null
+              ? ""
+              : ` (${context.percentage.toFixed(1)}% of window)`)),
+    );
     console.error(`  Cost: $${state.costUsd?.toFixed(4)}`);
     console.error(`  Cycles: ${state.totalCycles}`);
     console.error(`  Worker: ${state.workerHealth?.processAlive ? "alive" : "dead"}`);

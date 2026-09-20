@@ -150,6 +150,9 @@ export function registerAllHandlers(): Promise<void> {
     await import("./handlers/permission-buttons.ts");
     await import("./handlers/modals.ts");
     await import("./commands.ts");
+    await import("./handlers/session-commands.ts");
+    await import("./handlers/access-commands.ts");
+    await import("./handlers/usage-command.ts");
   })();
   return handlersLoaded;
 }
