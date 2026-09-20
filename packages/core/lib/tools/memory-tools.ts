@@ -3,7 +3,7 @@
  */
 
 import type { ToolDef } from "../types.ts";
-import { text } from "../types.ts";
+import { text, err } from "../types.ts";
 
 export const memoryTools: ToolDef[] = [
   {
@@ -108,8 +108,10 @@ export const memoryTools: ToolDef[] = [
       },
     },
     handler: async (args, ctx) => {
-      ctx.memory.deleteCoreMemory(args.key as string);
-      return text(`Deleted memory: ${args.key}`);
+      const key = args.key as string;
+      return ctx.memory.deleteCoreMemory(key)
+        ? text(`Deleted memory: ${key}`)
+        : err(`No core memory with key: ${key}`);
     },
   },
   {

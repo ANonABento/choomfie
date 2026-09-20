@@ -6,7 +6,7 @@ import type { ToolDef } from "../types.ts";
 import { text } from "../types.ts";
 import { formatUptime } from "../conversation.ts";
 import { VERSION } from "../version.ts";
-import { readFile } from "node:fs/promises";
+import { formatContextUsage, readDaemonStatus } from "../daemon-status.ts";
 
 export const statusTools: ToolDef[] = [
   {
@@ -55,35 +55,26 @@ export const statusTools: ToolDef[] = [
         .map(([uid, count]) => `<@${uid}>: ${count}`)
         .join(", ");
 
-      // Daemon mode detection — only show if daemon process is still alive
-      let daemonLines: string[] = [];
-      try {
-        const daemonState = JSON.parse(
-          await readFile(`${ctx.DATA_DIR}/meta/daemon-state.json`, "utf-8")
-        );
-        // Verify daemon PID is still running to avoid stale state
-        let daemonAlive = false;
-        if (daemonState.pid) {
-          try { process.kill(daemonState.pid, 0); daemonAlive = true; } catch {}
-        }
-        if (daemonAlive) {
-          const sessionUptime = formatUptime(daemonState.sessionUptimeSeconds * 1000);
-          daemonLines = [
+      // Daemon block — readDaemonStatus already verifies the daemon process is
+      // alive and is actually the daemon, so a state file left behind by an
+      // unclean shutdown doesn't get reported as a live session.
+      const daemon = await readDaemonStatus(ctx.DATA_DIR);
+      const daemonLines = daemon
+        ? ([
             "",
             "## Daemon Mode",
-            `  State: ${daemonState.state}`,
-            `  Session: ${daemonState.sessionId}`,
-            `  Session uptime: ${sessionUptime}`,
-            `  Turns: ${daemonState.turns.current}/${daemonState.turns.threshold}`,
-            `  Cost: $${daemonState.costUsd?.toFixed(4) ?? "0.0000"}`,
-            `  Total cycles: ${daemonState.totalCycles}`,
-            daemonState.lastCycleReason ? `  Last cycle reason: ${daemonState.lastCycleReason}` : null,
-            `  Worker alive: ${daemonState.workerHealth.processAlive}`,
-          ].filter(Boolean) as string[];
-        }
-      } catch {
-        // Not running in daemon mode — no state file
-      }
+            `  State: ${daemon.state ?? "unknown"}`,
+            `  Session: ${daemon.sessionId ?? "unknown"}`,
+            `  Session uptime: ${formatUptime((daemon.sessionUptimeSeconds ?? 0) * 1000)}`,
+            `  Model: ${daemon.model ?? "Claude Code default"}`,
+            `  Turns: ${daemon.turns?.current ?? "?"}/${daemon.turns?.threshold ?? "?"}`,
+            `  Context: ${formatContextUsage(daemon)}`,
+            `  Cost: $${(daemon.costUsd ?? 0).toFixed(4)}`,
+            `  Total cycles: ${daemon.totalCycles ?? 0}`,
+            daemon.lastCycleReason ? `  Last cycle reason: ${daemon.lastCycleReason}` : null,
+            `  Worker alive: ${daemon.workerHealth?.processAlive ?? false}`,
+          ].filter(Boolean) as string[])
+        : [];
 
       const lines = [
         "# Choomfie Status",
@@ -114,10 +105,10 @@ export const statusTools: ToolDef[] = [
         `  DMs: always active (no timeout)`,
         "",
         "## Model & Engine",
-        `  Model: Claude (inherited from Claude Code session)`,
-        `  Engine: Claude Code CLI via plugin system`,
+        `  Model: ${ctx.config.getModel() ?? "Claude Code default"}${daemon?.model ? ` (session running: ${daemon.model})` : ""}`,
+        `  Engine: ${daemon ? "Agent SDK (daemon)" : "Claude Code CLI via plugin system"}`,
         `  Auth: Max plan (no API key)`,
-        `  Change model: set model in Claude Code (/model command)`,
+        `  Change model: /model in Discord, or /config setting:model — applies to every mode on next start`,
         "",
         "## Persona",
         `  Active: ${persona.name} (\`${personaKey}\`)`,

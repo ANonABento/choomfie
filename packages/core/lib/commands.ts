@@ -15,8 +15,10 @@ import {
   ButtonBuilder,
   ButtonStyle,
 } from "discord.js";
+import { AUTOCOMPLETE_LIMIT } from "@choomfie/shared";
 import { VERSION } from "./version.ts";
 import { registerCommand, registerButtonHandler } from "./register.ts";
+import { formatContextUsage, readDaemonStatus } from "./daemon-status.ts";
 import { McpProxy } from "./mcp-proxy.ts";
 import { formatDuration, fromSQLiteDatetime } from "./time.ts";
 import { isOwner, requireOwner } from "./handlers/shared.ts";
@@ -134,13 +136,45 @@ registerCommand("cancel", {
 registerCommand("memory", {
   data: new SlashCommandBuilder()
     .setName("memory")
-    .setDescription("View or search memories")
+    .setDescription("View, search, or forget memories")
     .addStringOption((o) =>
       o.setName("search").setDescription("Search term (omit to list all core memories)")
     )
+    .addStringOption((o) =>
+      o
+        .setName("forget")
+        .setDescription("Core memory key to delete (owner only)")
+        .setAutocomplete(true)
+    )
     .toJSON(),
+  // Suggests keys that actually exist, so `forget` can't be a guess at a
+  // spelling. In-memory read, well inside Discord's 3-second budget.
+  autocomplete: async (interaction, ctx) => {
+    const typed = interaction.options.getFocused().toLowerCase();
+    await interaction.respond(
+      ctx.memory
+        .getCoreMemory()
+        .filter((m) => m.key.toLowerCase().includes(typed))
+        .slice(0, AUTOCOMPLETE_LIMIT)
+        .map((m) => ({ name: m.key.slice(0, 100), value: m.key })),
+    );
+  },
   handler: async (interaction, ctx) => {
     const search = interaction.options.getString("search");
+    const forget = interaction.options.getString("forget");
+
+    if (forget) {
+      if (await requireOwner(interaction, ctx)) return;
+
+      const deleted = ctx.memory.deleteCoreMemory(forget);
+      await interaction.reply({
+        content: deleted
+          ? `Forgot **${forget}**.`
+          : `No core memory called **${forget}**. Run \`/memory\` to see what's there.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
 
     if (search) {
       const core = ctx.memory.getCoreMemory().filter(
@@ -215,7 +249,8 @@ registerCommand("help", {
           name: "Memory",
           value: [
             "`/memory` — list core memories",
-            "`/memory <search>` — search memories",
+            "`/memory search:<term>` — search memories",
+            "`/memory forget:<key>` — delete a core memory",
             "`/savememory` — save a memory (form)",
           ].join("\n"),
           inline: false,
@@ -244,7 +279,25 @@ registerCommand("help", {
           value: [
             "`/config` — view all settings and current values",
             "`/config setting:<name> value:<v>` — change one",
-            "`/model [model]` — view or change the daemon's model",
+            "`/model [model]` — view or change the model I run on",
+          ].join("\n"),
+          inline: false,
+        },
+        {
+          name: "Session (daemon mode, owner only)",
+          value: [
+            "`/compact` — free up context, keep a summary",
+            "`/clear` — start fresh, keep nothing",
+            "_Saved memories and reminders survive both._",
+          ].join("\n"),
+          inline: false,
+        },
+        {
+          name: "Access (owner only)",
+          value: [
+            "`/allow` — list who can talk to me",
+            "`/allow user:@someone` — let them in",
+            "`/revoke user:@someone` — shut them out",
           ].join("\n"),
           inline: false,
         },
@@ -252,7 +305,8 @@ registerCommand("help", {
           name: "Other",
           value: [
             "`/github <check>` — PRs, issues, notifications",
-            "`/status` — bot status and stats",
+            "`/status` — bot status, session and context usage",
+            "`/usage` — plan limits and what this session cost",
           ].join("\n"),
           inline: false,
         },
@@ -352,10 +406,47 @@ registerCommand("status", {
         { name: "Reminders", value: `${stats.reminderCount} active`, inline: true },
         { name: "Access", value: `${ctx.allowedUsers.size} users`, inline: true },
         { name: "Plugins", value: pluginStatus, inline: true },
-      )
-      .setFooter({
-        text: `Personas: ${personas.map((p) => p.active ? `[${p.key}]` : p.key).join(", ")}`,
-      });
+      );
+
+    // Daemon block — only when a daemon is actually supervising. In foreground
+    // mode there is no session to report on, and an empty "Session: unknown"
+    // field reads like something is broken.
+    const daemon = await readDaemonStatus(ctx.DATA_DIR);
+    if (daemon) {
+      const sessionUptime =
+        typeof daemon.sessionUptimeSeconds === "number"
+          ? formatDuration(daemon.sessionUptimeSeconds * 1000)
+          : "unknown";
+      embed.addFields(
+        {
+          name: "Session",
+          value:
+            `${daemon.state ?? "unknown"} · ${sessionUptime}\n` +
+            `Model: **${daemon.model ?? "Claude Code default"}**`,
+          inline: true,
+        },
+        {
+          name: "Context",
+          value:
+            `${formatContextUsage(daemon)}\n` +
+            `Turns: ${daemon.turns?.current ?? "?"}/${daemon.turns?.threshold ?? "?"}`,
+          inline: true,
+        },
+        {
+          name: "Cycles",
+          value:
+            `${daemon.totalCycles ?? 0} · $${(daemon.costUsd ?? 0).toFixed(4)}\n` +
+            (daemon.lastCycleReason ? `Last: ${daemon.lastCycleReason}` : "Last: —"),
+          inline: true,
+        },
+      );
+    }
+
+    embed.setFooter({
+      text:
+        `${daemon ? "Daemon mode" : "Foreground mode"} · ` +
+        `Personas: ${personas.map((p) => p.active ? `[${p.key}]` : p.key).join(", ")}`,
+    });
 
     await interaction.reply({
       embeds: [embed],
@@ -534,13 +625,13 @@ registerCommand("config", {
 
 // /model — shortcut for the setting people change most (owner only)
 //
-// Everything here routes through the `daemon.model` Setting rather than
-// touching config directly, so /config and /model cannot disagree about
-// validation, bounds, or what "default" means.
+// Everything here routes through the `model` Setting rather than touching
+// config directly, so /config and /model cannot disagree about validation,
+// bounds, or what "default" means.
 registerCommand("model", {
   data: new SlashCommandBuilder()
     .setName("model")
-    .setDescription("View or change the model daemon sessions use (owner only)")
+    .setDescription("View or change the model Choomfie runs on (owner only)")
     .addStringOption((o) =>
       o
         .setName("model")
@@ -566,8 +657,8 @@ registerCommand("model", {
     if (requested === null) {
       await interaction.reply({
         content:
-          `Daemon sessions use **${setting.read(ctx.config)}**.\n` +
-          "Foreground and `--tmux` follow your Claude Code settings, not this.",
+          `Choomfie runs on **${setting.read(ctx.config)}**.\n` +
+          "Applies to every mode. Takes effect the next time Choomfie starts.",
         flags: MessageFlags.Ephemeral,
       });
       return;

@@ -7,7 +7,7 @@
  * actually wired to the config, and a bad value is rejected rather than stored.
  */
 import { describe, expect, test, afterEach } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AUTOCOMPLETE_LIMIT } from "@choomfie/shared";
@@ -52,7 +52,7 @@ describe("settings registry", () => {
   test("findSetting is case-insensitive and rejects unknown keys", () => {
     expect(findSetting("rateLimitMs")?.key).toBe("rateLimitMs");
     expect(findSetting("RATELIMITMS")?.key).toBe("rateLimitMs");
-    expect(findSetting("  daemon.model  ")?.key).toBe("daemon.model");
+    expect(findSetting("  daemon.turnThreshold  ")?.key).toBe("daemon.turnThreshold");
     expect(findSetting("nope")).toBeUndefined();
   });
 
@@ -115,37 +115,62 @@ describe("duration settings", () => {
 describe("model settings", () => {
   test("stores an alias or a full model id", () => {
     const { config } = newConfig();
-    const model = findSetting("daemon.model")!;
+    const model = findSetting("model")!;
 
     expect(model.write(config, "opus").ok).toBe(true);
-    expect(config.getDaemonConfig().model).toBe("opus");
+    expect(config.getModel()).toBe("opus");
 
     expect(model.write(config, "claude-opus-5").ok).toBe(true);
-    expect(config.getDaemonConfig().model).toBe("claude-opus-5");
+    expect(config.getModel()).toBe("claude-opus-5");
   });
 
   test("`default` clears it back to Claude Code's own default", () => {
     const { config, dir } = newConfig();
-    const model = findSetting("daemon.model")!;
+    const model = findSetting("model")!;
     model.write(config, "haiku");
 
     expect(model.write(config, "default").ok).toBe(true);
-    expect(config.getDaemonConfig().model).toBeUndefined();
+    expect(config.getModel()).toBeUndefined();
     expect(model.read(config)).toBe("Claude Code default");
 
     // An unset model must be absent from the file, not written as null —
     // createSession omits the SDK option entirely when it is undefined.
     const onDisk = JSON.parse(readFileSync(join(dir, "config.json"), "utf-8"));
+    expect("model" in onDisk).toBe(false);
+  });
+
+  test("adopts a model left at the old `daemon.model` location", () => {
+    // Before the model became universal it lived under `daemon`, where the
+    // foreground launcher never looked. A config written by that build must
+    // keep working and must end up with one place to look, not two.
+    const dir = mkdtempSync(join(tmpdir(), "choomfie-settings-"));
+    dirs.push(dir);
+    writeFileSync(
+      join(dir, "config.json"),
+      JSON.stringify({
+        daemon: { tokenThreshold: 99_000, turnThreshold: 42, model: "sonnet" },
+      }),
+    );
+
+    const config = new ConfigManager(dir);
+    expect(config.getModel()).toBe("sonnet");
+    expect(config.getDaemonConfig().tokenThreshold).toBe(99_000);
+    expect(config.getDaemonConfig().turnThreshold).toBe(42);
+
+    // The stale key is gone once anything saves, so the two cannot diverge.
+    config.setModel("haiku");
+    const onDisk = JSON.parse(readFileSync(join(dir, "config.json"), "utf-8"));
+    expect(onDisk.model).toBe("haiku");
     expect("model" in onDisk.daemon).toBe(false);
   });
 
   test("rejects values that cannot be a model id", () => {
     const { config } = newConfig();
-    const model = findSetting("daemon.model")!;
+    const model = findSetting("model")!;
     expect(model.write(config, "claude opus 5").ok).toBe(false);
     expect(model.write(config, "  ").ok).toBe(false);
     expect(model.write(config, "x".repeat(200)).ok).toBe(false);
-    expect(config.getDaemonConfig().model).toBeUndefined();
+    expect(config.getModel()).toBeUndefined();
   });
 });
 

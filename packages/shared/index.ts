@@ -62,6 +62,15 @@ export {
   parseWorkerHeartbeat,
   type WorkerHeartbeat,
 } from "./worker-health.ts";
+export {
+  CONTROL_POLL_INTERVAL_MS,
+  CONTROL_REQUEST_STALE_MS,
+  daemonControlPath,
+  isControlRequestStale,
+  parseDaemonControlRequest,
+  type DaemonControlCommand,
+  type DaemonControlRequest,
+} from "./daemon-control.ts";
 
 // Paths
 export {

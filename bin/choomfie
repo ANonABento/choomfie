@@ -58,6 +58,20 @@ if [ "$USE_DAEMON" = false ]; then
   fi
 fi
 
+# --- Model ---
+# config.json is the one place the model is configured, for every mode. The
+# daemon reads it directly; foreground runs under the `claude` CLI, which would
+# otherwise ignore it and use whatever Claude Code itself is set to — which is
+# exactly the surprise this avoids. Empty means "no --model flag", i.e. the
+# Claude Code default, which is what `/model default` sets.
+CLAUDE_MODEL_ARGS=()
+if [ "$USE_DAEMON" = false ]; then
+  CONFIGURED_MODEL="$(cd "$ROOT_DIR" && bun packages/core/scripts/resolve-model.ts 2>/dev/null || true)"
+  if [ -n "$CONFIGURED_MODEL" ]; then
+    CLAUDE_MODEL_ARGS=(--model "$CONFIGURED_MODEL")
+  fi
+fi
+
 if [ "$USE_DAEMON" = true ]; then
   QUOTED_ARGS=""
   for a in "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"; do
@@ -65,7 +79,11 @@ if [ "$USE_DAEMON" = true ]; then
   done
   INNER_CMD="cd $(printf %q "$ROOT_DIR") && exec bun packages/core/daemon.ts$QUOTED_ARGS"
 else
-  INNER_CMD="cd $(printf %q "$ROOT_DIR") && exec claude --plugin-dir $(printf %q "$ROOT_DIR") --dangerously-load-development-channels server:choomfie"
+  QUOTED_MODEL_ARGS=""
+  for a in "${CLAUDE_MODEL_ARGS[@]+"${CLAUDE_MODEL_ARGS[@]}"}"; do
+    QUOTED_MODEL_ARGS="$QUOTED_MODEL_ARGS $(printf %q "$a")"
+  done
+  INNER_CMD="cd $(printf %q "$ROOT_DIR") && exec claude --plugin-dir $(printf %q "$ROOT_DIR") --dangerously-load-development-channels server:choomfie$QUOTED_MODEL_ARGS"
 fi
 
 if [ "$USE_TMUX" = true ]; then
@@ -93,5 +111,6 @@ else
   if [ "$USE_DAEMON" = true ]; then
     exec bun packages/core/daemon.ts "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"
   fi
-  exec claude --plugin-dir "$ROOT_DIR" --dangerously-load-development-channels server:choomfie
+  exec claude --plugin-dir "$ROOT_DIR" --dangerously-load-development-channels server:choomfie \
+    "${CLAUDE_MODEL_ARGS[@]+"${CLAUDE_MODEL_ARGS[@]}"}"
 fi

@@ -35,6 +35,10 @@ export function createInitialState(settings: DaemonSettings): MetaState {
       consecutiveFailures: 0,
     },
     workerHealthTimer: null,
+    context: { tokens: null, maxTokens: null, percentage: null, checkedAt: null },
+    modelUsage: {},
+    rateLimit: null,
+    controlTimer: null,
     totalCycles: 0,
     lastCycleReason: null,
     thresholds: { tokenThreshold, turnThreshold },
@@ -50,6 +54,10 @@ export async function cleanup(state: MetaState): Promise<void> {
   if (state.contextCheckTimer) {
     clearInterval(state.contextCheckTimer);
     state.contextCheckTimer = null;
+  }
+  if (state.controlTimer) {
+    clearInterval(state.controlTimer);
+    state.controlTimer = null;
   }
   try {
     state.closeGenerator?.();

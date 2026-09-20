@@ -28,7 +28,9 @@ import type { ConfigManager } from "./config.ts";
 export type SettingScope =
   | "immediately"
   | "next worker restart"
-  | "next daemon start";
+  | "next daemon start"
+  /** Read when the `claude` CLI or the daemon session is launched. */
+  | "next start";
 
 export type SettingValue = string;
 
@@ -191,7 +193,7 @@ function countSetting(options: {
 export const MODEL_SUGGESTIONS = ["default", "opus", "sonnet", "haiku"];
 
 /** The setting `/model` is a shortcut for. Must name a Setting in SETTINGS. */
-export const MODEL_SETTING_KEY = "daemon.model";
+export const MODEL_SETTING_KEY = "model";
 
 function modelSetting(options: {
   key: string;
@@ -204,7 +206,7 @@ function modelSetting(options: {
     description: options.description,
     example: "opus, sonnet, haiku, a full model id, or `default`",
     suggestions: MODEL_SUGGESTIONS,
-    scope: "next daemon start",
+    scope: "next start",
     read: (config) => options.read(config) ?? "Claude Code default",
     write: (config, raw) => {
       if (isReset(raw)) {
@@ -249,16 +251,16 @@ export const SETTINGS: Setting[] = [
     write: (config, ms) => config.setConvoTimeoutMs(ms),
   }),
   modelSetting({
-    key: "daemon.model",
-    description: "Model for daemon sessions (foreground follows Claude Code)",
-    read: (config) => config.getDaemonConfig().model,
-    write: (config, model) => config.setDaemonConfig({ model }),
+    key: "model",
+    description: "Model Choomfie runs on, in every mode",
+    read: (config) => config.getModel(),
+    write: (config, model) => config.setModel(model),
   }),
   modelSetting({
-    key: "daemon.fallbackModel",
-    description: "Model to fall back to when the primary is overloaded",
-    read: (config) => config.getDaemonConfig().fallbackModel,
-    write: (config, model) => config.setDaemonConfig({ fallbackModel: model }),
+    key: "fallbackModel",
+    description: "Model to fall back to when the primary is overloaded (daemon only)",
+    read: (config) => config.getFallbackModel(),
+    write: (config, model) => config.setFallbackModel(model),
   }),
   countSetting({
     key: "daemon.tokenThreshold",

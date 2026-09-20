@@ -7,6 +7,14 @@ import {
 import { PLUGIN_DIR } from "./constants.ts";
 import type { ModelSettings } from "./types.ts";
 
+/**
+ * Claude Code gates the experimental channel capability behind an explicit
+ * opt-in list. `server:choomfie` names the MCP server the plugin registers —
+ * keep it in sync with the server name in `.mcp.json`.
+ */
+const CHANNELS_FLAG = "dangerously-load-development-channels";
+const CHANNEL_TARGET = "server:choomfie";
+
 export function generateSessionId(): string {
   return `s-${Date.now().toString(36)}`;
 }
@@ -113,6 +121,14 @@ export function createSession(
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       plugins: [{ type: "local", path: PLUGIN_DIR }],
+      // Without this the session loads Choomfie's MCP server but refuses to
+      // register its `claude/channel` capability ("server choomfie not in
+      // --channels list for this session"). The worker still boots and the bot
+      // still shows online, but every incoming Discord message — forwarded as a
+      // `notifications/claude/channel` notification — is dropped on the floor,
+      // so Choomfie never answers. Foreground mode passes the same flag; see
+      // the `choomfie` launcher script.
+      extraArgs: { [CHANNELS_FLAG]: CHANNEL_TARGET },
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
