@@ -1,4 +1,5 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { writeJsonAtomic } from "@choomfie/shared";
 import { HANDOFFS_PATH } from "./constants.ts";
 import type { HandoffEntry } from "./types.ts";
 
@@ -14,7 +15,7 @@ export async function loadHandoffs(): Promise<HandoffEntry[]> {
 export async function saveHandoff(entry: HandoffEntry): Promise<void> {
   const handoffs = await loadHandoffs();
   handoffs.push(entry);
-  await writeFile(HANDOFFS_PATH, JSON.stringify(handoffs.slice(-20), null, 2));
+  await writeJsonAtomic(HANDOFFS_PATH, handoffs.slice(-20));
 }
 
 export function getLastHandoffSummary(handoffs: HandoffEntry[]): string | undefined {

@@ -28,6 +28,7 @@ packages/
     interactions.ts                # Registries + register functions ONLY (no dispatch)
     worker-health.ts               # Worker heartbeat contract (writer: core, reader: daemon)
     pid-utils.ts                   # PID files + Choomfie process identification
+    atomic-file.ts                 # Crash-safe writes (temp + rename)
     version.ts                     # VERSION
   core/                            # @choomfie/core — Discord bridge, memory, etc.
     package.json
@@ -252,6 +253,7 @@ reminders: id, user_id, chat_id, message, due_at, fired, created_at,
 
 ## Key Details
 
+- All JSON state (`config.json`, `access.json`, `meta/*.json`) is written atomically via `writeJsonAtomic` from `@choomfie/shared` — temp file + `rename(2)`. Never write these with a bare `writeFile`; a crash mid-write truncates them
 - Single instance enforced via `choomfie.pid` (supervisor) and `meta/meta.pid` (daemon). Re-running `choomfie` replaces a stale foreground instance, but **refuses** when a daemon is supervising one — the daemon's own supervisor is exempt via `CHOOMFIE_DAEMON_PID`. Process identity comes from `@choomfie/shared`'s `pid-utils.ts`, not ad-hoc `ps` greps
 - Owner auto-detected from Discord app info: during `./install.sh` (primary) or startup fallback if missed
 - Permission relay: owner receives tool approval requests via DM, replies `yes/no <code>` to approve/deny

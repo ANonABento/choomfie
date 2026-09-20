@@ -6,8 +6,8 @@
  * Settings control bot behavior (rate limits, triggers, etc.).
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
-import type { SocialsPlatformConfig } from "@choomfie/shared";
+import { readFileSync } from "node:fs";
+import { writeJsonAtomicSync, type SocialsPlatformConfig } from "@choomfie/shared";
 import {
   resolveOpenAIEndpointConfig,
   type OpenAIEndpointConfig,
@@ -157,10 +157,9 @@ export class ConfigManager {
   }
 
   private save() {
-    writeFileSync(
-      this.configPath,
-      JSON.stringify(this.config, null, 2)
-    );
+    // Atomic: save() runs on every mutation, and a crash mid-write would
+    // otherwise truncate config.json and lose personas + settings.
+    writeJsonAtomicSync(this.configPath, this.config);
   }
 
   // --- Persona ---

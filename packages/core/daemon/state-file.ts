@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { writeJsonAtomic } from "@choomfie/shared";
 import { META_DIR } from "./constants.ts";
 import { getErrorMessage } from "./error.ts";
 import { log } from "./log.ts";
@@ -36,7 +36,7 @@ export async function writeDaemonState(state: MetaState): Promise<void> {
   };
 
   try {
-    await writeFile(DAEMON_STATE_PATH, JSON.stringify(data, null, 2));
+    await writeJsonAtomic(DAEMON_STATE_PATH, data);
   } catch (error: unknown) {
     log(`Failed to write daemon state: ${getErrorMessage(error)}`);
   }

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Crash-Safe Writes
+
+### Fixed
+
+- **Every JSON file Choomfie owns was written non-atomically** — truncate the target, stream the new contents in. A crash, `kill -9`, full disk, or worker restart landing mid-write left a truncated or half-written file, and the next read either threw or silently fell back to defaults. `config.json` does this on *every* settings mutation, so the window was not rare; losing it means losing personas and settings, and losing `access.json` means losing the owner id and allowlist. Writes now go to a sibling temp file and `rename(2)` over the target, so a reader sees either the old file or the new one, never a partial one. Applied to `config.json`, `access.json`, `meta/handoffs.json`, `meta/daemon-state.json`, and `meta/worker-health.json` via `writeFileAtomic` / `writeJsonAtomic` in `@choomfie/shared` — generalizing the temp-and-rename that `openai/auth.ts` already did by hand for the API key store.
+
+### Notes
+
+- Deliberately **not** moved into SQLite. The earlier plan was to fold `meta/` into the existing database, but `packages/core/daemon/` may not import `packages/core/lib/` (enforced by `daemon-structure.test.ts`) and the daemon runs in a separate process from the worker that owns the DB. Atomic writes fix the actual defect — partial files — without pushing a cross-process SQLite dependency through that boundary. `config.json` and `.env` stay files regardless: hand-editable is a feature.
+
 ## Unreleased — Single-Instance Guard
 
 ### Fixed

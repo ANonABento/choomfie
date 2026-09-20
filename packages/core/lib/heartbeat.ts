@@ -6,11 +6,11 @@
  * rather than IPC.
  */
 
-import { mkdir, writeFile, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import { unlink } from "node:fs/promises";
 import {
   HEARTBEAT_INTERVAL_MS,
   workerHealthPath,
+  writeJsonAtomic,
   type WorkerHeartbeat,
 } from "@choomfie/shared";
 import type { AppContext } from "./types.ts";
@@ -43,8 +43,9 @@ function snapshot(ctx: AppContext): WorkerHeartbeat {
 async function write(ctx: AppContext): Promise<void> {
   const path = workerHealthPath(ctx.DATA_DIR);
   try {
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, JSON.stringify(snapshot(ctx), null, 2));
+    // Atomic so the daemon never parses a half-written beat and concludes the
+    // worker is unhealthy.
+    await writeJsonAtomic(path, snapshot(ctx));
   } catch (error) {
     // A failed heartbeat write is itself a health signal — the daemon will see
     // a stale file. Never let it take the worker down.
