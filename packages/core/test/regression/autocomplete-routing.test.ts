@@ -54,7 +54,7 @@ const ctx = { plugins: [] } as unknown as AppContext;
 describe("autocomplete routing", () => {
   test("reaches the command's suggester and never the reply path", async () => {
     const { interaction, recorded } = fakeAutocomplete("config", {
-      strings: { setting: "daemon.model" },
+      strings: { setting: "model" },
       focused: "op",
     });
 

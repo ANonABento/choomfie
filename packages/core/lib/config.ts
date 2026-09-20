@@ -56,23 +56,12 @@ export interface SocialsConfig {
   [key: string]: SocialsPlatformConfig | undefined;
 }
 
-/** Settings for `--daemon` mode sessions. */
+/** Session-cycling thresholds for `--daemon` mode. */
 export interface DaemonConfig {
   /** Cycle the session once cumulative context reaches this many tokens. */
   tokenThreshold: number;
   /** Cycle the session once it has taken this many turns. */
   turnThreshold: number;
-  /**
-   * Model for daemon sessions — an alias ("opus", "sonnet", "haiku") or a full
-   * model id. Unset means Claude Code's own default, which is what daemon
-   * sessions used before this existed.
-   *
-   * Only applies to `--daemon`. Foreground and `--tmux` run under the `claude`
-   * CLI, which takes its model from your Claude Code settings, not from here.
-   */
-  model?: string;
-  /** Model to fall back to when the primary is overloaded. Unset = no fallback. */
-  fallbackModel?: string;
 }
 
 export interface Config {
@@ -84,6 +73,19 @@ export interface Config {
   plugins: string[];
   voice: VoiceConfig;
   socials?: SocialsConfig;
+  /**
+   * Model every mode runs on — an alias ("opus", "sonnet", "haiku") or a full
+   * model id. Unset means Claude Code's own configured default.
+   *
+   * Top-level, not under `daemon`, because it is not daemon-specific: the
+   * daemon passes it to the Agent SDK and the `bin/choomfie` launcher passes
+   * the same value to the `claude` CLI as `--model`. It used to live at
+   * `daemon.model`, which meant `/model` silently did nothing in foreground
+   * mode; `mergeConfig` migrates that key forward.
+   */
+  model?: string;
+  /** Model to fall back to when the primary is overloaded. Unset = no fallback. */
+  fallbackModel?: string;
   daemon: DaemonConfig;
   openaiEndpoint: OpenAIEndpointConfig;
   [key: string]: unknown;
@@ -121,8 +123,15 @@ function mergeConfig(saved: Partial<Config>): Config {
     saved.voice && typeof saved.voice === "object" ? saved.voice : {};
   const savedSocials =
     saved.socials && typeof saved.socials === "object" ? saved.socials : undefined;
-  const savedDaemon =
+  const savedDaemon: Partial<DaemonConfig> & { model?: string; fallbackModel?: string } =
     saved.daemon && typeof saved.daemon === "object" ? saved.daemon : {};
+
+  // Migration: `model`/`fallbackModel` used to live under `daemon`. Adopt the
+  // old value when the top-level key is absent, and drop the old one so the
+  // next save leaves a single place to look. An explicit top-level value wins —
+  // it can only have come from a newer build.
+  const model = saved.model ?? savedDaemon.model;
+  const fallbackModel = saved.fallbackModel ?? savedDaemon.fallbackModel;
   const savedOpenAIEndpoint =
     saved.openaiEndpoint && typeof saved.openaiEndpoint === "object"
       ? saved.openaiEndpoint
@@ -140,9 +149,11 @@ function mergeConfig(saved: Partial<Config>): Config {
       ...savedVoice,
     },
     ...(savedSocials ? { socials: savedSocials } : {}),
+    ...(model ? { model } : {}),
+    ...(fallbackModel ? { fallbackModel } : {}),
     daemon: {
-      ...DEFAULT_DAEMON_CONFIG,
-      ...savedDaemon,
+      tokenThreshold: savedDaemon.tokenThreshold ?? DEFAULT_DAEMON_CONFIG.tokenThreshold,
+      turnThreshold: savedDaemon.turnThreshold ?? DEFAULT_DAEMON_CONFIG.turnThreshold,
     },
     openaiEndpoint: resolveOpenAIEndpointConfig(savedOpenAIEndpoint),
   };
@@ -272,6 +283,28 @@ export class ConfigManager {
 
   getSocialsConfig(): SocialsConfig | undefined {
     return this.config.socials;
+  }
+
+  // --- Model (every mode) ---
+
+  getModel(): string | undefined {
+    return this.config.model;
+  }
+
+  setModel(model: string | undefined) {
+    if (model) this.config.model = model;
+    else delete this.config.model;
+    this.save();
+  }
+
+  getFallbackModel(): string | undefined {
+    return this.config.fallbackModel;
+  }
+
+  setFallbackModel(model: string | undefined) {
+    if (model) this.config.fallbackModel = model;
+    else delete this.config.fallbackModel;
+    this.save();
   }
 
   // --- Daemon ---

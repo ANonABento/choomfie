@@ -32,6 +32,7 @@ import {
   testCycle,
 } from "./daemon/cli.ts";
 import { getErrorMessage } from "./daemon/error.ts";
+import type { DaemonSettings } from "./daemon/types.ts";
 
 async function main(): Promise<void> {
   if (FLAG_STOP) return stopDaemon();
@@ -39,7 +40,14 @@ async function main(): Promise<void> {
 
   // Daemon settings live in config.json (the single settings source for every
   // mode). Resolved here, at the entry point, so daemon/ never imports lib/.
-  const settings = new ConfigManager(DATA_DIR).getDaemonConfig();
+  // Thresholds are daemon-only; the model is shared with foreground mode and
+  // lives at the top level of config.json, so it is read separately.
+  const config = new ConfigManager(DATA_DIR);
+  const settings: DaemonSettings = {
+    ...config.getDaemonConfig(),
+    model: config.getModel(),
+    fallbackModel: config.getFallbackModel(),
+  };
 
   if (FLAG_TEST_CYCLE) return testCycle(settings);
   if (FLAG_BENCHMARK) return benchmark(settings);
