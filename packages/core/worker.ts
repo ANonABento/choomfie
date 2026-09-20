@@ -12,6 +12,7 @@ import { loadPlugins } from "./lib/plugins.ts";
 import { createDiscordClient } from "./lib/discord.ts";
 import { registerAllHandlers } from "./lib/interactions.ts";
 import { startHeartbeat, stopHeartbeat, clearHeartbeat } from "./lib/heartbeat.ts";
+import { startRateLimitAlerts, stopRateLimitAlerts } from "./lib/rate-limit-alerts.ts";
 import { getAllTools } from "./lib/tools/index.ts";
 import { buildInstructions } from "./lib/mcp-server.ts";
 import { registerPermissionRelay } from "./lib/permissions.ts";
@@ -146,6 +147,9 @@ process.send?.({
 });
 // Publish worker liveness + gateway state for the daemon's health monitor
 startHeartbeat(ctx, { discordConfigured: Boolean(discordToken) });
+// Watch the daemon's plan limits and DM the owner before they bite. No-ops in
+// foreground mode, where there is no daemon state to read.
+startRateLimitAlerts(ctx);
 
 console.error("Choomfie Worker: ready");
 
@@ -156,6 +160,7 @@ async function shutdown() {
   shutdownCalled = true;
   console.error("Choomfie Worker: shutting down");
   stopHeartbeat();
+  stopRateLimitAlerts();
   await clearHeartbeat(ctx.DATA_DIR);
   ctx.reminderScheduler.destroy();
   ctx.birthdayScheduler.destroy();

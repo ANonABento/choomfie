@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased — Rate-Limit Alerts, Honest `/usage`, Lighter Context
+
+### Added
+
+- **Choomfie now tells you when you're near a plan limit, instead of waiting to be asked.** A poller in the worker (`lib/rate-limit-alerts.ts`) reads the daemon's state file and DMs the owner on crossing 90%, and again when requests start being refused.
+
+  It lives in the worker, not the daemon, and that is the point. The daemon's only route to Discord is to push a message into the Claude session and have it call the `reply` tool — the exact path that stops working when requests are being refused. The worker reads the state file directly and DMs through discord.js, so the "you are rate limited" message still goes out when the session is the thing that's broken.
+
+  The alert record is persisted to `meta/rate-limit-alert.json` rather than held in memory, because the worker is respawned on every session cycle and an in-memory flag would mean a fresh "you're at 94%" DM after each one. Its key carries the window's reset time, so next week's 95% isn't deduped against last week's.
+
+### Fixed
+
+- **`/usage` reported a rate-limit window that had already reset as if it were live.** Found on the running daemon: it rendered `Weekly — 97% · resets 7 hours ago` in red, from a snapshot 11 hours old, for a window that had rolled over overnight.
+
+  The cause is structural, not a typo: the daemon only learns its utilization from a `rate_limit_event`, which the SDK sends on a turn. An idle session takes no turns, so the numbers simply stop moving. A window whose reset has passed now renders as **reset** with an empty bar, the stale snapshot carries a "last updated" note explaining why the figures aren't moving, and a `rejected` status older than 30 minutes no longer claims you are rate limited right now. `isRateLimitStale` / `viewRateLimitWindows` in `lib/daemon-status.ts` are the shared source of truth, so the embed and the alerter cannot disagree about it.
+
+### Removed
+
+- `MetaState.messageQueue`, which was initialised and drained but never written to. It read as a feature — "messages sent while the session is down are replayed" — that could not fire, because Discord messages reach the session through MCP rather than through the daemon. Messages sent during a cycle are genuinely lost; the honest place to say so is the rate-limit DM.
+
+### Changed
+
+- **`CLAUDE.md` split: 31.7KB → 14.5KB**, with the reference material moved to `docs/tools.md`, `docs/commands.md`, `docs/configuration.md`, `docs/daemon.md` and the existing `docs/voice-plugin.md`.
+
+  It is loaded into every daemon session and re-read from cache on every turn — measured at ~7,900 tokens, roughly a quarter of the session's entire resident context, for documentation a Discord persona never needs. What stayed is the architecture and the rules that bite: shapes that compile but fail elsewhere, the register/dispatch split that prevents an import cycle, global-command shadowing, atomic writes, the SQLite datetime format. What moved is inventories and walkthroughs. Two gotchas that cost real debugging time were *added* while doing it — `ToolDef` names live at `t.definition.name`, and `CommandDef` uses `data`, not `definition`.
+
 ## Unreleased — OpenAI Endpoint Removed
 
 ### Removed

@@ -85,7 +85,6 @@ export type MetaState = {
   tokenUsageToday: TokenUsageToday;
   totalCostUsd: number;
   sessionStartTime: number;
-  messageQueue: SDKUserMessage[];
   contextCheckTimer: ReturnType<typeof setInterval> | null;
   contextCheckFailures: number;
   restartBackoff: number;

@@ -366,3 +366,59 @@ Released March 26, 2026. Mistral's first TTS model — 4B parameter transformer.
 **Short utterances ignored:**
 - By design: chunks < 10 opus frames or PCM < 4800 bytes are skipped
 - This prevents noise/breathing from triggering STT
+
+
+---
+
+## Runtime Behaviour at a Glance
+
+_Moved here from CLAUDE.md — the summary a developer wants before reading
+the sections above in full._
+
+Full-duplex voice conversations in Discord voice channels. See [docs/voice-optimization-roadmap.md](docs/voice-optimization-roadmap.md) for optimization details.
+
+### Architecture
+
+```
+User speaks → Discord Opus → per-speaker SileroVAD (adaptive endpointing)
+  → Opus decode (@discordjs/opus) → ffmpeg resample (48kHz stereo → 16kHz mono)
+  → whisper-cpp STT (segmented every ~3s) → MCP notification → Claude
+  → speak tool → sentence splitter → pipelined kokoro TTS
+  → 48kHz stereo PCM → AudioPlayer → Discord
+```
+
+### Key Features
+
+- **Streaming TTS**: Long responses split into sentences, each synthesized and played independently with one-ahead pipelining (next sentence synthesizes while current plays)
+- **Silero VAD**: Neural voice activity detection replacing fixed silence timeout. Adaptive endpointing: `threshold = min(1200ms, 400ms + utteranceDuration * 0.3)`
+- **Interruption handling**: User speech stops bot playback after 300ms barge-in threshold. Generation IDs invalidate stale speak() calls. Tracks what was actually spoken for context.
+- **Streaming STT**: Audio flushed to whisper every ~3s of continuous speech (MAX_SEGMENT_CHUNKS=150). Segments transcribe in parallel, combined on speech end.
+- **Multi-speaker**: Per-speaker VAD pipelines (independent SileroVAD + SpeechDetector). Max 4 concurrent speakers with LRU eviction. Idle cleanup every 30s.
+- **Silence priming**: Plays 0.5s silence on join to prime Discord's voice receive pipeline (required for Discord to send audio packets)
+- **Speak queue**: Serialized via promise chain with generation ID checks. Prevents race conditions between concurrent speak() calls.
+
+### Providers
+
+Swappable via config. Auto-detection picks the best available:
+
+| Type | Provider | Local | Free | Notes |
+|------|----------|-------|------|-------|
+| STT | whisper-cpp | Yes | Yes | Default. `brew install whisper-cpp`, model at `~/.cache/whisper-cpp/` |
+| STT | groq | No | Yes | Needs GROQ_API_KEY |
+| STT | elevenlabs | No | No | Paid API |
+| TTS | kokoro | Yes | Yes | Default. `pip install kokoro-onnx soundfile`, 53 voices |
+| TTS | edge-tts | No | Yes | Free Microsoft API |
+| TTS | elevenlabs | No | No | Paid API |
+| VAD | silero | Yes | Yes | Always on. Bundled via @ricky0123/vad-node |
+
+### Voice Config
+
+```json
+"voice": {
+  "stt": "whisper",     // or "groq", "elevenlabs", "auto"
+  "tts": "kokoro",      // or "edge-tts", "elevenlabs", "auto"
+  "ttsSpeed": 1.0       // 0.5-2.0, applied via ffmpeg atempo
+}
+```
+
+Voice model: set `KOKORO_VOICE=af_nova` env var (default: `af_heart`). 53 voices available across 8 languages.
