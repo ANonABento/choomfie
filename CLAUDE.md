@@ -98,14 +98,36 @@ daemon.ts (always running)
 
 - **daemon.ts** is a thin CLI entry point; the runtime lives in `packages/core/daemon/`
 - Uses `@anthropic-ai/claude-agent-sdk` to spawn Claude Code sessions programmatically
+- **`createSession` must pass `extraArgs: { "dangerously-load-development-channels": "server:choomfie" }`.** Claude Code gates the experimental `claude/channel` capability behind an explicit opt-in list; without the flag the session loads the MCP server and all its tools, the worker boots, and the bot shows online — but every incoming Discord message, forwarded as a `notifications/claude/channel` notification, is dropped and Choomfie never answers. Foreground mode passes the same flag in `bin/choomfie`; the two must stay in sync
 - Sessions are cycled when context gets heavy (~120k tokens or 80 turns)
 - Before cycling: captures a handoff summary from Claude, persists to `meta/handoffs.json`
 - New session gets handoff context injected into system prompt
+- `/compact` and `/clear` in Discord cycle on demand — see **Daemon Control Channel** below
 - Worker health monitored via the worker's heartbeat file (`meta/worker-health.json`, rewritten every 10s) every 30s; unhealthy = stale beat (>45s) or Discord gateway not ready. 3 consecutive failures trigger a full session cycle. Falls back to a `choomfie.pid` process check when no heartbeat exists yet (worker still booting)
 - States a restart can't fix (no `DISCORD_TOKEN` configured) report as DEGRADED and are explicitly **not** cycled — otherwise the daemon would respawn sessions forever over a config problem
-- Daemon state written to `meta/daemon-state.json` for `/status` integration
+- Daemon state written to `meta/daemon-state.json` for `/status` integration. `context` reports the live `getContextUsage()` reading — the number cycling is actually compared against — alongside its threshold; `cumulativeInputTokens` is the separate ever-growing total. These were once one field named `tokens.current`, which reported the cumulative figure against the context threshold and so could never reach it
 - Sessions always run on Anthropic. Authentication/billing errors abort the retry loop immediately; rate limits and overload still retry with backoff
 - Crash recovery with exponential backoff (2s → 60s max)
+
+### Usage Reporting (`/usage`)
+
+Plan limits come from the SDK's `rate_limit_event`, normalised in `packages/core/daemon/rate-limit.ts` and persisted to `meta/daemon-state.json` as `rateLimit`.
+
+- **The payload does not match the SDK's own types.** `SDKRateLimitInfo` declares a single flat window (`utilization`, `resetsAt`, `rateLimitType`); some builds instead send an undeclared `unifiedWindows` object holding *every* window at once, with the flat fields describing only the tightest. Observed both shapes from the same CLI build — a bare `query()` sent `unifiedWindows`, the daemon's session sent only the flat fields. `parseRateLimitInfo` prefers `unifiedWindows` and falls back, and `/usage` labels the result "binding window only" when just one arrived, so a single bar is never passed off as the whole picture
+- A payload with a utilization but no `rateLimitType` and no `unifiedWindows` is **dropped**: an unlabelled percentage can't be attributed to a limit
+- `state.rateLimit` is account-level and deliberately **not** reset by `startSession` — `/usage` still answers right after a cycle. `state.modelUsage` is per-session and is reset
+- `modelUsage` and `total_cost_usd` on a result are **session-cumulative** (verified: a model's `inputTokens` climbs across results), so they are assigned, not accumulated. `usage.input_tokens` is per-turn and *is* accumulated. Getting these backwards silently double-counts
+- Set `--verbose` to dump each raw `rate_limit_event`; it is the only way to see which fields a given CLI build actually sends
+
+### Daemon Control Channel
+
+The worker sits two processes below the daemon (daemon → Agent SDK → claude CLI → supervisor → worker), so there is no IPC between them. `meta/worker-health.json` carries the worker's heartbeat up; `meta/control.json` carries requests down. Contract in `packages/shared/daemon-control.ts` (writer: core, reader: daemon), mirroring `worker-health.ts`.
+
+- `/compact` and `/clear` write a request; the daemon polls every 2s (`CONTROL_POLL_INTERVAL_MS`) and cycles
+- **Consume-once**: `consumeControlRequest` deletes the file *before* cycling, so a crash mid-cycle can't replay the request against the session that replaces it. Malformed and stale files are deleted too — left in place, an unparseable one would be re-read every poll forever
+- Requests older than `CONTROL_REQUEST_STALE_MS` (2 min) are discarded. Without it, a `/compact` issued while the daemon was down would cycle the *next* session seconds after it started
+- `/clear` is `cycleSession(..., { skipHandoff: true })` — no summary is captured, so no turn is spent on one. `handoffs.json` still records the cycle, because a session missing context you expected is exactly when you want that entry
+- The confirmation comes from the *new* session (`announceTo`), not a reply — the session that would have replied is the one being replaced
 
 ### Plugin System
 
@@ -159,15 +181,20 @@ Defined in `packages/core/lib/commands.ts`, deployed via `packages/core/scripts/
 - `/remind` — opens a modal form to set a reminder (message, time, recurring, nag)
 - `/reminders` — list active reminders with embed (ephemeral)
 - `/cancel <id>` — cancel a reminder by ID
-- `/memory [search]` — list core memories or search all memories (ephemeral)
+- `/memory [search] [forget]` — list core memories, search all memories, or delete one by key (ephemeral). `forget` autocompletes from existing core memory keys and is owner-only
 - `/savememory` — opens a modal form to save a memory (key, value)
 - `/github <check> [repo]` — check PRs, issues, notifications
-- `/status` — bot status embed with uptime, persona, stats, plugins (ephemeral)
+- `/status` — bot status embed with uptime, persona, stats, plugins; plus session/context/cycles when a daemon is supervising (ephemeral)
+- `/usage` — plan rate-limit windows, session cost, and a per-model token breakdown (daemon mode, ephemeral)
+- `/compact` — free up daemon context, keeping a handoff summary (owner only, daemon mode)
+- `/clear` — replace the daemon session with nothing carried over (owner only, daemon mode, confirm button)
+- `/allow [user]` — add a user to the allowlist, or list it when no user is given (owner only, ephemeral)
+- `/revoke <user>` — remove a user from the allowlist (owner only, ephemeral)
 - `/persona [switch]` — list or switch personas
 - `/newpersona` — opens a modal form to create a persona (key, name, personality)
 - `/plugins [action] [name]` — list, enable, or disable plugins (owner only, restart needed)
 - `/config [setting] [value]` — list settings with current values, or change one (owner only, ephemeral). `value` autocompletes from the selected setting's suggestions
-- `/model [model]` — view or change the model daemon sessions use (owner only, autocompletes)
+- `/model [model]` — view or change the model Choomfie runs on, in every mode (owner only, autocompletes)
 - `/voice` — voice provider setup wizard with auto-detection and interactive buttons (owner only)
 - `/lesson` — start or continue a structured lesson (button-driven, no Claude roundtrip)
 - `/progress` — show learning progress with unit bars and completion stats (ephemeral)
@@ -295,25 +322,30 @@ reminders: id, user_id, chat_id, message, due_at, fired, created_at,
   "plugins": [],
   "personas": { ... },
   "voice": { "stt": "auto", "tts": "auto" },
+  "model": "opus",
+  "fallbackModel": "sonnet",
   "daemon": {
     "tokenThreshold": 120000,
-    "turnThreshold": 80,
-    "model": "opus",
-    "fallbackModel": "sonnet"
+    "turnThreshold": 80
   }
 }
 ```
 
 `config.json` is the single settings source for every mode. Secrets live separately in `$CLAUDE_DATA_DIR/.env` (`DISCORD_TOKEN`, provider API keys).
 
-`daemon` configures `--daemon` mode — read at startup by `packages/core/daemon.ts` and threaded into daemon state, so `packages/core/daemon/` never has to import `lib/`. Changes take effect on the next daemon start.
+`model` / `fallbackModel` are **top level, not under `daemon`** — they are not daemon-specific. Both optional; omitted means Claude Code's own default. Accepts an alias (`opus`, `sonnet`, `haiku`) or a full model id.
 
-- `tokenThreshold` / `turnThreshold` — when to cycle the session
-- `model` / `fallbackModel` — which model daemon sessions run on. **Both optional**; omitted means the Agent SDK's own default, which is what daemon sessions used before this was configurable. Accepts an alias (`opus`, `sonnet`, `haiku`) or a full model id. Only applies to `--daemon`: foreground and `--tmux` run under the `claude` CLI and take their model from your Claude Code settings, not from here.
+Two readers, one value:
+- `--daemon` reads it in `packages/core/daemon.ts` and passes it to the Agent SDK
+- foreground and `--tmux` resolve it in `bin/choomfie` (via `packages/core/scripts/resolve-model.ts`) and pass `--model` to the `claude` CLI
+
+They used to live at `daemon.model`, which meant `/model` silently did nothing in foreground mode — you changed it, restarted, and got the old model back. `mergeConfig` migrates the old key forward and drops it, so there is only ever one place to look. `fallbackModel` still only applies to `--daemon`; the CLI has no equivalent.
+
+`daemon` now holds only the cycling thresholds — read at startup by `packages/core/daemon.ts` and threaded into daemon state, so `packages/core/daemon/` never has to import `lib/`. Changes take effect on the next daemon start.
 
 ### Changing settings
 
-`/config` (owner only) lists every adjustable setting with its current value; `/config setting:<key> value:<v>` changes one, and `value:default` restores the built-in. `/model [model]` is a shortcut for `daemon.model`, the setting changed most often — it routes through the same `Setting` object, so the two can't disagree about validation.
+`/config` (owner only) lists every adjustable setting with its current value; `/config setting:<key> value:<v>` changes one, and `value:default` restores the built-in. `/model [model]` is a shortcut for `model`, the setting changed most often — it routes through the same `Setting` object, so the two can't disagree about validation.
 
 Settings are declared once in `packages/core/lib/settings.ts` with their parser, bounds, suggestions, and when the change takes effect — add a setting there and `/config` picks it up automatically (Discord caps both the choice list and autocomplete suggestions at 25).
 
