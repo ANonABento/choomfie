@@ -33,7 +33,7 @@ export const DEFAULT_DATA_DIR_SUFFIX = ".claude/plugins/data/choomfie-inline";
  * Resolve the runtime data directory.
  *
  * Single source of truth for every entry point — supervisor, worker, daemon,
- * the OpenAI endpoint, and the scripts. Both env var names are honored, in a
+ * and the scripts. Both env var names are honored, in a
  * fixed order, so that setting either one moves *all* of them together.
  * (Previously each call site hardcoded the default and read only one of the
  * two names, so `CHOOMFIE_DATA_DIR` could point install.sh at a directory the

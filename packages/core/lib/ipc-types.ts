@@ -25,14 +25,6 @@ export interface IpcNotification {
   params: Record<string, unknown>;
 }
 
-export interface IpcOpenAINotifyResult {
-  type: "openai_notify_result";
-  id: string;
-  ok: boolean;
-  mode?: "owner_dm" | "channel";
-  error?: string;
-}
-
 export interface IpcLog {
   type: "log";
   level: "error" | "info";
@@ -50,7 +42,6 @@ export type WorkerMessage =
   | IpcReady
   | IpcToolResult
   | IpcNotification
-  | IpcOpenAINotifyResult
   | IpcLog
   | IpcRequestRestart;
 
@@ -79,20 +70,11 @@ export interface IpcRestartConfirmation {
   chat_id: string;
 }
 
-export interface IpcOpenAINotify {
-  type: "openai_notify";
-  id: string;
-  content: string;
-  app: string;
-  channel_id?: string;
-}
-
 export type SupervisorMessage =
   | IpcToolCall
   | IpcPermissionRequest
   | IpcShutdown
-  | IpcRestartConfirmation
-  | IpcOpenAINotify;
+  | IpcRestartConfirmation;
 
 // --- Shared ---
 

@@ -8,7 +8,7 @@ A personal Discord agent that runs through your [Claude Code](https://docs.anthr
 - [Requirements](#requirements) · [Install](#install)
 - [Running Choomfie](#running-choomfie) · [Discord Access](#discord-access)
 - [Usage & Commands](#usage--commands)
-- [OpenAI-Compatible Endpoint](#openai-compatible-endpoint) · [Cost & Session Controls](#cost--session-controls)
+- [Cost & Session Controls](#cost--session-controls)
 - [Architecture](#architecture) · [Plugins](#plugins)
 - [Project Structure](#project-structure) · [Troubleshooting](#troubleshooting) · [Docs](#docs)
 
@@ -93,24 +93,6 @@ In servers, `@mention` the bot or reply to its messages. In DMs, just talk.
 | `/choomfie:access` | Manage access policy and allowlist |
 | `/choomfie:memory` | View/manage memories |
 | `/choomfie:status` | Full config overview |
-
-## OpenAI-Compatible Endpoint
-
-Choomfie can expose a local OpenAI-compatible API (e.g. for a companion app):
-
-```bash
-bun packages/core/scripts/api-key.ts issue exampleapp --scopes chat,models,memory,notify
-```
-
-Point OpenAI SDK clients at:
-
-```env
-OPENAI_API_KEY=sk-choomfie-exampleapp-...
-OPENAI_BASE_URL=http://127.0.0.1:4141/v1
-OPENAI_MODEL=choomfie-claude-sonnet
-```
-
-See [docs/openai-endpoint.md](docs/openai-endpoint.md) for routes and extension endpoints; [docs/openai-endpoint-verification.md](docs/openai-endpoint-verification.md) for verification notes.
 
 ## Cost & Session Controls
 

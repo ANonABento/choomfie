@@ -20,7 +20,7 @@
 - [x] Memory stats tool (count, size, oldest/newest)
 - [x] Configurable personality via core memory (key: "personality")
 - [ ] Cross-session recall — auto-search archival when context seems relevant
-- [ ] Vector embeddings for semantic archival search
+- [x] Vector embeddings for semantic archival search — `OllamaEmbeddingProvider` + cosine similarity in `lib/memory.ts`, on by default (`CHOOMFIE_EMBEDDINGS=off` to disable). Dormant unless Ollama is installed; falls back to keyword search
 - [ ] Memory decay — auto-archive stale core memories
 
 ## Phase 3: Tools & Integration (Done)
@@ -259,7 +259,7 @@
 ## Smart Memory (Ongoing)
 
 - [ ] Cross-session recall — auto-search archival when context seems relevant
-- [ ] Vector embeddings for semantic archival search
+- [x] Vector embeddings for semantic archival search — `OllamaEmbeddingProvider` + cosine similarity in `lib/memory.ts`, on by default (`CHOOMFIE_EMBEDDINGS=off` to disable). Dormant unless Ollama is installed; falls back to keyword search
 - [ ] Memory decay — auto-archive stale core memories
 
 ## Testing & CI
@@ -273,7 +273,7 @@ are for.
 - [ ] E2E tests — spawn server, verify startup/shutdown/PID lifecycle (`boot.test.ts` and `regression/pid-guard.test.ts` cover the logic in-process; neither spawns)
 - [ ] E2E tests — MCP tool round-trips over stdio (`mcp-proxy.test.ts` duck-types the proxy; no stdio transport)
 - [ ] E2E tests — Discord message flow (test bot + test server)
-- [x] Unit tests — time (`time.test.ts`), config/settings (`settings.test.ts`, `openai-config.test.ts`), reminder timezones (`reminder-timezone.test.ts`)
+- [x] Unit tests — time (`time.test.ts`), config/settings (`settings.test.ts`), reminder timezones (`reminder-timezone.test.ts`)
 - [ ] Unit tests — memory and conversation still uncovered
 - [x] Plugin tests — tutor (12 files) and browser (`browser-url-validation.test.ts`)
 - [ ] Plugin tests — voice and socials are covered only at load/registration level (`plugins.test.ts`, `regression/plugin-load.test.ts`, `regression/tools-register.test.ts`); no behavior tests

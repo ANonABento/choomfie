@@ -18,7 +18,6 @@
  * - `voice` — `/voice`, which auto-detects providers
  * - `autoSummarize` — currently read by nothing; exposing a switch that does
  *   nothing is worse than not having one.
- * - `openaiEndpoint` — the sidecar has its own config surface.
  */
 
 import { AUTOCOMPLETE_LIMIT } from "@choomfie/shared";

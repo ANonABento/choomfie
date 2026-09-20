@@ -1,13 +1,15 @@
 /**
- * Shared core for the two Ollama embedding call sites.
+ * Endpoint/model resolution and response parsing for Ollama embeddings —
+ * POST /api/embeddings with `{ model, prompt }`, back `{ embedding: number[] }`.
  *
- * Both speak the same wire protocol — POST /api/embeddings with
- * `{ model, prompt }`, back `{ embedding: number[] }` — but they cannot share a
- * provider class: `lib/memory.ts` needs a synchronous, nullable, single-text
- * call (it sits on a sync path down from `MemoryStore.searchArchival()`), while
- * `lib/openai/embeddings.ts` needs an async batch call that throws. So the
- * endpoint/model resolution and the response parsing live here, and each side
- * keeps its own thin transport adapter.
+ * `lib/memory.ts` is the only consumer, and keeps its own transport adapter: it
+ * needs a synchronous, nullable, single-text call, because it sits on a sync
+ * path down from `MemoryStore.searchArchival()`. This file stays separate from
+ * that adapter so the wire format is testable without a MemoryStore.
+ *
+ * There was a second consumer — the OpenAI-compatible endpoint's batch
+ * embeddings route — which is why this lived under `lib/openai/` until that
+ * endpoint was removed.
  */
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:11434";

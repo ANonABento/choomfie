@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — OpenAI Endpoint Removed
+
+### Removed
+
+- **The local OpenAI-compatible endpoint, in full** — `packages/core/openai-server.ts`, `packages/core/lib/openai/`, `packages/core/scripts/api-key.ts`, the three test files, the `openaiEndpoint` config block, the supervisor's sidecar lifecycle, and the four `openai_*` IPC message types. About 4,200 lines.
+
+  It was built for one named consumer, "ExampleApp", which does not exist on any machine this repo runs on, and it shipped `enabled: false`. Two things then rotted underneath it. Its setup path stopped working: `docs/openai-endpoint.md` instructs you to run `choomfie api-key issue …` and `choomfie restart`, but the runtime consolidation reduced `bin/choomfie` to a flag-only launcher with no subcommand dispatch at all, and `api-key.ts` was wired to no npm script — so with `requireAuth: true` as the default there was no documented way to obtain a key, and an enabled endpoint would have rejected every request. And its central abstraction went vestigial: `OpenAIRoutingMode` was a union with exactly one member, because routing existed to choose between Hermes and Claude Code and Hermes was deleted in "Remove Hermes runtime, Choomfie is Claude Code-only".
+
+  It was also the one subsystem CLAUDE.md never documented, which is the real cost — a large, undescribed surface that every future reader has to reverse-engineer before they can trust the architecture guide.
+
+- The `openai` npm devDependency, which only the endpoint's SDK-compatibility tests used.
+
+### Changed
+
+- `packages/core/lib/openai/ollama-embeddings.ts` moves to `packages/core/lib/ollama-embeddings.ts`. It was only ever a memory concern that landed in the endpoint's folder because embeddings arrived with that spec; `lib/memory.ts` is its sole consumer. Semantic archival search is unaffected.
+- `mergeConfig` now drops removed keys (`REMOVED_CONFIG_KEYS`) rather than letting `Config`'s index signature wave them back through `...saved`, and `ConfigManager` rewrites `config.json` once on load when it finds one. Without both halves an existing install would carry the whole dead `openaiEndpoint` block forever.
+
 ## Unreleased — Global Commands + Adjustable Settings
 
 ### Changed

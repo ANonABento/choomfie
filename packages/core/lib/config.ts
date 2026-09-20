@@ -8,10 +8,6 @@
 
 import { readFileSync } from "node:fs";
 import { writeJsonAtomicSync, type SocialsPlatformConfig } from "@choomfie/shared";
-import {
-  resolveOpenAIEndpointConfig,
-  type OpenAIEndpointConfig,
-} from "./openai/config.ts";
 
 export interface Persona {
   name: string;
@@ -87,7 +83,6 @@ export interface Config {
   /** Model to fall back to when the primary is overloaded. Unset = no fallback. */
   fallbackModel?: string;
   daemon: DaemonConfig;
-  openaiEndpoint: OpenAIEndpointConfig;
   [key: string]: unknown;
 }
 
@@ -111,8 +106,15 @@ const DEFAULT_CONFIG: Config = {
   plugins: [],
   voice: { stt: "auto", tts: "auto", ttsSpeed: 0.7 },
   daemon: { ...DEFAULT_DAEMON_CONFIG },
-  openaiEndpoint: resolveOpenAIEndpointConfig(),
 };
+
+/**
+ * Keys that older builds wrote and nothing reads any more. `mergeConfig` drops
+ * them, and `ConfigManager` rewrites the file once when it finds one — without
+ * that, `Config`'s index signature would wave them straight back through
+ * `...saved` and config.json would carry them forever.
+ */
+const REMOVED_CONFIG_KEYS = ["openaiEndpoint"] as const;
 
 function mergeConfig(saved: Partial<Config>): Config {
   const savedPersonas =
@@ -132,14 +134,13 @@ function mergeConfig(saved: Partial<Config>): Config {
   // it can only have come from a newer build.
   const model = saved.model ?? savedDaemon.model;
   const fallbackModel = saved.fallbackModel ?? savedDaemon.fallbackModel;
-  const savedOpenAIEndpoint =
-    saved.openaiEndpoint && typeof saved.openaiEndpoint === "object"
-      ? saved.openaiEndpoint
-      : undefined;
+
+  const carried = { ...saved };
+  for (const key of REMOVED_CONFIG_KEYS) delete carried[key];
 
   return {
     ...DEFAULT_CONFIG,
-    ...saved,
+    ...carried,
     personas: {
       ...DEFAULT_CONFIG.personas,
       ...savedPersonas,
@@ -155,32 +156,32 @@ function mergeConfig(saved: Partial<Config>): Config {
       tokenThreshold: savedDaemon.tokenThreshold ?? DEFAULT_DAEMON_CONFIG.tokenThreshold,
       turnThreshold: savedDaemon.turnThreshold ?? DEFAULT_DAEMON_CONFIG.turnThreshold,
     },
-    openaiEndpoint: resolveOpenAIEndpointConfig(savedOpenAIEndpoint),
   };
 }
 
 export class ConfigManager {
   private configPath: string;
   private config: Config;
-  private migratedOnLoad = false;
+  private staleKeysOnLoad = false;
 
   constructor(dataDir: string) {
     this.configPath = `${dataDir}/config.json`;
     this.config = this.load();
 
-    // Write the migration back immediately instead of waiting for an unrelated
-    // setting change. `mergeConfig` resolves `daemon.model` in memory on every
-    // load, so without this the file keeps showing a key nothing reads — which
-    // is exactly the confusion the migration exists to end. Idempotent: the
-    // rewritten file has no legacy key, so this fires once per install.
-    if (this.migratedOnLoad) {
+    // Write the cleanup back immediately instead of waiting for an unrelated
+    // setting change. `mergeConfig` already resolves the old `daemon.model`
+    // location and drops removed keys in memory, so without this the file keeps
+    // advertising keys nothing reads — exactly the confusion the migration
+    // exists to end. Idempotent: the rewritten file has neither, so this fires
+    // once per install.
+    if (this.staleKeysOnLoad) {
       try {
         this.save();
       } catch {
         // Read-only data dir. The in-memory value is already correct, so a
         // failed cleanup write must not stop the process from booting.
       }
-      this.migratedOnLoad = false;
+      this.staleKeysOnLoad = false;
     }
   }
 
@@ -191,16 +192,18 @@ export class ConfigManager {
       const legacyDaemon = saved.daemon as
         | { model?: unknown; fallbackModel?: unknown }
         | undefined;
-      this.migratedOnLoad =
+      const hasLegacyModel =
         !!legacyDaemon &&
         (legacyDaemon.model !== undefined ||
           legacyDaemon.fallbackModel !== undefined);
+      const hasRemovedKey = REMOVED_CONFIG_KEYS.some((key) => key in saved);
+      this.staleKeysOnLoad = hasLegacyModel || hasRemovedKey;
       return mergeConfig(saved);
     } catch {
       // Unreadable or unparseable file, or a merge that threw. Fall back to
-      // defaults in memory, and clear the migration flag — saving defaults over
-      // a file we failed to understand would destroy personas and settings.
-      this.migratedOnLoad = false;
+      // defaults in memory, and clear the flag — saving defaults over a file we
+      // failed to understand would destroy personas and settings.
+      this.staleKeysOnLoad = false;
       return { ...DEFAULT_CONFIG };
     }
   }
@@ -349,12 +352,6 @@ export class ConfigManager {
       ...daemon,
     };
     this.save();
-  }
-
-  // --- OpenAI-compatible endpoint ---
-
-  getOpenAIEndpointConfig(): OpenAIEndpointConfig {
-    return resolveOpenAIEndpointConfig(this.config.openaiEndpoint);
   }
 
   // --- Full config ---
