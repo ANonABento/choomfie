@@ -21,7 +21,6 @@ export function createInitialState(settings: DaemonSettings): MetaState {
     tokenUsageToday: { date: todayKey(), inputTokens: 0 },
     totalCostUsd: 0,
     sessionStartTime: 0,
-    messageQueue: [],
     contextCheckTimer: null,
     contextCheckFailures: 0,
     restartBackoff: INITIAL_RESTART_BACKOFF,

@@ -12,10 +12,22 @@ import { describe, expect, test } from "bun:test";
 import { parseRateLimitInfo } from "../../daemon/rate-limit.ts";
 import {
   bar,
+  buildEmbed,
   colorFor,
   formatModelUsage,
   orderedWindows,
 } from "../../lib/handlers/usage-command.ts";
+import {
+  isRateLimitStale,
+  peakUtilization,
+  viewRateLimitWindows,
+} from "../../lib/daemon-status.ts";
+import {
+  buildAlertMessage,
+  decideAlert,
+  shouldNotify,
+  type AlertRecord,
+} from "../../lib/rate-limit-alerts.ts";
 
 /** Captured verbatim from a real session, including the undeclared field. */
 const REAL_EVENT = {
@@ -96,7 +108,7 @@ describe("rendering", () => {
       },
     } as never)!;
 
-    expect(orderedWindows(snapshot).map(([name]) => name)).toEqual([
+    expect(orderedWindows(snapshot).map((w) => w.name)).toEqual([
       "five_hour",
       "seven_day",
       "some_future_window",
@@ -140,5 +152,168 @@ describe("rendering", () => {
     expect(rendered.indexOf("sonnet")).toBeLessThan(rendered.indexOf("haiku"));
     expect(rendered).toContain("claude-haiku-4-5");
     expect(rendered).not.toContain("20251001");
+  });
+});
+
+/**
+ * The numbers here are the ones the live daemon was actually holding: a 97%
+ * seven-day window captured at 12:04, still being rendered at 23:00 as "97% ·
+ * resets 7 hours ago". The window had rolled over overnight; the session had
+ * simply taken no turn since, and `rate_limit_event` only arrives on a turn.
+ */
+describe("a snapshot that has stopped describing the present", () => {
+  const CAPTURED_AT = 1789905884292; // 12:04 UTC
+  const RESETS_AT = 1789920000; // 16:00 UTC
+  const NOW = 1789945222000; // 23:00 UTC — 10.9h after capture, 7h after reset
+
+  const snapshot = {
+    status: "allowed_warning",
+    windows: { seven_day: { utilization: 0.97, resetsAt: RESETS_AT } },
+    tightest: "seven_day",
+    updatedAt: CAPTURED_AT,
+  };
+
+  test("a window whose reset has passed is marked expired, not reported at 97%", () => {
+    const [week] = viewRateLimitWindows(snapshot, ["seven_day"], NOW);
+    expect(week.expired).toBe(true);
+
+    // And at 15:59, one second before the reset, it is still live.
+    const [before] = viewRateLimitWindows(snapshot, ["seven_day"], RESETS_AT * 1000 - 1000);
+    expect(before.expired).toBe(false);
+  });
+
+  test("peak utilization is null when every window has expired", () => {
+    // Not 0: "we don't know" and "plenty left" are different answers, and only
+    // one of them should keep the embed green.
+    expect(peakUtilization(viewRateLimitWindows(snapshot, [], NOW))).toBeNull();
+    expect(peakUtilization(viewRateLimitWindows(snapshot, [], CAPTURED_AT))).toBe(0.97);
+  });
+
+  test("staleness is measured from when the daemon last heard, not the reset", () => {
+    expect(isRateLimitStale(snapshot, NOW)).toBe(true);
+    expect(isRateLimitStale(snapshot, CAPTURED_AT + 60_000)).toBe(false);
+    // A snapshot with no timestamp can't be judged stale.
+    expect(isRateLimitStale({ windows: {} }, NOW)).toBe(false);
+  });
+
+  test("the embed says reset instead of drawing a full red bar", () => {
+    const rendered = JSON.stringify(buildEmbed({ rateLimit: snapshot }, NOW).toJSON());
+
+    expect(rendered).toContain("reset");
+    expect(rendered).toContain("before it rolled over");
+    // The headline claim is gone: no live percentage, and not red.
+    expect(rendered).not.toContain("**97%**");
+    expect(colorFor(snapshot, NOW)).not.toBe(0xed4245);
+    // And the reader is told why the figures stopped moving.
+    expect(rendered).toContain("stale");
+  });
+
+  test("an 11-hour-old `rejected` no longer claims you are rate limited now", () => {
+    const rejected = { ...snapshot, status: "rejected" };
+    const stale = JSON.stringify(buildEmbed({ rateLimit: rejected }, NOW).toJSON());
+    expect(stale).not.toContain("Rate limited right now");
+
+    // Fresh, it must still say so as loudly as ever.
+    const fresh = {
+      status: "rejected",
+      windows: { seven_day: { utilization: 1, resetsAt: NOW / 1000 + 3600 } },
+      updatedAt: NOW - 1000,
+    };
+    const live = JSON.stringify(buildEmbed({ rateLimit: fresh }, NOW).toJSON());
+    expect(live).toContain("Rate limited right now");
+    expect(colorFor(fresh, NOW)).toBe(0xed4245);
+  });
+});
+
+describe("owner alerts", () => {
+  const NOW = 1789945222000;
+  const soon = NOW / 1000 + 3600;
+  const view = (utilization: number, name = "seven_day") =>
+    viewRateLimitWindows(
+      { windows: { [name]: { utilization, resetsAt: soon } } },
+      [],
+      NOW,
+    );
+
+  test("warns at 90% and stays quiet below it", () => {
+    expect(decideAlert(view(0.89), "allowed_warning", false)).toBeNull();
+    expect(decideAlert(view(0.9), "allowed_warning", false)?.level).toBe("warning");
+  });
+
+  test("a refusal outranks the percentage", () => {
+    // Overage or a per-model cap can refuse at a low headline number.
+    expect(decideAlert(view(0.1), "rejected", false)?.level).toBe("rejected");
+  });
+
+  test("never fires on a stale snapshot", () => {
+    // This is the DM version of the bug above, and the one that can't be
+    // dismissed — an alert saying "you're rate limited" hours after you weren't.
+    expect(decideAlert(view(0.97), "rejected", true)).toBeNull();
+  });
+
+  test("never fires on a window that has already reset", () => {
+    const expired = viewRateLimitWindows(
+      { windows: { seven_day: { utilization: 0.97, resetsAt: NOW / 1000 - 3600 } } },
+      [],
+      NOW,
+    );
+    expect(decideAlert(expired, "allowed_warning", false)).toBeNull();
+  });
+
+  test("reports against the tightest window, not the first", () => {
+    const mixed = viewRateLimitWindows(
+      {
+        windows: {
+          five_hour: { utilization: 0.4, resetsAt: soon },
+          seven_day: { utilization: 0.95, resetsAt: soon },
+        },
+      },
+      ["five_hour", "seven_day"],
+      NOW,
+    );
+    expect(decideAlert(mixed, "allowed_warning", false)?.window.name).toBe("seven_day");
+  });
+
+  test("does not repeat itself, but does escalate", () => {
+    const warning = decideAlert(view(0.95), "allowed_warning", false)!;
+    const last: AlertRecord = { level: "warning", key: warning.key, notifiedAt: NOW };
+
+    // The worker is respawned on every session cycle — an in-memory flag would
+    // re-send this each time, which is why the record is on disk.
+    expect(shouldNotify(warning, last)).toBe(false);
+    expect(shouldNotify(warning, null)).toBe(true);
+
+    const rejected = decideAlert(view(0.99), "rejected", false)!;
+    expect(shouldNotify(rejected, last)).toBe(true);
+    // But not twice.
+    expect(shouldNotify(rejected, { ...last, level: "rejected" })).toBe(false);
+  });
+
+  test("a rolled-over window earns a fresh alert", () => {
+    // Same window name, new period: the key carries resetsAt precisely so next
+    // week's 95% isn't deduped against last week's.
+    const lastWeek = decideAlert(view(0.95), "allowed_warning", false)!;
+    const nextWeek = viewRateLimitWindows(
+      { windows: { seven_day: { utilization: 0.95, resetsAt: soon + 604_800 } } },
+      [],
+      NOW,
+    );
+    const decision = decideAlert(nextWeek, "allowed_warning", false)!;
+    expect(decision.key).not.toBe(lastWeek.key);
+    expect(
+      shouldNotify(decision, { level: "warning", key: lastWeek.key, notifiedAt: NOW }),
+    ).toBe(true);
+  });
+
+  test("the message names the window, the number, and what it means for you", () => {
+    const [window] = view(0.94);
+    const warning = buildAlertMessage("warning", window);
+    expect(warning).toContain("Weekly");
+    expect(warning).toContain("94%");
+    expect(warning).toContain(`<t:${Math.floor(soon)}:R>`);
+
+    const rejected = buildAlertMessage("rejected", window);
+    // The one thing the owner needs to know that /usage can't tell them.
+    expect(rejected).toContain("won't be queued");
   });
 });

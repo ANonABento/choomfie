@@ -17,10 +17,14 @@ import {
 import { registerCommand } from "../register.ts";
 import {
   isDaemonMode,
+  isRateLimitStale,
+  peakUtilization,
   readDaemonStatus,
+  viewRateLimitWindows,
   type DaemonSnapshot,
   type ModelUsageSnapshot,
   type RateLimitSnapshot,
+  type RateLimitWindowView,
 } from "../daemon-status.ts";
 import type { AppContext } from "../types.ts";
 
@@ -51,26 +55,30 @@ function windowLabel(name: string): string {
   return WINDOW_LABELS[name] ?? name.replace(/_/g, " ");
 }
 
-function orderedWindows(rateLimit: RateLimitSnapshot): Array<[string, number, number | null]> {
-  const entries = Object.entries(rateLimit.windows ?? {});
-  const rank = (name: string) => {
-    const index = WINDOW_ORDER.indexOf(name);
-    return index === -1 ? WINDOW_ORDER.length : index;
-  };
-  return entries
-    .filter(([, w]) => typeof w.utilization === "number")
-    .sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]))
-    .map(([name, w]) => [name, w.utilization!, w.resetsAt ?? null]);
+function orderedWindows(
+  rateLimit: RateLimitSnapshot,
+  now: number = Date.now(),
+): RateLimitWindowView[] {
+  return viewRateLimitWindows(rateLimit, WINDOW_ORDER, now);
 }
 
-/** Green under 60%, amber under 85%, red above — matched to the status text. */
-function colorFor(rateLimit: RateLimitSnapshot | null | undefined): number {
+/**
+ * Green under 60%, amber under 85%, red above — matched to the status text.
+ *
+ * Expired windows are excluded via `peakUtilization`: colouring the embed red
+ * over a percentage from a window that has already rolled over is the same lie
+ * the bars used to tell.
+ */
+function colorFor(
+  rateLimit: RateLimitSnapshot | null | undefined,
+  now: number = Date.now(),
+): number {
   if (!rateLimit) return 0x5865f2;
-  if (rateLimit.status === "rejected") return 0xed4245;
-  const peak = Math.max(
-    0,
-    ...Object.values(rateLimit.windows ?? {}).map((w) => w.utilization ?? 0),
-  );
+  if (rateLimit.status === "rejected" && !isRateLimitStale(rateLimit, now)) {
+    return 0xed4245;
+  }
+  const peak = peakUtilization(orderedWindows(rateLimit, now));
+  if (peak === null) return 0x5865f2;
   if (peak >= 0.85) return 0xed4245;
   if (peak >= 0.6) return 0xfee75c;
   return 0x57f287;
@@ -99,20 +107,32 @@ function formatModelUsage(modelUsage: Record<string, ModelUsageSnapshot>): strin
     .join("\n");
 }
 
-function buildEmbed(daemon: DaemonSnapshot): EmbedBuilder {
+function buildEmbed(daemon: DaemonSnapshot, now: number = Date.now()): EmbedBuilder {
   const rateLimit = daemon.rateLimit ?? null;
   const embed = new EmbedBuilder()
-    .setColor(colorFor(rateLimit))
+    .setColor(colorFor(rateLimit, now))
     .setTitle("Usage");
 
   if (rateLimit && Object.keys(rateLimit.windows ?? {}).length > 0) {
-    const lines = orderedWindows(rateLimit).map(([name, utilization, resetsAt]) => {
+    const windows = orderedWindows(rateLimit, now);
+    const stale = isRateLimitStale(rateLimit, now);
+    const lines = windows.map((w) => {
       // resetsAt is unix *seconds* from the SDK — Discord's <t:> wants the same,
       // so it passes through unscaled.
-      const resets = resetsAt ? ` · resets <t:${Math.floor(resetsAt)}:R>` : "";
+      const stamp = w.resetsAt ? `<t:${Math.floor(w.resetsAt)}:R>` : null;
+      if (w.expired) {
+        // The percentage belongs to a window that has already rolled over.
+        // Rendering it as a live figure is how this showed "97% · resets 7
+        // hours ago" — a full bar for a limit that had reset overnight.
+        return (
+          `${windowLabel(w.name)} — **reset**${stamp ? ` ${stamp}` : ""}\n` +
+          `\`${bar(0)}\` -# was ${(w.utilization * 100).toFixed(0)}% before it rolled over`
+        );
+      }
       return (
-        `${windowLabel(name)} — **${(utilization * 100).toFixed(0)}%**${resets}\n` +
-        `\`${bar(utilization)}\``
+        `${windowLabel(w.name)} — **${(w.utilization * 100).toFixed(0)}%**` +
+        `${stamp ? ` · resets ${stamp}` : ""}\n` +
+        `\`${bar(w.utilization)}\``
       );
     });
     // Some CLI builds send every window (`unifiedWindows`), others only the
@@ -120,19 +140,34 @@ function buildEmbed(daemon: DaemonSnapshot): EmbedBuilder {
     // is your whole usage picture", which it isn't.
     const partial =
       Object.keys(rateLimit.windows ?? {}).length === 1 && rateLimit.tightest;
+    const notes: string[] = [];
+    if (partial) {
+      notes.push(
+        "-# Only the limit you're closest to was reported. Others aren't visible from here.",
+      );
+    }
+    if (stale) {
+      // The daemon learns its utilization from a per-turn event, so an idle
+      // session's numbers simply stop moving. Saying when they were last true
+      // matters more than the numbers themselves.
+      notes.push(
+        `-# Last updated <t:${Math.floor(rateLimit.updatedAt! / 1000)}:R> — ` +
+          "the daemon only hears about limits when it takes a turn, so an idle " +
+          "session's figures go stale. Send a message to refresh.",
+      );
+    }
     embed.addFields({
       name: partial ? "Plan limits (binding window only)" : "Plan limits",
-      value:
-        lines.join("\n") +
-        (partial
-          ? "\n-# Only the limit you're closest to was reported. Others aren't visible from here."
-          : ""),
+      value: [lines.join("\n"), ...notes].join("\n"),
       inline: false,
     });
 
-    if (rateLimit.status === "rejected") {
+    // A status is only worth announcing while the snapshot it came from still
+    // describes the present — "rate limited right now" from an 11-hour-old
+    // event is exactly the claim that sent people looking at this command.
+    if (!stale && rateLimit.status === "rejected") {
       embed.setDescription("**Rate limited right now** — requests are being refused until the window resets.");
-    } else if (rateLimit.status === "allowed_warning") {
+    } else if (!stale && rateLimit.status === "allowed_warning") {
       embed.setDescription("Approaching a limit. Still working, but worth pacing.");
     }
 

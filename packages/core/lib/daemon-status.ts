@@ -70,6 +70,78 @@ function daemonPidPath(dataDir: string): string {
 }
 
 /**
+ * How old a rate-limit snapshot may be before it stops being evidence.
+ *
+ * The daemon only learns its utilization from a `rate_limit_event`, which the
+ * SDK sends on a turn. An idle session takes no turns, so the snapshot ages:
+ * observed 10.9h old on a session that had handled 4 messages overnight. Past
+ * this, the numbers describe a window that may have rolled over since.
+ */
+export const RATE_LIMIT_STALE_MS = 30 * 60 * 1000;
+
+/** One window, read with its reset time taken into account. */
+export interface RateLimitWindowView {
+  name: string;
+  utilization: number;
+  resetsAt: number | null;
+  /**
+   * The reset time has passed, so `utilization` describes the *previous*
+   * window. Reported at 97% with a reset two hours gone, the plain number reads
+   * as "still nearly out" when the true answer is "reset, and unknown until the
+   * next turn".
+   */
+  expired: boolean;
+}
+
+/**
+ * Windows in a fixed order, each tagged with whether its reset has passed.
+ *
+ * `resetsAt` is unix *seconds* from the SDK; `now` is ms, so the comparison
+ * scales it rather than the other way round — Discord's `<t:>` wants the
+ * seconds back unscaled.
+ */
+export function viewRateLimitWindows(
+  rateLimit: RateLimitSnapshot | null | undefined,
+  order: readonly string[] = [],
+  now: number = Date.now(),
+): RateLimitWindowView[] {
+  const entries = Object.entries(rateLimit?.windows ?? {});
+  const rank = (name: string) => {
+    const index = order.indexOf(name);
+    return index === -1 ? order.length : index;
+  };
+  return entries
+    .filter(([, w]) => typeof w.utilization === "number")
+    .sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]))
+    .map(([name, w]) => ({
+      name,
+      utilization: w.utilization!,
+      resetsAt: w.resetsAt ?? null,
+      expired: w.resetsAt != null && w.resetsAt * 1000 <= now,
+    }));
+}
+
+/** True when the snapshot is too old to describe the present. */
+export function isRateLimitStale(
+  rateLimit: RateLimitSnapshot | null | undefined,
+  now: number = Date.now(),
+): boolean {
+  if (!rateLimit?.updatedAt) return false;
+  return now - rateLimit.updatedAt > RATE_LIMIT_STALE_MS;
+}
+
+/**
+ * Highest utilization across windows that still describe the current period.
+ * Returns null when every window has expired — "we don't know" rather than 0,
+ * which would read as "plenty left".
+ */
+export function peakUtilization(views: RateLimitWindowView[]): number | null {
+  const live = views.filter((w) => !w.expired);
+  if (live.length === 0) return null;
+  return Math.max(...live.map((w) => w.utilization));
+}
+
+/**
  * The daemon's current state, or null when Choomfie is running in foreground
  * mode.
  *

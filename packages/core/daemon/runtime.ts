@@ -98,14 +98,12 @@ export async function startSession(
   startWorkerHealthMonitor(state);
   startControlMonitor(state);
 
-  if (state.messageQueue.length > 0) {
-    log(`Replaying ${state.messageQueue.length} queued messages`);
-    for (const msg of state.messageQueue) {
-      push(msg);
-    }
-    state.messageQueue = [];
-  }
-
+  // There was a `messageQueue` replayed here, but nothing ever pushed to it:
+  // Discord messages reach the session through MCP, not the daemon, so the
+  // daemon has nothing to buffer. It read as a feature — "messages sent while
+  // the session is down are replayed" — that could never fire. Messages sent
+  // during a cycle are genuinely lost, and the honest place to say so is the
+  // rate-limit DM, not a queue that is always empty.
   state.restartBackoff = INITIAL_RESTART_BACKOFF;
 
   // A cycle someone asked for gets reported back where they asked, and says

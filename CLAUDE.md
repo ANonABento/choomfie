@@ -4,73 +4,43 @@
 
 Choomfie is a Claude Code plugin — an MCP server that bridges Discord to Claude Code with persistent memory, switchable personas, reminders, Discord interactions (buttons/slash commands/modals), GitHub integration, and more. It runs as a subprocess inside Claude Code via `--plugin-dir`. Version is defined in root `package.json` and read via `packages/shared/version.ts`.
 
-## Tech Stack
+**Runtime:** Bun · **Language:** TypeScript · **Protocol:** MCP over stdio · **DB:** SQLite via bun:sqlite · **Discord:** discord.js v14 · **Framework:** @modelcontextprotocol/sdk
 
-- **Runtime:** Bun
-- **Language:** TypeScript
-- **Protocol:** MCP (Model Context Protocol) over stdio
-- **Database:** SQLite via bun:sqlite
-- **Discord:** discord.js v14
-- **Framework:** @modelcontextprotocol/sdk
+## Reference Docs
+
+This file holds the architecture and the rules that constrain changes. Inventories and walkthroughs live in `docs/` — read them when you need them rather than assuming:
+
+| Doc | What's in it |
+|---|---|
+| [docs/tools.md](docs/tools.md) | Every MCP tool by name; embeds, polls, reminder system |
+| [docs/commands.md](docs/commands.md) | Slash commands, modals, interaction dispatch, shared handler utils |
+| [docs/configuration.md](docs/configuration.md) | `config.json` shape, every adjustable setting, `/config` and `/model` |
+| [docs/daemon.md](docs/daemon.md) | Daemon mode, `/usage` reporting, the control channel |
+| [docs/architecture.md](docs/architecture.md), [docs/supervisor-architecture.md](docs/supervisor-architecture.md) | Full supervisor/worker design |
+| [docs/voice-plugin.md](docs/voice-plugin.md) | Voice providers, audio pipeline, setup |
+| [docs/plugin-api.md](docs/plugin-api.md), [docs/plugins.md](docs/plugins.md) | Writing plugins |
+| [docs/testing.md](docs/testing.md), [docs/roadmap.md](docs/roadmap.md) | Test strategy, what's done and what isn't |
 
 ## Project Structure
 
 ```
-package.json                       # Root: bun workspaces, scripts, dev deps
 packages/
-  shared/                          # @choomfie/shared — types + utils
-    package.json
-    index.ts                       # Re-exports everything
-    types.ts                       # Plugin, ToolDef, ToolResult, text(), err()
-    plugin-context.ts              # PluginContext, PluginConfig (minimal subset of AppContext)
-    time.ts                        # nowUTC, toSQLiteDatetime, dateToSQLite, parseNaturalTime
-    paths.ts                       # findMonorepoRoot() — resilient project root resolution
-    interactions.ts                # Registries + register functions ONLY (no dispatch)
-    worker-health.ts               # Worker heartbeat contract (writer: core, reader: daemon)
-    pid-utils.ts                   # PID files + Choomfie process identification
-    atomic-file.ts                 # Crash-safe writes (temp + rename)
-    version.ts                     # VERSION
-  core/                            # @choomfie/core — Discord bridge, memory, etc.
-    package.json
-    supervisor.ts, worker.ts, daemon.ts
-    daemon/                         # Agent SDK session runtime, handoffs, health checks
-    lib/
-      types.ts                     # AppContext (extends PluginContext), re-exports shared
-      interactions.ts              # handleInteraction() + safeHandle() + registerAllHandlers()
-      register.ts                  # AppContext-typed register wrappers (handlers import this)
-      heartbeat.ts                 # Writes meta/worker-health.json for the daemon
-      config.ts, memory.ts, reminders.ts, discord.ts, context.ts, ...
-      plugins.ts                   # Plugin loader (explicit workspace package map)
-      tools/, handlers/
-    test/
-    scripts/, skills/, bin/
-plugins/                           # Optional, enable/disable from Discord
-  voice/                           # @choomfie/voice
-    package.json
-    index.ts                       # Plugin export (for Choomfie)
-    manager.ts, tools.ts, vad.ts, ...
-    providers/
-  browser/                         # @choomfie/browser
-    package.json
-    index.ts                       # Plugin export
-    session.ts, tools.ts
-  tutor/                           # @choomfie/tutor
-    package.json
-    index.ts                       # Plugin export
-    core/, tools/, modules/
-  socials/                         # @choomfie/socials
-    package.json
-    index.ts                       # Plugin export
-    tools/, providers/
-docs/
-.claude-plugin/
-.mcp.json
-CLAUDE.md, README.md, LICENSE
+  shared/      # @choomfie/shared — types, time utils, paths, atomic writes,
+               #   interaction registries, worker-health + daemon-control contracts
+  core/        # @choomfie/core — supervisor.ts, worker.ts, daemon.ts
+    daemon/    #   Agent SDK session runtime, handoffs, rate limits, health checks
+    lib/       #   types.ts (AppContext), config, memory, reminders, discord,
+               #   interactions.ts (dispatch), register.ts (typed wrappers),
+               #   plugins.ts (explicit workspace package map), tools/, handlers/
+    test/, scripts/, skills/, bin/
+plugins/       # voice, browser, tutor, socials — workspace packages, each an
+               #   index.ts exporting a Plugin
+docs/, .claude-plugin/, .mcp.json
 ```
 
 ## Architecture
 
-**Supervisor/Worker model** — see [docs/architecture.md](docs/architecture.md) and [docs/supervisor-architecture.md](docs/supervisor-architecture.md) for full details.
+**Supervisor/Worker model:**
 
 ```
 Claude Code ← MCP stdio → supervisor.ts (immortal)
@@ -78,17 +48,24 @@ Claude Code ← MCP stdio → supervisor.ts (immortal)
                           worker.ts (disposable)
 ```
 
-- **Supervisor** owns MCP server + restart tool. Never restarts — MCP connection stays alive.
+- **Supervisor** owns the MCP server + `restart` tool. Never restarts — the MCP connection stays alive.
 - **Worker** owns Discord + plugins + tools. Killed and respawned on restart (fresh code, clean state).
-- IPC: tool calls routed supervisor → worker, notifications forwarded worker → supervisor → Claude.
-- `McpProxy` in worker duck-types the MCP Server interface so discord.ts/permissions.ts/plugins work unchanged.
+- IPC: tool calls routed supervisor → worker; notifications forwarded worker → supervisor → Claude.
+- `McpProxy` in the worker duck-types the MCP Server interface so discord.ts/permissions.ts/plugins work unchanged.
 
-Shared state flows through a single `AppContext` object (defined in `packages/core/lib/types.ts`, extends `PluginContext` from `@choomfie/shared`).
-Tools colocate their JSON schema definition + handler in one file as `ToolDef[]` arrays.
+Shared state flows through a single `AppContext` (`packages/core/lib/types.ts`, extends `PluginContext` from `@choomfie/shared`). Tools colocate their JSON schema definition + handler in one file as `ToolDef[]` arrays.
+
+**Boot:** Claude Code loads the plugin and spawns `supervisor.ts` → supervisor acquires the PID file and spawns `worker.ts` via `Bun.spawn({ ipc })` → worker builds AppContext, calls `registerAllHandlers()`, loads plugins, connects Discord, starts its heartbeat → worker sends `{ type: "ready", tools, instructions }` → supervisor creates the MCP server with real instructions + tools and connects stdio → Claude Code calls `initialize` and gets the correct persona, security rules and tool list.
+
+**Steady state:** Discord message → worker → IPC notification → supervisor → MCP → Claude Code. Tool call → supervisor → IPC `tool_call` → worker → handler → IPC `tool_result` → supervisor → Claude.
+
+**Restart:** supervisor sends shutdown to worker → worker cleans up and exits → supervisor spawns a fresh worker → sends `tools/list_changed`.
+
+**Crash recovery:** supervisor detects a non-zero worker exit and auto-respawns with exponential backoff, giving up after **5 crashes in 60s**.
+
+**Shutdown** (SIGINT/SIGTERM/stdin close): supervisor tells the worker to shut down → cleans up the PID file → exits.
 
 ### Daemon Mode (`choomfie --daemon`)
-
-Autonomous mode — see [docs/architecture.md](docs/architecture.md) and [docs/architecture-v2.md](docs/architecture-v2.md) for full design.
 
 ```
 daemon.ts (always running)
@@ -96,311 +73,81 @@ daemon.ts (always running)
        └→ supervisor.ts (MCP stdio) → worker.ts (Discord)
 ```
 
-- **daemon.ts** is a thin CLI entry point; the runtime lives in `packages/core/daemon/`
-- Uses `@anthropic-ai/claude-agent-sdk` to spawn Claude Code sessions programmatically
-- **`createSession` must pass `extraArgs: { "dangerously-load-development-channels": "server:choomfie" }`.** Claude Code gates the experimental `claude/channel` capability behind an explicit opt-in list; without the flag the session loads the MCP server and all its tools, the worker boots, and the bot shows online — but every incoming Discord message, forwarded as a `notifications/claude/channel` notification, is dropped and Choomfie never answers. Foreground mode passes the same flag in `bin/choomfie`; the two must stay in sync
-- Sessions are cycled when context gets heavy (~120k tokens or 80 turns)
-- Before cycling: captures a handoff summary from Claude, persists to `meta/handoffs.json`
-- New session gets handoff context injected into system prompt
-- `/compact` and `/clear` in Discord cycle on demand — see **Daemon Control Channel** below
-- Worker health monitored via the worker's heartbeat file (`meta/worker-health.json`, rewritten every 10s) every 30s; unhealthy = stale beat (>45s) or Discord gateway not ready. 3 consecutive failures trigger a full session cycle. Falls back to a `choomfie.pid` process check when no heartbeat exists yet (worker still booting)
-- States a restart can't fix (no `DISCORD_TOKEN` configured) report as DEGRADED and are explicitly **not** cycled — otherwise the daemon would respawn sessions forever over a config problem
-- Daemon state written to `meta/daemon-state.json` for `/status` integration. `context` reports the live `getContextUsage()` reading — the number cycling is actually compared against — alongside its threshold; `cumulativeInputTokens` is the separate ever-growing total. These were once one field named `tokens.current`, which reported the cumulative figure against the context threshold and so could never reach it
-- Sessions always run on Anthropic. Authentication/billing errors abort the retry loop immediately; rate limits and overload still retry with backoff
-- Crash recovery with exponential backoff (2s → 60s max)
+`daemon.ts` is a thin CLI entry point; the runtime lives in `packages/core/daemon/`. Sessions are cycled when context gets heavy (~120k tokens or 80 turns), capturing a handoff summary first. Full detail in [docs/daemon.md](docs/daemon.md).
 
-### Usage Reporting (`/usage`)
-
-Plan limits come from the SDK's `rate_limit_event`, normalised in `packages/core/daemon/rate-limit.ts` and persisted to `meta/daemon-state.json` as `rateLimit`.
-
-- **The payload does not match the SDK's own types.** `SDKRateLimitInfo` declares a single flat window (`utilization`, `resetsAt`, `rateLimitType`); some builds instead send an undeclared `unifiedWindows` object holding *every* window at once, with the flat fields describing only the tightest. Observed both shapes from the same CLI build — a bare `query()` sent `unifiedWindows`, the daemon's session sent only the flat fields. `parseRateLimitInfo` prefers `unifiedWindows` and falls back, and `/usage` labels the result "binding window only" when just one arrived, so a single bar is never passed off as the whole picture
-- A payload with a utilization but no `rateLimitType` and no `unifiedWindows` is **dropped**: an unlabelled percentage can't be attributed to a limit
-- `state.rateLimit` is account-level and deliberately **not** reset by `startSession` — `/usage` still answers right after a cycle. `state.modelUsage` is per-session and is reset
-- `modelUsage` and `total_cost_usd` on a result are **session-cumulative** (verified: a model's `inputTokens` climbs across results), so they are assigned, not accumulated. `usage.input_tokens` is per-turn and *is* accumulated. Getting these backwards silently double-counts
-- Set `--verbose` to dump each raw `rate_limit_event`; it is the only way to see which fields a given CLI build actually sends
-
-### Daemon Control Channel
-
-The worker sits two processes below the daemon (daemon → Agent SDK → claude CLI → supervisor → worker), so there is no IPC between them. `meta/worker-health.json` carries the worker's heartbeat up; `meta/control.json` carries requests down. Contract in `packages/shared/daemon-control.ts` (writer: core, reader: daemon), mirroring `worker-health.ts`.
-
-- `/compact` and `/clear` write a request; the daemon polls every 2s (`CONTROL_POLL_INTERVAL_MS`) and cycles
-- **Consume-once**: `consumeControlRequest` deletes the file *before* cycling, so a crash mid-cycle can't replay the request against the session that replaces it. Malformed and stale files are deleted too — left in place, an unparseable one would be re-read every poll forever
-- Requests older than `CONTROL_REQUEST_STALE_MS` (2 min) are discarded. Without it, a `/compact` issued while the daemon was down would cycle the *next* session seconds after it started
-- `/clear` is `cycleSession(..., { skipHandoff: true })` — no summary is captured, so no turn is spent on one. `handoffs.json` still records the cycle, because a session missing context you expected is exactly when you want that entry
-- The confirmation comes from the *new* session (`announceTo`), not a reply — the session that would have replied is the one being replaced
+**`createSession` must pass `extraArgs: { "dangerously-load-development-channels": "server:choomfie" }`.** Claude Code gates the experimental `claude/channel` capability behind an explicit opt-in list; without the flag the session loads the MCP server and all its tools, the worker boots, and the bot shows online — but every incoming Discord message, forwarded as a `notifications/claude/channel` notification, is dropped and Choomfie never answers. Foreground mode passes the same flag in `bin/choomfie`; **the two must stay in sync.**
 
 ### Plugin System
 
-Plugins live in `plugins/<name>/index.ts` as workspace packages and export a `Plugin` interface:
-- `tools` — ToolDef[] (auto-registered into MCP)
-- `instructions` — string[] (appended to system prompt)
-- `intents` — extra Discord gateway intents
-- `userTools` — plugin tool names allowed for non-owner users
-- `init(ctx)` — called after Discord ready
-- `onMessage(msg, ctx)` — hook into every message
-- `onInteraction(interaction, ctx)` — hook into every interaction (buttons/commands/modals)
-- `destroy()` — cleanup on shutdown
+Plugins live in `plugins/<name>/index.ts` as workspace packages and export a `Plugin`: `tools` (ToolDef[]), `instructions` (string[], appended to the system prompt), `intents`, `userTools`, `init(ctx)`, `onMessage(msg, ctx)`, `onInteraction(interaction, ctx)`, `destroy()`.
 
-Plugins are workspace packages (`@choomfie/voice`, `@choomfie/browser`, `@choomfie/tutor`, `@choomfie/socials`) that import shared types from `@choomfie/shared` instead of relative `../../lib/` paths. The plugin loader in `packages/core/lib/plugins.ts` uses an explicit workspace package map, and `discoverPlugins()` returns the names from that map.
+They import shared types from `@choomfie/shared`, never relative `../../lib/` paths. The loader (`packages/core/lib/plugins.ts`) uses an explicit workspace package map; `discoverPlugins()` returns the names from that map. Plugin tool names are collision-checked during load — a plugin with a duplicate name is skipped before registration.
 
-Enable plugins via `/plugins` command from Discord, or in `config.json`: `"plugins": ["voice", "socials"]`
+Enable via `/plugins` from Discord, or `"plugins": ["voice", "socials"]` in config.json.
 
-## How It Works
+## Rules That Bite
 
-1. Claude Code loads Choomfie via `--plugin-dir` and `--dangerously-load-development-channels server:choomfie`, then spawns `bun packages/core/supervisor.ts` as an MCP subprocess (via `bun run start`)
-2. `supervisor.ts` acquires the PID file (single-instance guard) and spawns `worker.ts` via `Bun.spawn({ ipc })` (all in `packages/core/`)
-3. Worker creates AppContext, calls `registerAllHandlers()` (built-in buttons/modals/slash commands), loads enabled plugins (from `plugins/` workspace packages), connects to Discord, waits for full initialization, then starts publishing its heartbeat
-4. Worker sends `{ type: "ready", tools, instructions }` to supervisor via IPC
-5. Supervisor creates MCP server with real instructions + tools, connects stdio transport
-6. Claude Code calls `initialize` → gets correct persona, security rules, and full tool list
-7. Incoming Discord messages → worker → IPC notification → supervisor → MCP → Claude Code
-8. Claude calls MCP tools → supervisor → IPC tool_call → worker → handler → IPC tool_result → supervisor → Claude
-9. Restart: supervisor sends shutdown to worker → worker cleans up + exits → supervisor spawns fresh worker → sends `tools/list_changed` notification
-10. Crash recovery: supervisor detects non-zero worker exit → auto-respawns with exponential backoff (max 5 crashes/60s)
-11. On shutdown (SIGINT/SIGTERM/stdin close): supervisor tells worker to shutdown → cleans up PID file → exits
+Shapes and constraints that don't announce themselves. Getting one wrong compiles, or fails somewhere far away.
 
-### Interaction System
+**Object shapes**
+- `ToolDef` is `{ definition: { name, description, inputSchema }, handler }`. The name is at `t.definition.name`, **not** `t.name`.
+- `CommandDef` is `{ data: RESTPostAPIChatInputApplicationCommandsJSONBody, handler, autocomplete? }`. The field is `data`, **not** `definition`.
 
-Discord interactions (buttons, slash commands, modals) use a split architecture:
-- **Registries** (`registerButtonHandler()`, `registerModalHandler()`, `registerCommand()`) live in `@choomfie/shared` (`packages/shared/interactions.ts`) so plugins can self-register without importing core
-- **AppContext-typed register wrappers** live in `packages/core/lib/register.ts` — handler modules import from here, never from `interactions.ts`. Keeping them separate is what prevents the import cycle (handlers need `registerX` at import time; the router needs the handlers)
-- **Dispatch logic** (`handleInteraction()`, `safeHandle()`) lives in `packages/core/lib/interactions.ts`. Importing it has no side effects — call `registerAllHandlers()` once at boot (done in `worker.ts` and `scripts/deploy-commands.ts`) to load the built-in handlers, which self-register on import
-- **InteractionCreate** event registered in `packages/core/lib/discord.ts`, routes to `handleInteraction()`
-- Plugin hook: `onInteraction?(interaction, ctx)` in the Plugin interface
-- Button customId format: `prefix:action:data` (e.g. `reminder:ack:42`, `reminder:snooze:42:1h`)
-- Error handling via `safeHandle()` wrapper — catches errors + replies gracefully
-- **Autocomplete is the exception to `safeHandle()`.** A `CommandDef` may carry an optional `autocomplete` handler, routed *before* the chat-input branch. An AutocompleteInteraction has no `reply()`/`editReply()`, only `respond()`, so putting it through `safeHandle()` would throw inside the error handler. Its own catch responds with an empty list instead — a suggester that throws silently must not leave the user on a spinner that never resolves. Suggesters get 3 seconds and one response, so they must be synchronous work over in-memory data, never a network call
-- All interactions bypass Claude — handled directly for instant response (<100ms vs ~5s)
-- Key constraint: Discord requires response within 3 seconds; use `deferReply()` for async work
-- Slash command definitions in `packages/core/lib/commands.ts`, deployed via `bun packages/core/scripts/deploy-commands.ts`
-- Access control: `/persona switch`, `/newpersona`, `/savememory` are owner-only via `requireOwner()`
+**Interaction system** (full detail in [docs/commands.md](docs/commands.md))
+- Registries (`registerButtonHandler`, `registerModalHandler`, `registerCommand`) live in `@choomfie/shared` so plugins can self-register without importing core.
+- **AppContext-typed wrappers live in `packages/core/lib/register.ts` — handler modules import from there, never from `interactions.ts`.** Keeping them separate is what prevents the import cycle: handlers need `registerX` at import time, and the router needs the handlers.
+- Dispatch (`handleInteraction`, `safeHandle`) lives in `lib/interactions.ts` and has no import side effects. Call `registerAllHandlers()` once at boot — done in `worker.ts` and `scripts/deploy-commands.ts`.
+- **Autocomplete is the exception to `safeHandle()`.** An AutocompleteInteraction has no `reply()`/`editReply()`, only `respond()`, so routing it through `safeHandle` throws inside the error handler. Its own catch responds with an empty list. Suggesters get 3 seconds and one response: synchronous work over in-memory data, never a network call.
+- Discord requires a response within 3 seconds — `deferReply()` for async work. `showModal()` must be the first response to an interaction (cannot defer first).
 
-### Slash Commands
+**Slash command deployment**
+- Commands deploy **globally**. Guild-scoped deployment is deliberately not used: Discord keeps the two scopes as separate lists and a guild command *shadows* a global one of the same name, so a leftover guild copy silently pins that guild to a stale definition. Every global deploy therefore also calls `clearGuildCommands()`.
+- Auto-deploys on startup when the definition hash changes (the hash is prefixed with the scope, so switching scope self-migrates). `--guild=<id>` is a dev-only escape hatch; it shadows global in that guild until you run `--clear-guilds`.
+- Trade-off: a newly added or renamed global command can take up to an hour to appear. Edits to an existing command's description or options are usually immediate.
 
-Defined in `packages/core/lib/commands.ts`, deployed via `packages/core/scripts/deploy-commands.ts`:
-- `/remind` — opens a modal form to set a reminder (message, time, recurring, nag)
-- `/reminders` — list active reminders with embed (ephemeral)
-- `/cancel <id>` — cancel a reminder by ID
-- `/memory [search] [forget]` — list core memories, search all memories, or delete one by key (ephemeral). `forget` autocompletes from existing core memory keys and is owner-only
-- `/savememory` — opens a modal form to save a memory (key, value)
-- `/github <check> [repo]` — check PRs, issues, notifications
-- `/status` — bot status embed with uptime, persona, stats, plugins; plus session/context/cycles when a daemon is supervising (ephemeral)
-- `/usage` — plan rate-limit windows, session cost, and a per-model token breakdown (daemon mode, ephemeral)
-- `/compact` — free up daemon context, keeping a handoff summary (owner only, daemon mode)
-- `/clear` — replace the daemon session with nothing carried over (owner only, daemon mode, confirm button)
-- `/allow [user]` — add a user to the allowlist, or list it when no user is given (owner only, ephemeral)
-- `/revoke <user>` — remove a user from the allowlist (owner only, ephemeral)
-- `/persona [switch]` — list or switch personas
-- `/newpersona` — opens a modal form to create a persona (key, name, personality)
-- `/plugins [action] [name]` — list, enable, or disable plugins (owner only, restart needed)
-- `/config [setting] [value]` — list settings with current values, or change one (owner only, ephemeral). `value` autocompletes from the selected setting's suggestions
-- `/model [model]` — view or change the model Choomfie runs on, in every mode (owner only, autocompletes)
-- `/voice` — voice provider setup wizard with auto-detection and interactive buttons (owner only)
-- `/lesson` — start or continue a structured lesson (button-driven, no Claude roundtrip)
-- `/progress` — show learning progress with unit bars and completion stats (ephemeral)
-- `/help` — show all commands and capabilities
+**State on disk**
+- All JSON state (`config.json`, `access.json`, `meta/*.json`) is written atomically via `writeJsonAtomic` / `writeJsonAtomicSync` from `@choomfie/shared` — temp file + `rename(2)`. Never write these with a bare `writeFile`; a crash mid-write truncates them.
+- **All SQLite datetimes use space-separated format (`YYYY-MM-DD HH:MM:SS`), never ISO 8601 with `T`/`Z`.** Use `@choomfie/shared` time utilities (`toSQLiteDatetime`, `dateToSQLite`, `nowUTC`).
+- Single instance enforced via `choomfie.pid` (supervisor) and `meta/meta.pid` (daemon). Re-running `choomfie` replaces a stale foreground instance, but **refuses** when a daemon is supervising one — the daemon's own supervisor is exempt via `CHOOMFIE_DAEMON_PID`. Process identity comes from `@choomfie/shared`'s `pid-utils.ts`, not ad-hoc `ps` greps.
+- `Config` carries a `[key: string]: unknown` index signature, so a removed key survives `...saved` unless actively stripped. `REMOVED_CONFIG_KEYS` in `lib/config.ts` does that, and `ConfigManager` rewrites the file once on load when it finds one.
 
-Commands are deployed **globally** — one command list for every guild and for DMs. Guild-scoped deployment is deliberately not used: Discord keeps the two scopes as separate lists and a guild command *shadows* a global one of the same name, so a leftover guild copy silently pins that guild to a stale definition. Every global deploy therefore also clears guild-scoped commands (`clearGuildCommands`).
+**Process boundaries**
+- **Console output goes to stderr — stdout is the MCP stdio transport.** Entry point is `packages/core/supervisor.ts`.
+- **Hot-reload boundary:** worker code in `packages/core/` and all plugin packages are hot-reloadable via worker restart. Supervisor code (`supervisor.ts`, IPC types, MCP server) requires a full session restart (exit + re-run `choomfie`). `packages/shared/` changes require a worker restart at minimum.
+- Auto-restart triggers: persona switch, plugin enable/disable, voice config change — all send `request_restart` IPC → supervisor restarts worker → confirmation to the Discord channel.
+- The worker sits two processes below the daemon, so there is no IPC between them. `meta/worker-health.json` carries the heartbeat up; `meta/control.json` carries `/compact` and `/clear` requests down; `meta/daemon-state.json` carries daemon state down (read by `/status`, `/usage`, and the rate-limit alerter).
 
-Commands auto-deploy on startup when definitions change (hash-based check; the hash is prefixed with the scope, so switching scope self-migrates). Manual: `bun packages/core/scripts/deploy-commands.ts`. `--guild=<id>` is a dev-only escape hatch for instant iteration — it shadows global in that guild until you run `--clear-guilds`.
+**Settings**
+- `model` / `fallbackModel` are **top level, not under `daemon`** — they are not daemon-specific. Both the daemon (via the Agent SDK) and foreground/`--tmux` (via `bin/choomfie` → `scripts/resolve-model.ts`) read the same value. They used to live at `daemon.model`, which meant `/model` silently did nothing in foreground mode; `mergeConfig` migrates the old key forward and drops it.
+- Settings are declared once in `packages/core/lib/settings.ts` with their parser, bounds, suggestions and when the change takes effect. Add one there and `/config` picks it up automatically. `suggestions` are hints, not an allowlist.
+- **Do not add a `ConfigManager` setter without a caller.** `setRateLimitMs`, `setConvoTimeoutMs` and `setDaemonConfig` sat uncalled for a long time while this file claimed settings were adjustable, and they weren't. Likewise `autoSummarize` exists in `Config`, is read by nothing, and is deliberately absent from `/config` — a switch that does nothing is worse than no switch.
 
-Trade-off: a newly added or renamed global command can take up to an hour to appear. Edits to an existing command's description or options are usually immediate.
-
-### Modals
-
-Modal forms triggered from slash commands, defined in `packages/core/lib/handlers/modals.ts`:
-- Reminder modal: message, time, recurring fields
-- Persona modal: key, name, personality fields (owner only)
-- Memory modal: key, value fields (owner only)
-- Modal submissions handled via `registerModalHandler(prefix, handler)` with customId prefix routing
-- Key constraint: `showModal()` must be the first response to an interaction (cannot defer first)
-
-### Shared Utilities
-
-- `packages/shared/time.ts` — `MS_PER_MIN/HOUR/DAY` constants, `parseNaturalTime()`, `formatDuration()`, `relativeTime()`, `isValidCron()`, SQLite datetime formatting (re-exported via `@choomfie/shared`)
-- `packages/core/lib/handlers/shared.ts` — `createAndScheduleReminder()` (used by /remind + modal), `requireOwner()`, `isOwner()`, `isAllowed()`
-- `packages/core/lib/handlers/github.ts` — `buildGhArgs()` + `runGh()` (used by MCP tool + slash command)
-- `packages/shared/version.ts` — `VERSION` constant from package.json (used by mcp-server, commands, status-tools)
-
-## Tools (97 with every plugin enabled)
-
-Tool lists are dynamic: the supervisor always exposes `restart`, the worker exposes 34 core tools, and enabled plugins add their own. With all shipped plugins enabled (voice 3, browser 7, tutor 19, socials 33 = 62), Choomfie exposes 97 MCP tools total: 96 worker tools plus the supervisor-owned `restart` tool.
-
-Core Discord: reply (with embeds), react, edit_message, fetch_messages, search_messages, create_thread, create_poll, pin_message, unpin_message
-Core Memory: save_memory, search_memory, list_memories, delete_memory, save_conversation_summary, memory_stats
-Core Personas: switch_persona, save_persona, list_personas, delete_persona
-Core Reminders: set_reminder, list_reminders, cancel_reminder, snooze_reminder, ack_reminder
-Core Birthdays: birthday_add, birthday_remove, birthday_list, birthday_upcoming
-Core Access: allow_user, remove_user, list_allowed_users (owner only)
-Core GitHub: check_github
-Core Status: choomfie_status
-Core Translation: translate
-System: restart (owner only, supervisor-owned — kills worker, spawns fresh one, reloads all code)
-
-Browser plugin: browse, browser_click, browser_type, browser_screenshot, browser_eval, browser_press_key, browser_close
-Voice plugin: join_voice, leave_voice, speak
-Tutor plugin: tutor_prompt, dictionary_lookup, quiz, set_level, list_modules, switch_module, srs_review, srs_rate, srs_stats, srs_reminders, lesson_status, random_word, convert_kana, kanji_stroke_info, convert_pinyin, stroke_info, convert_hanzi
-Socials plugin: youtube_search, youtube_info, youtube_transcript, youtube_auth, youtube_comment, reddit_search, reddit_posts, reddit_comments, reddit_auth, reddit_post, reddit_comment, linkedin_auth, linkedin_post, linkedin_post_image, linkedin_post_images, linkedin_post_link, linkedin_edit, linkedin_poll, linkedin_repost, linkedin_delete, linkedin_comments, linkedin_comment, linkedin_react, linkedin_schedule, linkedin_queue, linkedin_monitor, linkedin_analytics, linkedin_status, twitter_auth, twitter_post, twitter_post_image, twitter_thread, twitter_status
-
-### Rich Embeds
-
-The `reply` tool supports Discord embeds via the `embeds` parameter. Each embed takes:
-- `title`, `description`, `color` (name: blue/green/yellow/orange/red/purple/pink/grey, or hex)
-- `fields` array of `{name, value, inline?}`
-- `footer`, `thumbnail`, `url`
-
-Use for structured content (status, lists, summaries). Plain text for casual chat.
-
-### Polls
-
-`create_poll` creates Discord native polls:
-- 2-10 options, 1-168 hour duration (default 24)
-- Optional multi-select
-- Uses Discord's built-in poll UI (not reaction-based)
-
-### Reminder System
-
-Reminders use precise `setTimeout` timers — each reminder gets its own timer that fires exactly when due. No polling, zero wasted compute.
-
-Architecture:
-- `ReminderScheduler` class in `packages/core/lib/reminders.ts` manages all timers
-- On startup: loads pending reminders from DB, sets a timer for each
-- On create/snooze: immediately schedules a new timer
-- On cancel/ack: clears the timer
-- Nag mode: after firing, schedules a repeating nag timer
-
-Features:
-- **Recurring:** `cron` param supports "hourly", "daily", "weekly", "monthly", "every Xm/h/d"
-- **Nag mode:** `nag_interval` (minutes) re-pings until user acknowledges via `ack_reminder`
-- **Snooze:** `snooze_reminder` reschedules a fired reminder (non-recurring only; recurring auto-acks)
-- **Categories:** optional label for grouping (e.g. "work", "personal")
-- **History:** `list_reminders` with `include_history=true` shows fired reminders
-- **Buttons:** reminder notifications include interactive buttons (Done, Snooze 30m/1h/Tomorrow) — no Claude roundtrip needed, handled directly by `packages/core/lib/interactions.ts`
-
-**Datetime format:** All dates stored in SQLite use space-separated format (`YYYY-MM-DD HH:MM:SS`), never ISO 8601 with `T`/`Z`. Use `@choomfie/shared` time utilities (`toSQLiteDatetime`, `dateToSQLite`, `nowUTC`) for all conversions.
-
-DB schema (auto-migrated):
-```sql
-reminders: id, user_id, chat_id, message, due_at, fired, created_at,
-           cron, nag_interval, category, ack, last_nag_at
-```
+**Rate limits and usage**
+- The SDK's `rate_limit_event` payload **does not match the SDK's own types.** `SDKRateLimitInfo` declares one flat window; some builds instead send an undeclared `unifiedWindows` object holding every window, with the flat fields describing only the tightest. `parseRateLimitInfo` prefers `unifiedWindows` and falls back; `/usage` labels a lone window "binding window only".
+- **The snapshot only updates on a turn.** An idle session's figures stop moving and go stale — observed 10.9h old, still rendering a window that had reset hours earlier. `isRateLimitStale` / `viewRateLimitWindows` in `lib/daemon-status.ts` are the single source of truth for "is this still true"; both `/usage` and the alerter go through them.
+- `modelUsage` and `total_cost_usd` on a result are **session-cumulative** (verified: a model's `inputTokens` climbs across results), so they are assigned, not accumulated. `usage.input_tokens` is per-turn and *is* accumulated. Getting these backwards silently double-counts.
+- `state.rateLimit` is account-level and deliberately **not** reset by `startSession`. `state.modelUsage` is per-session and is reset.
 
 ## Key Details
 
-- All JSON state (`config.json`, `access.json`, `meta/*.json`) is written atomically via `writeJsonAtomic` from `@choomfie/shared` — temp file + `rename(2)`. Never write these with a bare `writeFile`; a crash mid-write truncates them
-- Single instance enforced via `choomfie.pid` (supervisor) and `meta/meta.pid` (daemon). Re-running `choomfie` replaces a stale foreground instance, but **refuses** when a daemon is supervising one — the daemon's own supervisor is exempt via `CHOOMFIE_DAEMON_PID`. Process identity comes from `@choomfie/shared`'s `pid-utils.ts`, not ad-hoc `ps` greps
 - Owner auto-detected from Discord app info: during `./install.sh` (primary) or startup fallback if missed
-- Permission relay: owner receives tool approval requests via DM, replies `yes/no <code>` to approve/deny
+- Permission relay: owner receives tool approval requests via DM, replies `yes/no <code>`
 - State lives in `~/.claude/plugins/data/choomfie-inline/` (token, access list, database, inbox)
-- Personality loaded from core memory (key: "personality") at startup
-- Memory auto-compactor: core memories capped at 20. When exceeded, oldest are auto-archived to archival memory with `[auto-archived]` prefix and `auto-archived,core-memory` tags
-- Console output goes to stderr (stdout is MCP stdio transport) — entry point is `packages/core/supervisor.ts`
-- DMs require Partials.Channel + Partials.Message in discord.js
-- All attachments downloaded to `~/.claude/plugins/data/choomfie-inline/inbox/` (file_path = first, file_paths = all semicolon-separated)
-- GitHub integration shells out to `gh` CLI via shared `packages/core/lib/handlers/github.ts` (15s timeout)
-- Servers: only responds when @mentioned or replied to (not every message)
-- DMs: always responds
-- Rate limit: configurable via config.json (default 5s)
-- Conversation timeout: configurable via config.json `convoTimeoutMs` (default 5 min)
-- Typing indicator: state machine in `packages/core/lib/typing.ts` (IDLE ↔ TYPING). Shows typing while Claude thinks, stops on reply. Use `keep_typing: true` on the reply tool to keep typing active between multi-message workflows. Safety timeout: 2 min. Skipped for conversation_mode.
-- Allowlist: loaded at startup from access.json. Use `allow_user`/`remove_user` tools to modify in-memory + persist to file (no restart needed). Manual file edits require restart.
-- @mentions stripped from message before forwarding to Claude
+- Personality loaded from core memory (key: `personality`) at startup
+- Memory auto-compactor: core memories capped at 20; oldest auto-archived with `[auto-archived]` prefix and `auto-archived,core-memory` tags
+- DMs require `Partials.Channel` + `Partials.Message` in discord.js
+- Attachments downloaded to `…/choomfie-inline/inbox/` (`file_path` = first, `file_paths` = all, semicolon-separated)
+- GitHub integration shells out to `gh` via `lib/handlers/github.ts` (15s timeout)
+- Servers: only responds when @mentioned or replied to. DMs: always responds. @mentions stripped before forwarding
+- Rate limit + conversation timeout configurable in config.json (`rateLimitMs` default 5s, `convoTimeoutMs` default 5 min)
+- Typing indicator: state machine in `lib/typing.ts`. `keep_typing: true` on `reply` holds it between multi-message workflows. Safety timeout 2 min; skipped for conversation_mode
+- Allowlist loaded at startup from access.json; `allow_user`/`remove_user` update in-memory + persist (no restart). Manual file edits require a restart
 - Personas stored in config.json, switchable from Discord (auto-restarts worker)
-- search_messages paginates up to 1000 messages for user/keyword filtering
-- Plugin tool names are collision-checked during load; a plugin with duplicate/conflicting tool names is skipped before registration
-- Slash commands auto-deploy on Discord ready when the command definition hash changes
-- **Hot-reload boundary:** Worker code in `packages/core/` (tools, Discord) and all plugin packages in `plugins/` (voice, browser, tutor, socials) are hot-reloadable via worker restart. Supervisor code (`packages/core/supervisor.ts`, IPC types, MCP server) requires full session restart (exit + re-run `choomfie`). Shared package (`packages/shared/`) changes require worker restart at minimum.
-- Auto-restart triggers: persona switch, plugin enable/disable, voice config change — all send `request_restart` IPC → supervisor restarts worker → sends confirmation to Discord channel
+- `search_messages` paginates up to 1000 messages for user/keyword filtering
+- Owner-only: `/persona switch`, `/newpersona`, `/savememory`, `/plugins`, `/config`, `/model`, `/allow`, `/revoke`, `/compact`, `/clear`, `/voice`, and the birthday tools
 
-## Config (config.json)
+## Token Budget
 
-```json
-{
-  "activePersona": "takagi",
-  "rateLimitMs": 5000,
-  "convoTimeoutMs": 300000,
-  "plugins": [],
-  "personas": { ... },
-  "voice": { "stt": "auto", "tts": "auto" },
-  "model": "opus",
-  "fallbackModel": "sonnet",
-  "daemon": {
-    "tokenThreshold": 120000,
-    "turnThreshold": 80
-  }
-}
-```
+This file is loaded into every daemon session's context and re-read from cache on every turn, as is `docs/` content you open. Measured: at 31.7KB it was ~7,900 tokens — roughly a quarter of the session's entire resident context, for documentation a Discord persona never needs. Keep it to rules and architecture; put inventories, walkthroughs and examples in `docs/`.
 
-`config.json` is the single settings source for every mode. Secrets live separately in `$CLAUDE_DATA_DIR/.env` (`DISCORD_TOKEN`, provider API keys).
-
-`model` / `fallbackModel` are **top level, not under `daemon`** — they are not daemon-specific. Both optional; omitted means Claude Code's own default. Accepts an alias (`opus`, `sonnet`, `haiku`) or a full model id.
-
-Two readers, one value:
-- `--daemon` reads it in `packages/core/daemon.ts` and passes it to the Agent SDK
-- foreground and `--tmux` resolve it in `bin/choomfie` (via `packages/core/scripts/resolve-model.ts`) and pass `--model` to the `claude` CLI
-
-They used to live at `daemon.model`, which meant `/model` silently did nothing in foreground mode — you changed it, restarted, and got the old model back. `mergeConfig` migrates the old key forward and drops it, so there is only ever one place to look. `fallbackModel` still only applies to `--daemon`; the CLI has no equivalent.
-
-`daemon` now holds only the cycling thresholds — read at startup by `packages/core/daemon.ts` and threaded into daemon state, so `packages/core/daemon/` never has to import `lib/`. Changes take effect on the next daemon start.
-
-### Changing settings
-
-`/config` (owner only) lists every adjustable setting with its current value; `/config setting:<key> value:<v>` changes one, and `value:default` restores the built-in. `/model [model]` is a shortcut for `model`, the setting changed most often — it routes through the same `Setting` object, so the two can't disagree about validation.
-
-Settings are declared once in `packages/core/lib/settings.ts` with their parser, bounds, suggestions, and when the change takes effect — add a setting there and `/config` picks it up automatically (Discord caps both the choice list and autocomplete suggestions at 25).
-
-`suggestions` are hints, not an allowlist: `write()` still accepts anything valid, so a model id newer than the file is usable the day it ships. Whatever the user has typed is offered back as the first suggestion when it isn't already in the list — Discord gives no way to submit free text once a suggestion list is showing, so without that a valid-but-unlisted value looks rejected. A test asserts every suggestion a setting offers is one its own validator accepts.
-
-Editing `config.json` by hand still works. `ConfigManager`'s setters are what `/config` calls; **do not add a setter without a caller** — `setRateLimitMs`, `setConvoTimeoutMs` and `setDaemonConfig` sat uncalled for a long time while this file claimed settings were adjustable via tools, and they weren't.
-
-`autoSummarize` exists in `Config` and is read by nothing. It is deliberately absent from `/config` — a switch that does nothing is worse than no switch.
-
-## Voice Plugin
-
-Full-duplex voice conversations in Discord voice channels. See [docs/voice-optimization-roadmap.md](docs/voice-optimization-roadmap.md) for optimization details.
-
-### Architecture
-
-```
-User speaks → Discord Opus → per-speaker SileroVAD (adaptive endpointing)
-  → Opus decode (@discordjs/opus) → ffmpeg resample (48kHz stereo → 16kHz mono)
-  → whisper-cpp STT (segmented every ~3s) → MCP notification → Claude
-  → speak tool → sentence splitter → pipelined kokoro TTS
-  → 48kHz stereo PCM → AudioPlayer → Discord
-```
-
-### Key Features
-
-- **Streaming TTS**: Long responses split into sentences, each synthesized and played independently with one-ahead pipelining (next sentence synthesizes while current plays)
-- **Silero VAD**: Neural voice activity detection replacing fixed silence timeout. Adaptive endpointing: `threshold = min(1200ms, 400ms + utteranceDuration * 0.3)`
-- **Interruption handling**: User speech stops bot playback after 300ms barge-in threshold. Generation IDs invalidate stale speak() calls. Tracks what was actually spoken for context.
-- **Streaming STT**: Audio flushed to whisper every ~3s of continuous speech (MAX_SEGMENT_CHUNKS=150). Segments transcribe in parallel, combined on speech end.
-- **Multi-speaker**: Per-speaker VAD pipelines (independent SileroVAD + SpeechDetector). Max 4 concurrent speakers with LRU eviction. Idle cleanup every 30s.
-- **Silence priming**: Plays 0.5s silence on join to prime Discord's voice receive pipeline (required for Discord to send audio packets)
-- **Speak queue**: Serialized via promise chain with generation ID checks. Prevents race conditions between concurrent speak() calls.
-
-### Providers
-
-Swappable via config. Auto-detection picks the best available:
-
-| Type | Provider | Local | Free | Notes |
-|------|----------|-------|------|-------|
-| STT | whisper-cpp | Yes | Yes | Default. `brew install whisper-cpp`, model at `~/.cache/whisper-cpp/` |
-| STT | groq | No | Yes | Needs GROQ_API_KEY |
-| STT | elevenlabs | No | No | Paid API |
-| TTS | kokoro | Yes | Yes | Default. `pip install kokoro-onnx soundfile`, 53 voices |
-| TTS | edge-tts | No | Yes | Free Microsoft API |
-| TTS | elevenlabs | No | No | Paid API |
-| VAD | silero | Yes | Yes | Always on. Bundled via @ricky0123/vad-node |
-
-### Voice Config
-
-```json
-"voice": {
-  "stt": "whisper",     // or "groq", "elevenlabs", "auto"
-  "tts": "kokoro",      // or "edge-tts", "elevenlabs", "auto"
-  "ttsSpeed": 1.0       // 0.5-2.0, applied via ffmpeg atempo
-}
-```
-
-Voice model: set `KOKORO_VOICE=af_nova` env var (default: `af_heart`). 53 voices available across 8 languages.
+The same applies to plugins: their tool schemas and instructions are resident too (voice ~511, browser ~844, tutor ~2,211, socials ~4,232 tokens). Enable only what's in use.
