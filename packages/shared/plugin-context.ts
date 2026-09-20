@@ -20,10 +20,7 @@ export interface SocialsConfig {
 }
 
 export interface ChoomfieConfig {
-  localFirst?: boolean;
   provider?: string;
-  localModel?: string;
-  ollamaUrl?: string;
   embeddings?: string;
   socials?: SocialsConfig;
   [key: string]: unknown;

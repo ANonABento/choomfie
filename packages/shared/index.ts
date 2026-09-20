@@ -36,9 +36,21 @@ export {
 
 // Version
 export { VERSION } from "./version.ts";
+export {
+  HEARTBEAT_INTERVAL_MS,
+  HEARTBEAT_STALE_MS,
+  workerHealthPath,
+  isHeartbeatStale,
+  parseWorkerHeartbeat,
+  type WorkerHeartbeat,
+} from "./worker-health.ts";
 
 // Paths
-export { findMonorepoRoot } from "./paths.ts";
+export {
+  findMonorepoRoot,
+  resolveDataDir,
+  DEFAULT_DATA_DIR_SUFFIX,
+} from "./paths.ts";
 
 // Secret-file helpers
 export {

@@ -6,7 +6,14 @@ import type {
 
 export type SessionState = "STARTING" | "ACTIVE" | "DRAINING" | "CYCLING";
 
-export type ModelProvider = "anthropic" | "ollama";
+/**
+ * Session-cycling thresholds, resolved from config.json by the entry point.
+ * Threaded through state so daemon/ never has to import core's lib/.
+ */
+export type DaemonThresholds = {
+  tokenThreshold: number;
+  turnThreshold: number;
+};
 
 export type HandoffEntry = {
   sessionId: string;
@@ -49,8 +56,6 @@ export type MetaState = {
   workerHealthTimer: ReturnType<typeof setInterval> | null;
   totalCycles: number;
   lastCycleReason: string | null;
-  /** Current model provider — switches to "ollama" on repeated Anthropic failures. */
-  activeProvider: ModelProvider;
-  /** Consecutive Anthropic API failures used to trigger the fallback threshold. */
-  anthropicFailureCount: number;
+  /** Cycling thresholds for this run, from config.json. */
+  thresholds: DaemonThresholds;
 };

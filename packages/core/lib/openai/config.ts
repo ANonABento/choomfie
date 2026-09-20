@@ -1,3 +1,5 @@
+import { resolveDataDir } from "@choomfie/shared";
+
 export type OpenAIRoutingMode = "claude_code";
 
 export interface OpenAIModelAliasConfig {
@@ -62,10 +64,6 @@ export const DEFAULT_OPENAI_ENDPOINT_CONFIG: OpenAIEndpointConfig = {
       "choomfie-claude-code": {
         backend: "claude_code",
         model: "claude-opus-4-6",
-      },
-      "choomfie-local": {
-        backend: "ollama",
-        model: "llama3.1",
       },
     },
   },
@@ -191,9 +189,5 @@ export function resolveOpenAIEndpointConfig(
 }
 
 export function getOpenAIEndpointDataDir(env: Env = process.env): string {
-  return (
-    env.CHOOMFIE_DATA_DIR ||
-    env.CLAUDE_PLUGIN_DATA ||
-    `${env.HOME ?? "."}/.claude/plugins/data/choomfie-inline`
-  );
+  return resolveDataDir(env);
 }

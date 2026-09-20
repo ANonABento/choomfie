@@ -9,7 +9,7 @@ import {
   TextInputBuilder,
   TextInputStyle,
 } from "discord.js";
-import { registerModalHandler } from "../interactions.ts";
+import { registerModalHandler } from "../register.ts";
 import { parseNaturalTime, isValidCron, normalizeTimeZone } from "../time.ts";
 import { createAndScheduleReminder, isOwner } from "./shared.ts";
 

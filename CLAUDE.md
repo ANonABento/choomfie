@@ -26,14 +26,17 @@ packages/
     time.ts                        # nowUTC, toSQLiteDatetime, dateToSQLite, parseNaturalTime
     paths.ts                       # findMonorepoRoot() — resilient project root resolution
     interactions.ts                # Registries + register functions ONLY (no dispatch)
+    worker-health.ts               # Worker heartbeat contract (writer: core, reader: daemon)
     version.ts                     # VERSION
   core/                            # @choomfie/core — Discord bridge, memory, etc.
     package.json
-    server.ts, supervisor.ts, worker.ts, daemon.ts
+    supervisor.ts, worker.ts, daemon.ts
     daemon/                         # Agent SDK session runtime, handoffs, health checks
     lib/
       types.ts                     # AppContext (extends PluginContext), re-exports shared
-      interactions.ts              # handleInteraction() + safeHandle() + re-exports shared registries
+      interactions.ts              # handleInteraction() + safeHandle() + registerAllHandlers()
+      register.ts                  # AppContext-typed register wrappers (handlers import this)
+      heartbeat.ts                 # Writes meta/worker-health.json for the daemon
       config.ts, memory.ts, reminders.ts, discord.ts, context.ts, ...
       plugins.ts                   # Plugin loader (explicit workspace package map)
       tools/, handlers/
@@ -96,9 +99,10 @@ daemon.ts (always running)
 - Sessions are cycled when context gets heavy (~120k tokens or 80 turns)
 - Before cycling: captures a handoff summary from Claude, persists to `meta/handoffs.json`
 - New session gets handoff context injected into system prompt
-- Worker health monitored via `choomfie.pid` checks every 30s; 3 consecutive failures trigger a full session cycle
+- Worker health monitored via the worker's heartbeat file (`meta/worker-health.json`, rewritten every 10s) every 30s; unhealthy = stale beat (>45s) or Discord gateway not ready. 3 consecutive failures trigger a full session cycle. Falls back to a `choomfie.pid` process check when no heartbeat exists yet (worker still booting)
+- States a restart can't fix (no `DISCORD_TOKEN` configured) report as DEGRADED and are explicitly **not** cycled — otherwise the daemon would respawn sessions forever over a config problem
 - Daemon state written to `meta/daemon-state.json` for `/status` integration
-- Repeated Anthropic API failures switch new sessions to the Ollama-compatible fallback provider
+- Sessions always run on Anthropic. Authentication/billing errors abort the retry loop immediately; rate limits and overload still retry with backoff
 - Crash recovery with exponential backoff (2s → 60s max)
 
 ### Plugin System
@@ -119,9 +123,9 @@ Enable plugins via `/plugins` command from Discord, or in `config.json`: `"plugi
 
 ## How It Works
 
-1. Claude Code loads Choomfie via `--plugin-dir` and `--dangerously-load-development-channels server:choomfie`, then spawns `bun packages/core/server.ts` as an MCP subprocess
-2. `server.ts` → `supervisor.ts`: acquires PID file (single-instance guard), spawns `worker.ts` via `Bun.spawn({ ipc })` (all in `packages/core/`)
-3. Worker creates AppContext, loads enabled plugins (from `plugins/` workspace packages), connects to Discord, waits for full initialization
+1. Claude Code loads Choomfie via `--plugin-dir` and `--dangerously-load-development-channels server:choomfie`, then spawns `bun packages/core/supervisor.ts` as an MCP subprocess (via `bun run start`)
+2. `supervisor.ts` acquires the PID file (single-instance guard) and spawns `worker.ts` via `Bun.spawn({ ipc })` (all in `packages/core/`)
+3. Worker creates AppContext, calls `registerAllHandlers()` (built-in buttons/modals/slash commands), loads enabled plugins (from `plugins/` workspace packages), connects to Discord, waits for full initialization, then starts publishing its heartbeat
 4. Worker sends `{ type: "ready", tools, instructions }` to supervisor via IPC
 5. Supervisor creates MCP server with real instructions + tools, connects stdio transport
 6. Claude Code calls `initialize` → gets correct persona, security rules, and full tool list
@@ -135,7 +139,8 @@ Enable plugins via `/plugins` command from Discord, or in `config.json`: `"plugi
 
 Discord interactions (buttons, slash commands, modals) use a split architecture:
 - **Registries** (`registerButtonHandler()`, `registerModalHandler()`, `registerCommand()`) live in `@choomfie/shared` (`packages/shared/interactions.ts`) so plugins can self-register without importing core
-- **Dispatch logic** (`handleInteraction()`, `safeHandle()`) lives in `packages/core/lib/interactions.ts`
+- **AppContext-typed register wrappers** live in `packages/core/lib/register.ts` — handler modules import from here, never from `interactions.ts`. Keeping them separate is what prevents the import cycle (handlers need `registerX` at import time; the router needs the handlers)
+- **Dispatch logic** (`handleInteraction()`, `safeHandle()`) lives in `packages/core/lib/interactions.ts`. Importing it has no side effects — call `registerAllHandlers()` once at boot (done in `worker.ts` and `scripts/deploy-commands.ts`) to load the built-in handlers, which self-register on import
 - **InteractionCreate** event registered in `packages/core/lib/discord.ts`, routes to `handleInteraction()`
 - Plugin hook: `onInteraction?(interaction, ctx)` in the Plugin interface
 - Button customId format: `prefix:action:data` (e.g. `reminder:ack:42`, `reminder:snooze:42:1h`)
@@ -251,7 +256,7 @@ reminders: id, user_id, chat_id, message, due_at, fired, created_at,
 - State lives in `~/.claude/plugins/data/choomfie-inline/` (token, access list, database, inbox)
 - Personality loaded from core memory (key: "personality") at startup
 - Memory auto-compactor: core memories capped at 20. When exceeded, oldest are auto-archived to archival memory with `[auto-archived]` prefix and `auto-archived,core-memory` tags
-- Console output goes to stderr (stdout is MCP stdio transport) — entry point is `packages/core/server.ts`
+- Console output goes to stderr (stdout is MCP stdio transport) — entry point is `packages/core/supervisor.ts`
 - DMs require Partials.Channel + Partials.Message in discord.js
 - All attachments downloaded to `~/.claude/plugins/data/choomfie-inline/inbox/` (file_path = first, file_paths = all semicolon-separated)
 - GitHub integration shells out to `gh` CLI via shared `packages/core/lib/handlers/github.ts` (15s timeout)
@@ -281,9 +286,14 @@ Runtime-configurable settings — changes take effect immediately, no restart ne
   "autoSummarize": true,
   "plugins": [],
   "personas": { ... },
-  "voice": { "stt": "auto", "tts": "auto" }
+  "voice": { "stt": "auto", "tts": "auto" },
+  "daemon": { "tokenThreshold": 120000, "turnThreshold": 80 }
 }
 ```
+
+`config.json` is the single settings source for every mode. Secrets live separately in `$CLAUDE_DATA_DIR/.env` (`DISCORD_TOKEN`, provider API keys).
+
+`daemon` controls session cycling in `--daemon` mode — read at startup by `packages/core/daemon.ts` and threaded into daemon state, so `packages/core/daemon/` never has to import `lib/`. Changing it takes effect on the next daemon start.
 
 Settings can be changed via tools (e.g. `setRateLimitMs`, `setConvoTimeoutMs`) or by editing the file directly.
 

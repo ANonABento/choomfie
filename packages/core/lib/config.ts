@@ -9,10 +9,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import type { SocialsPlatformConfig } from "@choomfie/shared";
 import {
-  DEFAULT_LOCAL_CONFIG as DEFAULT_LOCAL_RUNTIME_CONFIG,
-  type LocalRuntimeConfig,
-} from "./orchestrator/local-runtime.ts";
-import {
   resolveOpenAIEndpointConfig,
   type OpenAIEndpointConfig,
 } from "./openai/config.ts";
@@ -60,12 +56,12 @@ export interface SocialsConfig {
   [key: string]: SocialsPlatformConfig | undefined;
 }
 
-export type LocalBackgroundTasksConfig = LocalRuntimeConfig["backgroundTasks"];
-export type LocalResourceConfig = LocalRuntimeConfig["resourceManagement"];
-
-export interface LocalConfig extends LocalRuntimeConfig {
-  /** Persistence flag — only the user-facing wrapper sees this; runtime ignores. */
-  enabled: boolean;
+/** Daemon session-cycling thresholds. */
+export interface DaemonConfig {
+  /** Cycle the session once cumulative context reaches this many tokens. */
+  tokenThreshold: number;
+  /** Cycle the session once it has taken this many turns. */
+  turnThreshold: number;
 }
 
 export interface Config {
@@ -77,14 +73,14 @@ export interface Config {
   plugins: string[];
   voice: VoiceConfig;
   socials?: SocialsConfig;
-  local?: LocalConfig;
+  daemon: DaemonConfig;
   openaiEndpoint: OpenAIEndpointConfig;
   [key: string]: unknown;
 }
 
-export const DEFAULT_LOCAL_CONFIG: LocalConfig = {
-  enabled: false,
-  ...DEFAULT_LOCAL_RUNTIME_CONFIG,
+export const DEFAULT_DAEMON_CONFIG: DaemonConfig = {
+  tokenThreshold: 120_000,
+  turnThreshold: 80,
 };
 
 const DEFAULT_CONFIG: Config = {
@@ -101,6 +97,7 @@ const DEFAULT_CONFIG: Config = {
   autoSummarize: true,
   plugins: [],
   voice: { stt: "auto", tts: "auto", ttsSpeed: 0.7 },
+  daemon: { ...DEFAULT_DAEMON_CONFIG },
   openaiEndpoint: resolveOpenAIEndpointConfig(),
 };
 
@@ -113,8 +110,8 @@ function mergeConfig(saved: Partial<Config>): Config {
     saved.voice && typeof saved.voice === "object" ? saved.voice : {};
   const savedSocials =
     saved.socials && typeof saved.socials === "object" ? saved.socials : undefined;
-  const savedLocal =
-    saved.local && typeof saved.local === "object" ? saved.local : undefined;
+  const savedDaemon =
+    saved.daemon && typeof saved.daemon === "object" ? saved.daemon : {};
   const savedOpenAIEndpoint =
     saved.openaiEndpoint && typeof saved.openaiEndpoint === "object"
       ? saved.openaiEndpoint
@@ -132,22 +129,10 @@ function mergeConfig(saved: Partial<Config>): Config {
       ...savedVoice,
     },
     ...(savedSocials ? { socials: savedSocials } : {}),
-    ...(savedLocal
-      ? {
-          local: {
-            ...DEFAULT_LOCAL_CONFIG,
-            ...savedLocal,
-            backgroundTasks: {
-              ...DEFAULT_LOCAL_CONFIG.backgroundTasks,
-              ...(savedLocal.backgroundTasks ?? {}),
-            },
-            resourceManagement: {
-              ...DEFAULT_LOCAL_CONFIG.resourceManagement,
-              ...(savedLocal.resourceManagement ?? {}),
-            },
-          },
-        }
-      : {}),
+    daemon: {
+      ...DEFAULT_DAEMON_CONFIG,
+      ...savedDaemon,
+    },
     openaiEndpoint: resolveOpenAIEndpointConfig(savedOpenAIEndpoint),
   };
 }
@@ -279,43 +264,21 @@ export class ConfigManager {
     return this.config.socials;
   }
 
-  // --- Local mode ---
+  // --- Daemon ---
 
-  getLocalConfig(): LocalConfig {
-    if (!this.config.local) return { ...DEFAULT_LOCAL_CONFIG };
+  getDaemonConfig(): DaemonConfig {
     return {
-      ...DEFAULT_LOCAL_CONFIG,
-      ...this.config.local,
-      backgroundTasks: {
-        ...DEFAULT_LOCAL_CONFIG.backgroundTasks,
-        ...this.config.local.backgroundTasks,
-      },
-      resourceManagement: {
-        ...DEFAULT_LOCAL_CONFIG.resourceManagement,
-        ...this.config.local.resourceManagement,
-      },
+      ...DEFAULT_DAEMON_CONFIG,
+      ...this.config.daemon,
     };
   }
 
-  setLocalConfig(local: Partial<LocalConfig>) {
-    const current = this.getLocalConfig();
-    this.config.local = {
-      ...current,
-      ...local,
-      backgroundTasks: {
-        ...current.backgroundTasks,
-        ...(local.backgroundTasks ?? {}),
-      },
-      resourceManagement: {
-        ...current.resourceManagement,
-        ...(local.resourceManagement ?? {}),
-      },
+  setDaemonConfig(daemon: Partial<DaemonConfig>) {
+    this.config.daemon = {
+      ...this.getDaemonConfig(),
+      ...daemon,
     };
     this.save();
-  }
-
-  isLocalEnabled(): boolean {
-    return this.getLocalConfig().enabled;
   }
 
   // --- OpenAI-compatible endpoint ---

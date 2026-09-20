@@ -5,7 +5,8 @@
 set -euo pipefail
 
 CHOOMFIE_DIR="$(cd "$(dirname "$0")" && pwd)"
-CLAUDE_DATA_DIR="${CHOOMFIE_DATA_DIR:-$HOME/.claude/plugins/data/choomfie-inline}"
+# Must match resolveDataDir() in packages/shared/paths.ts — same names, same order.
+CLAUDE_DATA_DIR="${CHOOMFIE_DATA_DIR:-${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/choomfie-inline}}"
 BIN_DIR="${HOME}/.local/bin"
 
 echo "=== Choomfie Installer ==="
@@ -109,6 +110,29 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
   fi
 fi
 
+# --- Optional: start at login (macOS) ---
+# An install-time question rather than a config.json setting: this writes a
+# launchd agent and calls launchctl, which the running process has no business
+# doing to your machine on its own.
+autostart="unsupported"
+if [ "$(uname -s)" = "Darwin" ]; then
+  autostart="off"
+  answer="${CHOOMFIE_AUTOSTART:-}"
+  if [ -z "$answer" ] && [ -t 0 ]; then
+    echo ""
+    read -rp "Start Choomfie automatically at login? [y/N]: " answer
+  fi
+  case "$answer" in
+    [yY] | [yY][eE][sS] | 1 | true)
+      echo ""
+      # install-launchd.sh reports its own errors; just record the outcome.
+      if "$CHOOMFIE_DIR/packages/core/scripts/install-launchd.sh"; then
+        autostart="on"
+      fi
+      ;;
+  esac
+fi
+
 echo ""
 echo "=== Done! ==="
 echo ""
@@ -116,3 +140,11 @@ echo "Start Choomfie:"
 echo "  choomfie            # run through your Claude Code plan"
 echo "  choomfie --daemon   # always-on autonomous mode"
 echo "  choomfie --tmux     # run in a detached tmux session"
+echo ""
+
+case "$autostart" in
+  on)  echo "Auto-start is ON — launchd runs 'choomfie --daemon' at login."
+       echo "  bun run install:launchd --status | --uninstall" ;;
+  off) echo "Auto-start is off. Enable anytime with:"
+       echo "  bun run install:launchd" ;;
+esac

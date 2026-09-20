@@ -2,7 +2,7 @@
  * Context factory — loads env/config and creates the AppContext object.
  */
 
-import { SECRET_FILE_MODE, writeSecretFile } from "@choomfie/shared";
+import { resolveDataDir, SECRET_FILE_MODE, writeSecretFile } from "@choomfie/shared";
 import { MemoryStore } from "./memory.ts";
 import { ConfigManager } from "./config.ts";
 import { ReminderScheduler } from "./reminders.ts";
@@ -32,9 +32,7 @@ export async function createContext(): Promise<{
   ctx: AppContext;
   discordToken: string;
 }> {
-  const DATA_DIR =
-    process.env.CLAUDE_PLUGIN_DATA ||
-    `${process.env.HOME}/.claude/plugins/data/choomfie-inline`;
+  const DATA_DIR = resolveDataDir();
 
   // Ensure data directory exists
   const { mkdir } = await import("node:fs/promises");

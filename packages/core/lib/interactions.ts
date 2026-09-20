@@ -2,8 +2,11 @@
  * Interaction router — dispatches buttons, slash commands, and modal submissions.
  *
  * Re-exports shared registries so existing core imports don't break.
- * Handler logic lives in lib/handlers/ and lib/commands.ts.
- * All register themselves via side-effect imports at the bottom.
+ * Handler logic lives in lib/handlers/ and lib/commands.ts; the registration
+ * wrappers they use live in lib/register.ts.
+ *
+ * Importing this module has NO side effects. Call registerAllHandlers() once at
+ * boot to load the built-in handlers — see the note on that function.
  */
 
 import {
@@ -12,10 +15,9 @@ import {
   type ButtonInteraction,
   type ChatInputCommandInteraction,
   type ModalSubmitInteraction,
-  type RESTPostAPIChatInputApplicationCommandsJSONBody,
 } from "discord.js";
 import type { AppContext } from "./types.ts";
-import { errorMessage, type PluginContext } from "@choomfie/shared";
+import { errorMessage } from "@choomfie/shared";
 import { dispatchPluginInteraction } from "./plugin-lifecycle.ts";
 
 // Re-export shared registries so existing core imports keep working
@@ -26,60 +28,18 @@ export {
   commands,
 } from "@choomfie/shared";
 
-import {
-  buttonHandlers,
-  modalHandlers,
-  commands,
-  registerButtonHandler as registerSharedButtonHandler,
-  registerModalHandler as registerSharedModalHandler,
-  registerCommand as registerSharedCommand,
-} from "@choomfie/shared";
+// Re-exported for back-compat — the definitions live in ./register.ts, which
+// handler modules import directly so they never depend on this file.
+export {
+  registerButtonHandler,
+  registerModalHandler,
+  registerCommand,
+  type ButtonHandler,
+  type ModalHandler,
+  type CommandHandler,
+} from "./register.ts";
 
-export type ButtonHandler = (
-  interaction: ButtonInteraction,
-  parts: string[],
-  ctx: AppContext
-) => Promise<void>;
-
-export type ModalHandler = (
-  interaction: ModalSubmitInteraction,
-  parts: string[],
-  ctx: AppContext
-) => Promise<void>;
-
-export type CommandHandler = (
-  interaction: ChatInputCommandInteraction,
-  ctx: AppContext
-) => Promise<void>;
-
-function asAppContext(ctx: PluginContext): AppContext {
-  return ctx as AppContext;
-}
-
-export function registerButtonHandler(prefix: string, handler: ButtonHandler) {
-  registerSharedButtonHandler(prefix, (interaction, parts, ctx) =>
-    handler(interaction, parts, asAppContext(ctx))
-  );
-}
-
-export function registerModalHandler(prefix: string, handler: ModalHandler) {
-  registerSharedModalHandler(prefix, (interaction, parts, ctx) =>
-    handler(interaction, parts, asAppContext(ctx))
-  );
-}
-
-export function registerCommand(
-  name: string,
-  def: {
-    data: RESTPostAPIChatInputApplicationCommandsJSONBody;
-    handler: CommandHandler;
-  }
-) {
-  registerSharedCommand(name, {
-    data: def.data,
-    handler: (interaction, ctx) => def.handler(interaction, asAppContext(ctx)),
-  });
-}
+import { buttonHandlers, modalHandlers, commands } from "@choomfie/shared";
 
 // --- Error-safe interaction wrapper ---
 
@@ -150,10 +110,24 @@ export async function handleInteraction(
 }
 
 // --- Load handlers ---
-// Dynamic imports avoid circular initialization issues.
-// Handlers register themselves by calling registerButtonHandler/registerModalHandler/registerCommand.
-await import("./handlers/reminder-buttons.ts");
-await import("./handlers/permission-buttons.ts");
-await import("./handlers/modals.ts");
-await import("./commands.ts");
-await import("./local-commands.ts");
+
+let handlersLoaded: Promise<void> | null = null;
+
+/**
+ * Load the built-in button/modal/command handlers, which self-register on
+ * import. Idempotent — repeated calls await the first one.
+ *
+ * These imports used to sit at module scope as top-level `await import()`,
+ * which made importing this file (or anything that reached it) a deadlock risk.
+ * Keeping them inside a function means module import is side-effect free and
+ * the registration point is an explicit, greppable call at boot.
+ */
+export function registerAllHandlers(): Promise<void> {
+  handlersLoaded ??= (async () => {
+    await import("./handlers/reminder-buttons.ts");
+    await import("./handlers/permission-buttons.ts");
+    await import("./handlers/modals.ts");
+    await import("./commands.ts");
+  })();
+  return handlersLoaded;
+}

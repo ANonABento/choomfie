@@ -1,5 +1,5 @@
 import { writeFile } from "node:fs/promises";
-import { META_DIR, TOKEN_THRESHOLD, TURN_THRESHOLD } from "./constants.ts";
+import { META_DIR } from "./constants.ts";
 import { getErrorMessage } from "./error.ts";
 import { log } from "./log.ts";
 import type { MetaState } from "./types.ts";
@@ -18,8 +18,11 @@ export async function writeDaemonState(state: MetaState): Promise<void> {
     state: state.state,
     sessionId: state.sessionId,
     sessionUptimeSeconds: uptime,
-    turns: { current: state.turnCount, threshold: TURN_THRESHOLD },
-    tokens: { current: state.totalInputTokens, threshold: TOKEN_THRESHOLD },
+    turns: { current: state.turnCount, threshold: state.thresholds.turnThreshold },
+    tokens: {
+      current: state.totalInputTokens,
+      threshold: state.thresholds.tokenThreshold,
+    },
     tokenUsageToday: state.tokenUsageToday,
     costUsd: state.totalCostUsd,
     totalCycles: state.totalCycles,
@@ -29,7 +32,6 @@ export async function writeDaemonState(state: MetaState): Promise<void> {
       lastHealthyAt: state.workerHealth.lastHealthyAt || null,
       consecutiveFailures: state.workerHealth.consecutiveFailures,
     },
-    activeProvider: state.activeProvider,
     updatedAt: new Date().toISOString(),
   };
 

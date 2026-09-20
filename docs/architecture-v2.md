@@ -1,6 +1,13 @@
 # Architecture V2: Daemon Mode
 
-## Status: Implemented (Phase 3) — Last Updated 2026-04-02
+## Status: Partially implemented — Last Updated 2026-09-19
+
+> **Correction (2026-09-19):** the "MCP becomes unnecessary" design below was
+> never shipped. Daemon mode wraps the *same* supervisor → worker MCP stack as
+> foreground mode rather than reimplementing Discord and tool handling a second
+> time; the Agent SDK session it spawns loads Choomfie as a local plugin. The
+> "Key Insight" section is kept for historical context but does not describe the
+> running system. See [architecture.md](architecture.md) for shipped reality.
 
 ## TL;DR
 
@@ -51,9 +58,16 @@ Daemon (packages/core/daemon.ts — immortal, always running)
        └→ IPC back to Daemon
 ```
 
-### Key Insight
+### Key Insight (not shipped — see the correction at the top)
 
-The current supervisor's ONLY job is keeping the MCP pipe alive. If daemon manages Claude sessions via the Agent SDK, there IS no MCP pipe to keep alive — the SDK handles the Claude connection internally. The MCP layer becomes unnecessary.
+The original proposal argued: the supervisor's ONLY job is keeping the MCP pipe
+alive, so if the daemon manages Claude sessions via the Agent SDK there is no
+MCP pipe to keep alive and the MCP layer becomes unnecessary.
+
+In practice MCP stayed mandatory for every attachment mode. Foreground mode
+requires it structurally (that is how Claude Code CLI plugins work), and daemon
+mode gets Discord, plugins, and all 95 worker tools for free by reusing the same
+path instead of growing a parallel implementation.
 
 ### What Each Layer Does
 

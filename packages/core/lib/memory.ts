@@ -12,6 +12,11 @@
 import { Database } from "bun:sqlite";
 import { spawnSync } from "node:child_process";
 import { normalizeTimeZone, toSQLiteDatetime } from "./time.ts";
+import {
+  buildOllamaEmbeddingRequest,
+  parseOllamaEmbeddingResponse,
+  resolveOllamaEmbeddingConfig,
+} from "./openai/ollama-embeddings.ts";
 
 export interface CoreMemory {
   key: string;
@@ -105,9 +110,9 @@ class OllamaEmbeddingProvider implements EmbeddingProvider {
   private available = true;
 
   constructor() {
-    const baseUrl = process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434";
-    this.endpoint = `${baseUrl.replace(/\/$/, "")}/api/embeddings`;
-    this.model = process.env.OLLAMA_EMBEDDING_MODEL ?? "mxbai-embed-large";
+    const config = resolveOllamaEmbeddingConfig();
+    this.endpoint = config.endpoint;
+    this.model = config.model;
   }
 
   embed(text: string): number[] | null {
@@ -125,7 +130,7 @@ class OllamaEmbeddingProvider implements EmbeddingProvider {
         "-H",
         "Content-Type: application/json",
         "-d",
-        JSON.stringify({ model: this.model, prompt: text }),
+        buildOllamaEmbeddingRequest(this.model, text),
       ],
       {
         encoding: "utf8",
@@ -139,10 +144,8 @@ class OllamaEmbeddingProvider implements EmbeddingProvider {
     }
 
     try {
-      const parsed = JSON.parse(result.stdout) as { embedding?: unknown };
-      if (!Array.isArray(parsed.embedding)) return null;
-      const embedding = parsed.embedding.filter((n): n is number => typeof n === "number");
-      return embedding.length > 0 ? embedding : null;
+      const embedding = parseOllamaEmbeddingResponse(JSON.parse(result.stdout));
+      return embedding && embedding.length > 0 ? embedding : null;
     } catch {
       this.available = false;
       return null;

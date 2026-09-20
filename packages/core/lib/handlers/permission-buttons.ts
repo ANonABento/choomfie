@@ -11,7 +11,7 @@ import {
   MessageFlags,
   type MessageCreateOptions,
 } from "discord.js";
-import { registerButtonHandler } from "../interactions.ts";
+import { registerButtonHandler } from "../register.ts";
 
 export type PermissionRequestParams = {
   request_id: string;
