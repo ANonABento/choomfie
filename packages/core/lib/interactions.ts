@@ -77,6 +77,28 @@ export async function handleInteraction(
   // Let plugins handle first
   await dispatchPluginInteraction(ctx.plugins, interaction, ctx);
 
+  // Autocomplete is checked before the command branch: an autocomplete
+  // interaction is not a chat-input command, and it cannot go through
+  // safeHandle — it has no reply()/editReply(), only respond(), and Discord
+  // accepts exactly one response within 3 seconds.
+  if (interaction.isAutocomplete()) {
+    const cmd = commands.get(interaction.commandName);
+    if (!cmd?.autocomplete) return;
+    try {
+      await cmd.autocomplete(interaction, ctx);
+    } catch (e) {
+      console.error(`Autocomplete(${interaction.commandName}): ${errorMessage(e)}`);
+      // Leave the user with an empty list rather than a spinner that never
+      // resolves. Throws if something already responded, which is fine.
+      try {
+        await interaction.respond([]);
+      } catch {
+        // Already responded, or the 3s window closed.
+      }
+    }
+    return;
+  }
+
   if (interaction.isChatInputCommand()) {
     const cmd = commands.get(interaction.commandName);
     if (cmd) {

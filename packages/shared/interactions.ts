@@ -6,12 +6,19 @@
  */
 
 import type {
+  AutocompleteInteraction,
   ButtonInteraction,
   ChatInputCommandInteraction,
   ModalSubmitInteraction,
   RESTPostAPIChatInputApplicationCommandsJSONBody,
 } from "discord.js";
 import type { PluginContext } from "./plugin-context.ts";
+
+/**
+ * Discord's hard cap on autocomplete suggestions. Sending more is rejected
+ * outright, so every suggester must slice to this.
+ */
+export const AUTOCOMPLETE_LIMIT = 25;
 
 // --- Handler types ---
 
@@ -32,9 +39,23 @@ export type CommandHandler = (
   ctx: PluginContext
 ) => Promise<void>;
 
+/**
+ * Suggests values for the option the user is currently typing in.
+ *
+ * Discord gives the handler 3 seconds and accepts exactly one response, so a
+ * suggester must be synchronous work over in-memory data — never a network
+ * call. It must also respond even when it has nothing to suggest (with an empty
+ * list), or the user sees a stuck "loading options" spinner.
+ */
+export type AutocompleteHandler = (
+  interaction: AutocompleteInteraction,
+  ctx: PluginContext
+) => Promise<void>;
+
 export interface CommandDef {
   data: RESTPostAPIChatInputApplicationCommandsJSONBody;
   handler: CommandHandler;
+  autocomplete?: AutocompleteHandler;
 }
 
 // --- Registries ---
@@ -53,10 +74,7 @@ export function registerModalHandler(prefix: string, handler: ModalHandler) {
   modalHandlers.set(prefix, handler);
 }
 
-export function registerCommand(
-  name: string,
-  def: { data: RESTPostAPIChatInputApplicationCommandsJSONBody; handler: CommandHandler }
-) {
+export function registerCommand(name: string, def: CommandDef) {
   commands.set(name, def);
 }
 

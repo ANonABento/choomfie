@@ -22,7 +22,12 @@ import { formatDuration, fromSQLiteDatetime } from "./time.ts";
 import { isOwner, requireOwner } from "./handlers/shared.ts";
 import { buildGhArgs, runGh } from "./handlers/github.ts";
 import { discoverPlugins } from "./plugins.ts";
-import { SETTINGS, findSetting } from "./settings.ts";
+import {
+  MODEL_SETTING_KEY,
+  SETTINGS,
+  findSetting,
+  suggestValues,
+} from "./settings.ts";
 import {
   buildReminderModal,
   buildPersonaModal,
@@ -239,6 +244,7 @@ registerCommand("help", {
           value: [
             "`/config` — view all settings and current values",
             "`/config setting:<name> value:<v>` — change one",
+            "`/model [model]` — view or change the daemon's model",
           ].join("\n"),
           inline: false,
         },
@@ -444,8 +450,24 @@ registerCommand("config", {
       o
         .setName("value")
         .setDescription("New value — or `default` to restore the built-in one")
+        .setAutocomplete(true)
     )
     .toJSON(),
+  // Suggests values for whichever setting is currently selected. Not owner-
+  // gated: autocomplete only reveals the same static hints as the command
+  // description, and a non-owner is refused at submit time anyway.
+  autocomplete: async (interaction) => {
+    const key = interaction.options.getString("setting");
+    const setting = key ? findSetting(key) : undefined;
+    if (!setting) {
+      await interaction.respond([]);
+      return;
+    }
+    const typed = interaction.options.getFocused();
+    await interaction.respond(
+      suggestValues(setting, typed).map((value) => ({ name: value, value })),
+    );
+  },
   handler: async (interaction, ctx) => {
     if (await requireOwner(interaction, ctx)) return;
 
@@ -506,6 +528,66 @@ registerCommand("config", {
             ? "In effect now."
             : `Takes effect on ${setting.scope}.`,
       });
+    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+  },
+});
+
+// /model — shortcut for the setting people change most (owner only)
+//
+// Everything here routes through the `daemon.model` Setting rather than
+// touching config directly, so /config and /model cannot disagree about
+// validation, bounds, or what "default" means.
+registerCommand("model", {
+  data: new SlashCommandBuilder()
+    .setName("model")
+    .setDescription("View or change the model daemon sessions use (owner only)")
+    .addStringOption((o) =>
+      o
+        .setName("model")
+        .setDescription("Model alias or id — or `default` for Claude Code's own")
+        .setAutocomplete(true)
+    )
+    .toJSON(),
+  autocomplete: async (interaction) => {
+    const setting = findSetting(MODEL_SETTING_KEY)!;
+    await interaction.respond(
+      suggestValues(setting, interaction.options.getFocused()).map((value) => ({
+        name: value,
+        value,
+      })),
+    );
+  },
+  handler: async (interaction, ctx) => {
+    if (await requireOwner(interaction, ctx)) return;
+
+    const setting = findSetting(MODEL_SETTING_KEY)!;
+    const requested = interaction.options.getString("model");
+
+    if (requested === null) {
+      await interaction.reply({
+        content:
+          `Daemon sessions use **${setting.read(ctx.config)}**.\n` +
+          "Foreground and `--tmux` follow your Claude Code settings, not this.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const previous = setting.read(ctx.config);
+    const result = setting.write(ctx.config, requested);
+    if (!result.ok) {
+      await interaction.reply({
+        content: `Couldn't set the model: ${result.error}`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle("Model updated")
+      .setDescription(`**${previous}** → **${result.value}**`)
+      .setFooter({ text: `Takes effect on ${setting.scope}.` });
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   },
 });

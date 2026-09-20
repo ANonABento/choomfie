@@ -86,10 +86,12 @@ export {
   buttonHandlers,
   modalHandlers,
   commands,
+  AUTOCOMPLETE_LIMIT,
 } from "./interactions.ts";
 export type {
   ButtonHandler,
   ModalHandler,
   CommandHandler,
+  AutocompleteHandler,
   CommandDef,
 } from "./interactions.ts";

@@ -10,8 +10,14 @@ import { describe, expect, test, afterEach } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { AUTOCOMPLETE_LIMIT } from "@choomfie/shared";
 import { ConfigManager } from "../lib/config.ts";
-import { SETTINGS, findSetting } from "../lib/settings.ts";
+import {
+  MODEL_SETTING_KEY,
+  SETTINGS,
+  findSetting,
+  suggestValues,
+} from "../lib/settings.ts";
 
 const dirs: string[] = [];
 function newConfig(): { config: ConfigManager; dir: string } {
@@ -162,5 +168,55 @@ describe("count settings", () => {
     turns.write(config, "10");
     expect(turns.write(config, "default").ok).toBe(true);
     expect(config.getDaemonConfig().turnThreshold).toBe(80);
+  });
+});
+
+describe("autocomplete suggestions", () => {
+  test("every suggestion a setting offers is one it would actually accept", () => {
+    // A picker that offers a value the validator rejects is worse than no
+    // picker — the user clicks a listed option and is told no.
+    for (const setting of SETTINGS) {
+      const { config } = newConfig();
+      for (const suggestion of setting.suggestions) {
+        const result = setting.write(config, suggestion);
+        expect(`${setting.key}=${suggestion}: ${result.error ?? "ok"}`).toBe(
+          `${setting.key}=${suggestion}: ok`,
+        );
+      }
+    }
+  });
+
+  test("an empty query offers everything; a query narrows by substring", () => {
+    const model = findSetting(MODEL_SETTING_KEY)!;
+    expect(suggestValues(model, "")).toEqual(model.suggestions);
+    expect(suggestValues(model, "op")).toEqual(["op", "opus"]);
+    expect(suggestValues(model, "us")).toEqual(["us", "opus"]);
+  });
+
+  test("a value not in the list is still offered, so free text stays usable", () => {
+    // Discord gives no way to submit free text once suggestions are showing,
+    // so a brand-new model id would look rejected without this.
+    const model = findSetting(MODEL_SETTING_KEY)!;
+    const suggestions = suggestValues(model, "claude-opus-5");
+    expect(suggestions[0]).toBe("claude-opus-5");
+  });
+
+  test("an exact match is not duplicated at the top of the list", () => {
+    const model = findSetting(MODEL_SETTING_KEY)!;
+    expect(suggestValues(model, "opus")).toEqual(["opus"]);
+    expect(suggestValues(model, "OPUS")).toEqual(["opus"]);
+  });
+
+  test("never exceeds Discord's suggestion cap", () => {
+    const model = findSetting(MODEL_SETTING_KEY)!;
+    expect(suggestValues(model, "").length).toBeLessThanOrEqual(AUTOCOMPLETE_LIMIT);
+    for (const setting of SETTINGS) {
+      expect(setting.suggestions.length).toBeLessThanOrEqual(AUTOCOMPLETE_LIMIT);
+    }
+  });
+
+  test("the /model shortcut points at a setting that exists", () => {
+    // /model delegates to this key; a rename here must not leave it dangling.
+    expect(findSetting(MODEL_SETTING_KEY)).toBeDefined();
   });
 });

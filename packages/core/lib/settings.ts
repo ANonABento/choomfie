@@ -21,6 +21,7 @@
  * - `openaiEndpoint` — the sidecar has its own config surface.
  */
 
+import { AUTOCOMPLETE_LIMIT } from "@choomfie/shared";
 import type { ConfigManager } from "./config.ts";
 
 /** When a change takes effect. */
@@ -47,6 +48,13 @@ export type Setting = {
   description: string;
   /** Hint shown to the user for what a valid value looks like. */
   example: string;
+  /**
+   * Values offered by `/config`'s autocomplete. Suggestions only — `write`
+   * still accepts anything valid, so a model id newer than this file is not
+   * locked out. Kept static and in-memory: Discord allows 3 seconds and one
+   * response for an autocomplete, so there is no room for a lookup.
+   */
+  suggestions: string[];
   scope: SettingScope;
   /** Current value, formatted for display. */
   read(config: ConfigManager): string;
@@ -105,6 +113,7 @@ function durationSetting(options: {
   key: string;
   description: string;
   example: string;
+  suggestions: string[];
   min: number;
   max: number;
   read: (config: ConfigManager) => number;
@@ -114,6 +123,7 @@ function durationSetting(options: {
     key: options.key,
     description: options.description,
     example: options.example,
+    suggestions: options.suggestions,
     scope: "immediately",
     read: (config) => formatMs(options.read(config)),
     write: (config, raw) => {
@@ -137,6 +147,7 @@ function countSetting(options: {
   key: string;
   description: string;
   example: string;
+  suggestions: string[];
   min: number;
   max: number;
   fallback: number;
@@ -147,6 +158,7 @@ function countSetting(options: {
     key: options.key,
     description: options.description,
     example: options.example,
+    suggestions: options.suggestions,
     scope: "next daemon start",
     read: (config) => options.read(config).toLocaleString(),
     write: (config, raw) => {
@@ -170,6 +182,17 @@ function countSetting(options: {
   };
 }
 
+/**
+ * Aliases the Agent SDK resolves to the current model in each tier. Offered as
+ * suggestions rather than enforced choices: aliases outlive specific model ids,
+ * but a full id must stay typeable so a new model is usable the day it ships,
+ * without an edit here.
+ */
+export const MODEL_SUGGESTIONS = ["default", "opus", "sonnet", "haiku"];
+
+/** The setting `/model` is a shortcut for. Must name a Setting in SETTINGS. */
+export const MODEL_SETTING_KEY = "daemon.model";
+
 function modelSetting(options: {
   key: string;
   description: string;
@@ -180,6 +203,7 @@ function modelSetting(options: {
     key: options.key,
     description: options.description,
     example: "opus, sonnet, haiku, a full model id, or `default`",
+    suggestions: MODEL_SUGGESTIONS,
     scope: "next daemon start",
     read: (config) => options.read(config) ?? "Claude Code default",
     write: (config, raw) => {
@@ -208,6 +232,7 @@ export const SETTINGS: Setting[] = [
     key: "rateLimitMs",
     description: "Per-user cooldown between messages Choomfie will answer",
     example: "5s",
+    suggestions: ["0", "3s", "5s", "10s", "30s"],
     min: 0,
     max: 5 * 60_000,
     read: (config) => config.getRateLimitMs(),
@@ -217,6 +242,7 @@ export const SETTINGS: Setting[] = [
     key: "convoTimeoutMs",
     description: "How long a channel stays 'in conversation' after a reply",
     example: "5m",
+    suggestions: ["1m", "5m", "15m", "30m", "1h"],
     min: 10_000,
     max: 6 * 3_600_000,
     read: (config) => config.getConvoTimeoutMs(),
@@ -238,6 +264,7 @@ export const SETTINGS: Setting[] = [
     key: "daemon.tokenThreshold",
     description: "Cycle the daemon session past this much context",
     example: "120000",
+    suggestions: ["default", "60000", "120000", "200000", "400000"],
     min: 10_000,
     max: 900_000,
     fallback: 120_000,
@@ -248,6 +275,7 @@ export const SETTINGS: Setting[] = [
     key: "daemon.turnThreshold",
     description: "Cycle the daemon session past this many turns",
     example: "80",
+    suggestions: ["default", "40", "80", "150", "300"],
     min: 5,
     max: 1000,
     fallback: 80,
@@ -259,4 +287,29 @@ export const SETTINGS: Setting[] = [
 export function findSetting(key: string): Setting | undefined {
   const wanted = key.trim().toLowerCase();
   return SETTINGS.find((setting) => setting.key.toLowerCase() === wanted);
+}
+
+/**
+ * Suggestions for `setting`, narrowed to what the user has typed so far.
+ *
+ * Substring rather than prefix matching, so typing "model" finds
+ * `daemon.fallbackModel` too. Whatever the user has typed is offered back as
+ * the first entry when it isn't already in the list — without it, a valid value
+ * that simply isn't in `suggestions` (a brand-new model id) looks rejected,
+ * because Discord's picker gives no way to submit free text once a suggestion
+ * list is showing.
+ */
+export function suggestValues(setting: Setting, typed: string): string[] {
+  const query = typed.trim().toLowerCase();
+  const matches = setting.suggestions.filter((value) =>
+    value.toLowerCase().includes(query),
+  );
+  const typedIsNovel =
+    query.length > 0 &&
+    !matches.some((value) => value.toLowerCase() === query);
+
+  return (typedIsNovel ? [typed.trim(), ...matches] : matches).slice(
+    0,
+    AUTOCOMPLETE_LIMIT,
+  );
 }

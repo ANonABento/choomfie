@@ -15,6 +15,7 @@
  */
 
 import type {
+  AutocompleteInteraction,
   ButtonInteraction,
   ChatInputCommandInteraction,
   ModalSubmitInteraction,
@@ -45,6 +46,11 @@ export type CommandHandler = (
   ctx: AppContext
 ) => Promise<void>;
 
+export type AutocompleteHandler = (
+  interaction: AutocompleteInteraction,
+  ctx: AppContext
+) => Promise<void>;
+
 function asAppContext(ctx: PluginContext): AppContext {
   return ctx as AppContext;
 }
@@ -66,10 +72,18 @@ export function registerCommand(
   def: {
     data: RESTPostAPIChatInputApplicationCommandsJSONBody;
     handler: CommandHandler;
+    autocomplete?: AutocompleteHandler;
   }
 ) {
+  const { autocomplete } = def;
   registerSharedCommand(name, {
     data: def.data,
     handler: (interaction, ctx) => def.handler(interaction, asAppContext(ctx)),
+    ...(autocomplete
+      ? {
+          autocomplete: (interaction, ctx) =>
+            autocomplete(interaction, asAppContext(ctx)),
+        }
+      : {}),
   });
 }
