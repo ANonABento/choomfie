@@ -7,34 +7,30 @@
  * These helpers paper over that footgun.
  */
 
-import { writeFileSync, chmodSync } from "node:fs";
-import { chmod } from "node:fs/promises";
+import { writeFileAtomicSync } from "./atomic-file.ts";
 
 /** File mode for any file that contains a secret or owner identity (0600). */
 export const SECRET_FILE_MODE = 0o600;
 
-/** Async secret-file write (Bun.write + chmod). */
+function toText(contents: string | Uint8Array): string {
+  return typeof contents === "string" ? contents : new TextDecoder().decode(contents);
+}
+
+/**
+ * Async secret-file write. Atomic (temp + rename) so a crash mid-write cannot
+ * truncate access.json and lose the owner id and allowlist.
+ */
 export async function writeSecretFile(
   path: string,
   contents: string | Uint8Array
 ): Promise<void> {
-  await Bun.write(path, contents);
-  try {
-    await chmod(path, SECRET_FILE_MODE);
-  } catch {
-    // Filesystem may not support chmod (e.g. some Windows mounts). Best effort.
-  }
+  writeFileAtomicSync(path, toText(contents), { mode: SECRET_FILE_MODE });
 }
 
-/** Sync secret-file write (writeFileSync + chmodSync). */
+/** Sync secret-file write. Same atomicity guarantee. */
 export function writeSecretFileSync(
   path: string,
   contents: string | Uint8Array
 ): void {
-  writeFileSync(path, contents, { mode: SECRET_FILE_MODE });
-  try {
-    chmodSync(path, SECRET_FILE_MODE);
-  } catch {
-    // Best effort — see writeSecretFile.
-  }
+  writeFileAtomicSync(path, toText(contents), { mode: SECRET_FILE_MODE });
 }

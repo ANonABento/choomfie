@@ -37,6 +37,13 @@ export {
 // Version
 export { VERSION } from "./version.ts";
 export {
+  writeFileAtomic,
+  writeFileAtomicSync,
+  writeJsonAtomic,
+  writeJsonAtomicSync,
+  type AtomicWriteOptions,
+} from "./atomic-file.ts";
+export {
   CHOOMFIE_PROCESS_MARKERS,
   CHOOMFIE_DAEMON_MARKER,
   isChoomfieCommand,
