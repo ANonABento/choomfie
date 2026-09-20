@@ -353,8 +353,9 @@ export class MemoryStore {
     return oldest.length;
   }
 
-  deleteCoreMemory(key: string) {
-    this.db.query("DELETE FROM core_memory WHERE key = ?").run(key);
+  /** Returns false when no memory had that key, so callers can say so. */
+  deleteCoreMemory(key: string): boolean {
+    return this.db.query("DELETE FROM core_memory WHERE key = ?").run(key).changes > 0;
   }
 
   // --- Archival memory ---
