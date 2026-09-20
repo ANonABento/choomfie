@@ -4,13 +4,14 @@ import { log } from "./log.ts";
 import { releasePid } from "./pid.ts";
 import { generateSessionId } from "./session-core.ts";
 import { DAEMON_STATE_PATH } from "./state-file.ts";
-import type { DaemonThresholds, MetaState } from "./types.ts";
+import type { DaemonSettings, MetaState } from "./types.ts";
 
 export function todayKey(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function createInitialState(thresholds: DaemonThresholds): MetaState {
+export function createInitialState(settings: DaemonSettings): MetaState {
+  const { tokenThreshold, turnThreshold, model, fallbackModel } = settings;
   return {
     state: "STARTING",
     session: null,
@@ -36,7 +37,8 @@ export function createInitialState(thresholds: DaemonThresholds): MetaState {
     workerHealthTimer: null,
     totalCycles: 0,
     lastCycleReason: null,
-    thresholds,
+    thresholds: { tokenThreshold, turnThreshold },
+    models: { model, fallbackModel },
   };
 }
 

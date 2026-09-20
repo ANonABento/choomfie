@@ -7,14 +7,14 @@ import { acquirePid } from "./pid.ts";
 import { cycleSession, startSession, waitForResult } from "./runtime.ts";
 import { DAEMON_STATE_PATH } from "./state-file.ts";
 import { getErrorMessage } from "./error.ts";
-import type { DaemonThresholds, MetaState } from "./types.ts";
+import type { DaemonSettings, MetaState } from "./types.ts";
 
 async function withCliSession(
-  thresholds: DaemonThresholds,
+  settings: DaemonSettings,
   run: (state: MetaState) => Promise<number | void>
 ): Promise<void> {
   await acquirePid();
-  const state = createInitialState(thresholds);
+  const state = createInitialState(settings);
   setupShutdown(state);
 
   try {
@@ -29,9 +29,9 @@ async function withCliSession(
   }
 }
 
-export async function testCycle(thresholds: DaemonThresholds): Promise<void> {
+export async function testCycle(settings: DaemonSettings): Promise<void> {
   log("=== TEST: Session Cycling ===");
-  await withCliSession(thresholds, async (state) => {
+  await withCliSession(settings, async (state) => {
     log("Sending test message...");
     state.pushMessage?.({
       type: "user",
@@ -102,9 +102,9 @@ export async function testCycle(thresholds: DaemonThresholds): Promise<void> {
   });
 }
 
-export async function benchmark(thresholds: DaemonThresholds): Promise<void> {
+export async function benchmark(settings: DaemonSettings): Promise<void> {
   log("=== BENCHMARK: Latency Measurement ===");
-  await withCliSession(thresholds, async (state) => {
+  await withCliSession(settings, async (state) => {
     const NUM_MESSAGES = 5;
     const latencies: number[] = [];
 
@@ -241,6 +241,10 @@ export async function showStatus(): Promise<void> {
     console.error(`  State: ${state.state}`);
     console.error(`  Session: ${state.sessionId}`);
     console.error(`  Uptime: ${state.sessionUptimeSeconds}s`);
+    console.error(
+      `  Model: ${state.model ?? "Claude Code default"}` +
+        (state.fallbackModel ? ` (fallback: ${state.fallbackModel})` : ""),
+    );
     console.error(`  Turns: ${state.turns?.current}/${state.turns?.threshold}`);
     console.error(`  Tokens: ${state.tokens?.current}/${state.tokens?.threshold}`);
     console.error(`  Cost: $${state.costUsd?.toFixed(4)}`);

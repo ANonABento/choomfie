@@ -56,12 +56,23 @@ export interface SocialsConfig {
   [key: string]: SocialsPlatformConfig | undefined;
 }
 
-/** Daemon session-cycling thresholds. */
+/** Settings for `--daemon` mode sessions. */
 export interface DaemonConfig {
   /** Cycle the session once cumulative context reaches this many tokens. */
   tokenThreshold: number;
   /** Cycle the session once it has taken this many turns. */
   turnThreshold: number;
+  /**
+   * Model for daemon sessions — an alias ("opus", "sonnet", "haiku") or a full
+   * model id. Unset means Claude Code's own default, which is what daemon
+   * sessions used before this existed.
+   *
+   * Only applies to `--daemon`. Foreground and `--tmux` run under the `claude`
+   * CLI, which takes its model from your Claude Code settings, not from here.
+   */
+  model?: string;
+  /** Model to fall back to when the primary is overloaded. Unset = no fallback. */
+  fallbackModel?: string;
 }
 
 export interface Config {

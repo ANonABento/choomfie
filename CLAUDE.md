@@ -165,12 +165,17 @@ Defined in `packages/core/lib/commands.ts`, deployed via `packages/core/scripts/
 - `/persona [switch]` — list or switch personas
 - `/newpersona` — opens a modal form to create a persona (key, name, personality)
 - `/plugins [action] [name]` — list, enable, or disable plugins (owner only, restart needed)
+- `/config [setting] [value]` — list settings with current values, or change one (owner only, ephemeral)
 - `/voice` — voice provider setup wizard with auto-detection and interactive buttons (owner only)
 - `/lesson` — start or continue a structured lesson (button-driven, no Claude roundtrip)
 - `/progress` — show learning progress with unit bars and completion stats (ephemeral)
 - `/help` — show all commands and capabilities
 
-Commands auto-deploy on startup when definitions change (hash-based check). Manual: `bun packages/core/scripts/deploy-commands.ts` or `--global` for global deploy.
+Commands are deployed **globally** — one command list for every guild and for DMs. Guild-scoped deployment is deliberately not used: Discord keeps the two scopes as separate lists and a guild command *shadows* a global one of the same name, so a leftover guild copy silently pins that guild to a stale definition. Every global deploy therefore also clears guild-scoped commands (`clearGuildCommands`).
+
+Commands auto-deploy on startup when definitions change (hash-based check; the hash is prefixed with the scope, so switching scope self-migrates). Manual: `bun packages/core/scripts/deploy-commands.ts`. `--guild=<id>` is a dev-only escape hatch for instant iteration — it shadows global in that guild until you run `--clear-guilds`.
+
+Trade-off: a newly added or renamed global command can take up to an hour to appear. Edits to an existing command's description or options are usually immediate.
 
 ### Modals
 
@@ -280,26 +285,37 @@ reminders: id, user_id, chat_id, message, due_at, fired, created_at,
 
 ## Config (config.json)
 
-Runtime-configurable settings — changes take effect immediately, no restart needed:
-
 ```json
 {
   "activePersona": "takagi",
   "rateLimitMs": 5000,
   "convoTimeoutMs": 300000,
-  "autoSummarize": true,
   "plugins": [],
   "personas": { ... },
   "voice": { "stt": "auto", "tts": "auto" },
-  "daemon": { "tokenThreshold": 120000, "turnThreshold": 80 }
+  "daemon": {
+    "tokenThreshold": 120000,
+    "turnThreshold": 80,
+    "model": "opus",
+    "fallbackModel": "sonnet"
+  }
 }
 ```
 
 `config.json` is the single settings source for every mode. Secrets live separately in `$CLAUDE_DATA_DIR/.env` (`DISCORD_TOKEN`, provider API keys).
 
-`daemon` controls session cycling in `--daemon` mode — read at startup by `packages/core/daemon.ts` and threaded into daemon state, so `packages/core/daemon/` never has to import `lib/`. Changing it takes effect on the next daemon start.
+`daemon` configures `--daemon` mode — read at startup by `packages/core/daemon.ts` and threaded into daemon state, so `packages/core/daemon/` never has to import `lib/`. Changes take effect on the next daemon start.
 
-Settings can be changed via tools (e.g. `setRateLimitMs`, `setConvoTimeoutMs`) or by editing the file directly.
+- `tokenThreshold` / `turnThreshold` — when to cycle the session
+- `model` / `fallbackModel` — which model daemon sessions run on. **Both optional**; omitted means the Agent SDK's own default, which is what daemon sessions used before this was configurable. Accepts an alias (`opus`, `sonnet`, `haiku`) or a full model id. Only applies to `--daemon`: foreground and `--tmux` run under the `claude` CLI and take their model from your Claude Code settings, not from here.
+
+### Changing settings
+
+`/config` (owner only) lists every adjustable setting with its current value; `/config setting:<key> value:<v>` changes one, and `value:default` restores the built-in. Settings are declared once in `packages/core/lib/settings.ts` with their parser, bounds, and when the change takes effect — add a setting there and `/config` picks it up automatically (Discord caps the choice list at 25).
+
+Editing `config.json` by hand still works. `ConfigManager`'s setters are what `/config` calls; **do not add a setter without a caller** — `setRateLimitMs`, `setConvoTimeoutMs` and `setDaemonConfig` sat uncalled for a long time while this file claimed settings were adjustable via tools, and they weren't.
+
+`autoSummarize` exists in `Config` and is read by nothing. It is deliberately absent from `/config` — a switch that does nothing is worse than no switch.
 
 ## Voice Plugin
 

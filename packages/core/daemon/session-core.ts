@@ -5,6 +5,7 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { PLUGIN_DIR } from "./constants.ts";
+import type { ModelSettings } from "./types.ts";
 
 export function generateSessionId(): string {
   return `s-${Date.now().toString(36)}`;
@@ -98,11 +99,17 @@ export function isUnrecoverableAnthropicError(error: unknown): boolean {
 
 export function createSession(
   prompt: AsyncGenerator<SDKUserMessage>,
-  handoffSummary?: string
+  handoffSummary?: string,
+  models: ModelSettings = {}
 ): Query {
   return query({
     prompt,
     options: {
+      // Omitted rather than passed as undefined: the SDK treats an absent
+      // `model` as "use Claude Code's configured default", which is the
+      // behaviour daemon sessions had before this was configurable.
+      ...(models.model ? { model: models.model } : {}),
+      ...(models.fallbackModel ? { fallbackModel: models.fallbackModel } : {}),
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       plugins: [{ type: "local", path: PLUGIN_DIR }],

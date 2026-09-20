@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased — Global Commands + Adjustable Settings
+
+### Changed
+
+- **Slash commands now deploy globally instead of per-guild.** Discord keeps guild-scoped and global commands as two separate lists, and a guild command *shadows* a global one with the same name. Choomfie deployed per-guild for the instant propagation, which meant the command list was per-guild state that had to be rewritten in every guild the bot joined, and never reached DMs where a global deploy is the only option. Now a single global `PUT` is the source of truth. The auto-deploy hash is prefixed with the scope (`global:`), so an existing install sees a changed hash on first boot and redeploys itself — no migration step.
+- **Every global deploy also clears guild-scoped commands** (`clearGuildCommands`). Without this, the copies left over from the per-guild era would keep shadowing the global list in those exact guilds — the one place the change most needed to land. Idempotent, so it is simply always done.
+- `deploy-commands.ts` defaults to global. `--guild=<id>` survives as a dev escape hatch for iterating without waiting on propagation, and now says out loud that it shadows global until `--clear-guilds`.
+- Trade-off accepted: a newly added or renamed global command can take up to an hour to appear, where a guild deploy was instant. Edits to an existing command are usually immediate.
+
+### Added
+
+- **`daemon.model` and `daemon.fallbackModel` in `config.json`.** There was previously no way to choose a model at all — `createSession` passed no `model` option, so daemon sessions silently inherited Claude Code's default and the only way to change it was to change Claude Code's own configuration. Both are optional; omitted means exactly the previous behaviour (the option is left off the SDK call entirely, not passed as `undefined`). Reported in `--status` and in `meta/daemon-state.json`. Applies to `--daemon` only — foreground and `--tmux` run under the `claude` CLI, which takes its model from your Claude Code settings.
+- **`/config` (owner only)** — lists every adjustable setting with its current value, and changes one with `/config setting:<key> value:<v>`. `value:default` restores the built-in. Values are validated and bounded before they are stored, durations accept `5s` / `2m` as well as raw milliseconds, and the reply says whether the change is live now or waits for the next daemon start.
+- `packages/core/lib/settings.ts` — one declarative registry of what is adjustable, with each setting's parser, bounds, and effect scope. `/config` renders from it, so adding a setting there is the whole change.
+- `packages/core/test/regression/command-scope.test.ts` pins the deployment routes and asserts that a clear PUTs an empty body. `packages/core/test/settings.test.ts` asserts every setting round-trips to disk and that rejects leave the old value in place.
+
+### Fixed
+
+- **`ConfigManager`'s setters had no callers.** `setRateLimitMs`, `setConvoTimeoutMs`, `setAutoSummarize` and `setDaemonConfig` existed and were reachable from nothing — no tool, no command. CLAUDE.md stated "settings can be changed via tools (e.g. `setRateLimitMs`, `setConvoTimeoutMs`)"; in practice the only way to change a rate limit was to hand-edit `config.json` and restart. `/config` is now a real caller for all of them except `setAutoSummarize`.
+
+### Notes
+
+- `autoSummarize` is read by nothing in the codebase — it is a config key and a pair of accessors with no behaviour behind them. Left in place (harmless, and removing it would silently drop a key from existing configs) but deliberately **not** exposed in `/config`: a switch that does nothing is worse than no switch. Worth either wiring up or removing.
+- No message-level logging exists to decide what is worth fast-pathing (the open issue about messages that don't need a Claude round-trip). `ctx.messageStats` is three in-memory counters — `received`, `sent`, and a per-user `Map` — reset on every worker restart, with no record of what a message was, what it cost, or whether it used a tool. That question cannot be answered from what is currently recorded.
+
 ## Unreleased — Crash-Safe Writes
 
 ### Fixed

@@ -67,7 +67,7 @@ export async function startSession(
   state.pushMessage = push;
   state.closeGenerator = close;
 
-  state.session = createSession(generator, handoffSummary);
+  state.session = createSession(generator, handoffSummary, state.models);
 
   void consumeSessionStream(state).catch((error: unknown) => {
     log(`Session stream error: ${getErrorMessage(error)}`);

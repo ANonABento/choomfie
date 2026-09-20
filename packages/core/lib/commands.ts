@@ -22,6 +22,7 @@ import { formatDuration, fromSQLiteDatetime } from "./time.ts";
 import { isOwner, requireOwner } from "./handlers/shared.ts";
 import { buildGhArgs, runGh } from "./handlers/github.ts";
 import { discoverPlugins } from "./plugins.ts";
+import { SETTINGS, findSetting } from "./settings.ts";
 import {
   buildReminderModal,
   buildPersonaModal,
@@ -234,6 +235,14 @@ registerCommand("help", {
           inline: false,
         },
         {
+          name: "Settings",
+          value: [
+            "`/config` — view all settings and current values",
+            "`/config setting:<name> value:<v>` — change one",
+          ].join("\n"),
+          inline: false,
+        },
+        {
           name: "Other",
           value: [
             "`/github <check>` — PRs, issues, notifications",
@@ -415,6 +424,89 @@ registerCommand("savememory", {
   handler: async (interaction, ctx) => {
     if (await requireOwner(interaction, ctx)) return;
     await interaction.showModal(buildMemoryModal());
+  },
+});
+
+// /config — view and change runtime settings (owner only)
+registerCommand("config", {
+  data: new SlashCommandBuilder()
+    .setName("config")
+    .setDescription("View or change settings (owner only)")
+    .addStringOption((o) =>
+      o
+        .setName("setting")
+        .setDescription("Setting to change (omit to list all)")
+        .addChoices(
+          ...SETTINGS.map((setting) => ({ name: setting.key, value: setting.key })),
+        )
+    )
+    .addStringOption((o) =>
+      o
+        .setName("value")
+        .setDescription("New value — or `default` to restore the built-in one")
+    )
+    .toJSON(),
+  handler: async (interaction, ctx) => {
+    if (await requireOwner(interaction, ctx)) return;
+
+    const key = interaction.options.getString("setting");
+    const value = interaction.options.getString("value");
+
+    if (!key) {
+      const lines = SETTINGS.map(
+        (setting) =>
+          `\`${setting.key}\` — **${setting.read(ctx.config)}**\n` +
+          `⤷ ${setting.description}`
+      );
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle("Settings")
+        .setDescription(lines.join("\n\n"))
+        .setFooter({ text: "/config setting:<name> value:<new value>" });
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const setting = findSetting(key);
+    if (!setting) {
+      await interaction.reply({
+        content: `Unknown setting \`${key}\`. Run \`/config\` to see the list.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (value === null) {
+      await interaction.reply({
+        content:
+          `\`${setting.key}\` is currently **${setting.read(ctx.config)}**.\n` +
+          `${setting.description}. Set it with \`value:\` — e.g. \`${setting.example}\`.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const previous = setting.read(ctx.config);
+    const result = setting.write(ctx.config, value);
+    if (!result.ok) {
+      await interaction.reply({
+        content: `Couldn't set \`${setting.key}\`: ${result.error}`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle(`Updated ${setting.key}`)
+      .setDescription(`**${previous}** → **${result.value}**`)
+      .setFooter({
+        text:
+          setting.scope === "immediately"
+            ? "In effect now."
+            : `Takes effect on ${setting.scope}.`,
+      });
+    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   },
 });
 

@@ -21,7 +21,7 @@ import {
   refreshChannel,
   isRateLimited,
 } from "./conversation.ts";
-import { deployGuildCommands } from "./command-deploy.ts";
+import { clearGuildCommands, deployGlobalCommands } from "./command-deploy.ts";
 import { isAllowed, isOwner } from "./access.ts";
 import {
   errorMessage,
@@ -126,10 +126,14 @@ export function createDiscordClient(ctx: AppContext): Client {
     // Initialize plugins
     await initializePlugins(ctx.plugins, ctx);
 
-    // Auto-deploy slash commands if they've changed
+    // Auto-deploy slash commands if they've changed.
+    //
+    // "global:" tags the hash with the deployment scope, so an install that
+    // previously deployed guild-scoped commands sees a changed hash on first
+    // boot after the switch and redeploys — no manual migration step.
     try {
       const commands = getCommandDefs();
-      const hash = Bun.hash(JSON.stringify(commands)).toString(36);
+      const hash = `global:${Bun.hash(JSON.stringify(commands)).toString(36)}`;
       const hashFile = `${ctx.DATA_DIR}/.commands-hash`;
       let lastHash = "";
       try { lastHash = await Bun.file(hashFile).text(); } catch {}
@@ -138,9 +142,16 @@ export function createDiscordClient(ctx: AppContext): Client {
         const { REST } = await import("discord.js");
         const rest = new REST().setToken(ctx.discord.token!);
         const appId = c.application.id;
-        await deployGuildCommands(rest, appId, c.guilds.cache.keys(), commands);
+        await deployGlobalCommands(rest, appId, commands);
+        // Guild-scoped commands shadow global ones of the same name, so a
+        // leftover copy from before the switch would pin that guild to an old
+        // definition forever. Cheap and idempotent, so just always do it.
+        const cleared = await clearGuildCommands(rest, appId, c.guilds.cache.keys());
         await Bun.write(hashFile, hash);
-        console.error(`Slash commands deployed (${commands.length} commands to ${c.guilds.cache.size} guild(s))`);
+        console.error(
+          `Slash commands deployed globally (${commands.length} commands` +
+            `${cleared > 0 ? `, cleared guild-scoped copies in ${cleared} guild(s)` : ""})`,
+        );
       }
     } catch (e) {
       console.error(`Slash command auto-deploy failed: ${errorMessage(e)}`);
