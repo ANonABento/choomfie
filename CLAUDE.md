@@ -75,7 +75,19 @@ daemon.ts (always running)
 
 `daemon.ts` is a thin CLI entry point; the runtime lives in `packages/core/daemon/`. Sessions are cycled when context gets heavy (~120k tokens or 80 turns), capturing a handoff summary first. Full detail in [docs/daemon.md](docs/daemon.md).
 
-**`createSession` must pass `extraArgs: { "dangerously-load-development-channels": "server:choomfie" }`.** Claude Code gates the experimental `claude/channel` capability behind an explicit opt-in list; without the flag the session loads the MCP server and all its tools, the worker boots, and the bot shows online — but every incoming Discord message, forwarded as a `notifications/claude/channel` notification, is dropped and Choomfie never answers. Foreground mode passes the same flag in `bin/choomfie`; **the two must stay in sync.**
+**`createSession` must pass `extraArgs: { "dangerously-load-development-channels": "server:choomfie" }`.** Claude Code gates the experimental `claude/channel` capability behind an explicit opt-in list; without the flag the session loads the MCP server and all its tools, the worker boots, and the bot shows online — but every incoming Discord message, forwarded as a `notifications/claude/channel` notification, is dropped and Choomfie never answers. Foreground mode passes the same flag in `bin/choomfie`.
+
+### Two launch paths, one behaviour
+
+`packages/core/daemon/session-core.ts` (`createSession`) and `bin/choomfie` start the same bot two different ways, and **anything that decides how a session behaves has to be set in both.** This has now drifted three times — the channels flag, `daemon.model` vs top-level `model`, and permission mode — each time producing a bot that looked fine and quietly wouldn't do its job.
+
+| | Daemon | Foreground |
+|---|---|---|
+| Channels flag | `extraArgs` in `createSession` | `--dangerously-load-development-channels` |
+| Model | `models.model` from config.json | `--model` via `scripts/resolve-model.ts` |
+| Permission mode | `bypassPermissions` | `--permission-mode auto` (override: `CHOOMFIE_PERMISSION_MODE`, or pass your own) |
+
+Permission mode differs **deliberately**: a terminal session has a human in front of it who can still be asked about genuinely destructive things; a daemon answering Discord at 3am does not. Everything else in that table must match.
 
 ### Plugin System
 

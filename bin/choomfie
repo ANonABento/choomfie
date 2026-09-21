@@ -72,6 +72,32 @@ if [ "$USE_DAEMON" = false ]; then
   fi
 fi
 
+# --- Permission mode ---
+# Foreground passed none, so every session opened in `manual` and you had to
+# Shift+Tab before Choomfie could do anything without being asked each time.
+# The daemon has always set `bypassPermissions` in createSession(), so the two
+# launch paths disagreed about the single setting that decides whether the bot
+# can act with nobody at the keyboard — the same drift that once had `/model`
+# working in one mode and silently doing nothing in the other.
+#
+# `auto` rather than the daemon's `bypassPermissions`: a terminal session has a
+# human in front of it who can still be asked about genuinely destructive
+# things, which is not true of a daemon answering Discord at 3am. Override with
+# CHOOMFIE_PERMISSION_MODE, or by passing your own --permission-mode.
+CLAUDE_PERMISSION_ARGS=()
+if [ "$USE_DAEMON" = false ]; then
+  CLAUDE_PERMISSION_ARGS=(--permission-mode "${CHOOMFIE_PERMISSION_MODE:-auto}")
+  for arg in "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"; do
+    case "$arg" in
+      --permission-mode|--permission-mode=*|--dangerously-skip-permissions)
+        # An explicit choice wins, including choosing `manual` back.
+        CLAUDE_PERMISSION_ARGS=()
+        break
+        ;;
+    esac
+  done
+fi
+
 if [ "$USE_DAEMON" = true ]; then
   QUOTED_ARGS=""
   for a in "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"; do
@@ -79,11 +105,16 @@ if [ "$USE_DAEMON" = true ]; then
   done
   INNER_CMD="cd $(printf %q "$ROOT_DIR") && exec bun packages/core/daemon.ts$QUOTED_ARGS"
 else
-  QUOTED_MODEL_ARGS=""
-  for a in "${CLAUDE_MODEL_ARGS[@]+"${CLAUDE_MODEL_ARGS[@]}"}"; do
-    QUOTED_MODEL_ARGS="$QUOTED_MODEL_ARGS $(printf %q "$a")"
+  # Model, permission mode, then anything else you passed — so an explicit
+  # --permission-mode reaches the CLI and wins over the default above.
+  QUOTED_CLAUDE_ARGS=""
+  for a in \
+    "${CLAUDE_MODEL_ARGS[@]+"${CLAUDE_MODEL_ARGS[@]}"}" \
+    "${CLAUDE_PERMISSION_ARGS[@]+"${CLAUDE_PERMISSION_ARGS[@]}"}" \
+    "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"; do
+    QUOTED_CLAUDE_ARGS="$QUOTED_CLAUDE_ARGS $(printf %q "$a")"
   done
-  INNER_CMD="cd $(printf %q "$ROOT_DIR") && exec claude --plugin-dir $(printf %q "$ROOT_DIR") --dangerously-load-development-channels server:choomfie$QUOTED_MODEL_ARGS"
+  INNER_CMD="cd $(printf %q "$ROOT_DIR") && exec claude --plugin-dir $(printf %q "$ROOT_DIR") --dangerously-load-development-channels server:choomfie$QUOTED_CLAUDE_ARGS"
 fi
 
 if [ "$USE_TMUX" = true ]; then
@@ -111,6 +142,10 @@ else
   if [ "$USE_DAEMON" = true ]; then
     exec bun packages/core/daemon.ts "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"
   fi
+  # EXTRA_ARGS was previously dropped on this path — only the daemon branch
+  # forwarded it — so `choomfie --permission-mode plan` silently did nothing.
   exec claude --plugin-dir "$ROOT_DIR" --dangerously-load-development-channels server:choomfie \
-    "${CLAUDE_MODEL_ARGS[@]+"${CLAUDE_MODEL_ARGS[@]}"}"
+    "${CLAUDE_MODEL_ARGS[@]+"${CLAUDE_MODEL_ARGS[@]}"}" \
+    "${CLAUDE_PERMISSION_ARGS[@]+"${CLAUDE_PERMISSION_ARGS[@]}"}" \
+    "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"
 fi
