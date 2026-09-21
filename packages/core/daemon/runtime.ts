@@ -25,8 +25,9 @@ import {
   workerHealthPath,
   type WorkerHeartbeat,
 } from "@choomfie/shared";
-import { CONTROL_POLL_INTERVAL_MS } from "@choomfie/shared";
+import { CONTROL_POLL_INTERVAL_MS, INCOMING_POLL_INTERVAL_MS } from "@choomfie/shared";
 import { takeControlRequest } from "./control.ts";
+import { formatChannelPrompt, takeInboundMessages } from "./incoming.ts";
 import { parseRateLimitInfo } from "./rate-limit.ts";
 import { loadHandoffs, getLastHandoffSummary, saveHandoff } from "./handoffs.ts";
 import { cleanup, todayKey } from "./lifecycle.ts";
@@ -91,17 +92,18 @@ export async function startSession(
 
   await new Promise((resolve) => setTimeout(resolve, 3000));
 
-  // Must happen before the session is advertised as ACTIVE: until the channel
-  // is enabled, every Discord message is dropped on the floor, and the worker
-  // has no way to know that — it starts a typing indicator and waits forever.
+  // Expected to fail on every current SDK build — `enableChannel` demands a
+  // marketplace-sourced plugin and Choomfie loads locally. Kept as a tripwire:
+  // the day it succeeds is the day daemon sessions could use the same delivery
+  // path as foreground, and this line is how we find out. Inbound messages do
+  // not depend on it either way — they arrive through the incoming queue below.
   try {
     await enableChannelNotifications(state.session);
     log("Channel notifications enabled (choomfie MCP server)");
   } catch (error: unknown) {
-    log(
-      `WARNING: could not enable channel notifications: ${getErrorMessage(error)}. ` +
-        "Discord messages will NOT reach this session — the bot will appear online, " +
-        "type, and never answer.",
+    verbose(
+      `Channel capability unavailable (${getErrorMessage(error)}) — ` +
+        "inbound messages will arrive through meta/incoming instead.",
     );
   }
 
@@ -112,13 +114,15 @@ export async function startSession(
   startContextMonitor(state);
   startWorkerHealthMonitor(state);
   startControlMonitor(state);
+  startIncomingMonitor(state);
 
-  // There was a `messageQueue` replayed here, but nothing ever pushed to it:
-  // Discord messages reach the session through MCP, not the daemon, so the
-  // daemon has nothing to buffer. It read as a feature — "messages sent while
-  // the session is down are replayed" — that could never fire. Messages sent
-  // during a cycle are genuinely lost, and the honest place to say so is the
-  // rate-limit DM, not a queue that is always empty.
+  // Messages that arrived while this session was starting are still sitting in
+  // meta/incoming — the worker keeps writing through a cycle, and the sweep above
+  // only skips them while the state is not ACTIVE. The first tick delivers
+  // them, so a message sent mid-cycle is answered a second late rather than
+  // lost. (There used to be an in-memory `messageQueue` here meant to do this;
+  // nothing ever pushed to it, because messages reached the session through MCP
+  // and never passed through the daemon at all.)
   state.restartBackoff = INITIAL_RESTART_BACKOFF;
 
   // A cycle someone asked for gets reported back where they asked, and says
@@ -492,6 +496,7 @@ export async function cycleSession(
 
   stopWorkerHealthMonitor(state);
   stopControlMonitor(state);
+  stopIncomingMonitor(state);
   if (state.contextCheckTimer) {
     clearInterval(state.contextCheckTimer);
     state.contextCheckTimer = null;
@@ -580,6 +585,74 @@ export function stopControlMonitor(state: MetaState): void {
   if (state.controlTimer) {
     clearInterval(state.controlTimer);
     state.controlTimer = null;
+  }
+}
+
+/**
+ * Sweep the incoming queue and feed each waiting Discord message into the session.
+ *
+ * This is the daemon's delivery path for inbound messages, standing in for the
+ * `claude/channel` capability an Agent SDK session cannot register. The worker
+ * writes each message to `meta/incoming/`; this turns it into the same `<channel>`
+ * prompt Claude Code builds in foreground mode and pushes it onto the queue.
+ *
+ * Only while ACTIVE: `pushMessage` belongs to the live session, and a message
+ * pushed mid-cycle would go to a generator that is already closing. Leaving it
+ * on disk means the replacement session picks it up a second later instead —
+ * which is why messages sent during a cycle are no longer lost.
+ */
+export function startIncomingMonitor(state: MetaState): void {
+  stopIncomingMonitor(state);
+
+  // A sweep that outlives its interval must not overlap the next one, or the
+  // same file could be read twice before either delete lands.
+  let sweeping = false;
+
+  state.incomingTimer = setInterval(async () => {
+    if (sweeping) return;
+    if (state.state !== "ACTIVE" || !state.session || !state.pushMessage) return;
+
+    sweeping = true;
+    try {
+      const messages = await takeInboundMessages();
+      for (const [index, message] of messages.entries()) {
+        // Re-checked per message: a batch can outlive the session it started
+        // under. `push` on a closed generator does not throw — it appends to a
+        // queue nothing is reading — so the message would vanish without a
+        // trace. These are already off disk, so say what was lost.
+        if (state.state !== "ACTIVE" || !state.pushMessage) {
+          log(
+            `Session went away mid-sweep — dropped ${messages.length - index} ` +
+              "already-consumed message(s)",
+          );
+          break;
+        }
+
+        verbose(
+          `Inbound message from ${message.meta.user ?? "unknown"} ` +
+            `in ${message.meta.chat_id ?? "unknown channel"}`
+        );
+        state.pushMessage({
+          type: "user",
+          message: {
+            role: "user",
+            content: formatChannelPrompt(message.content, message.meta),
+          },
+          parent_tool_use_id: null,
+        });
+      }
+    } catch (error: unknown) {
+      log(`Incoming sweep failed: ${getErrorMessage(error)}`);
+    } finally {
+      sweeping = false;
+    }
+  }, INCOMING_POLL_INTERVAL_MS);
+}
+
+export function stopIncomingMonitor(state: MetaState): void {
+  if (state.incomingTimer) {
+    clearInterval(state.incomingTimer);
+    state.incomingTimer = null;
   }
 }
 

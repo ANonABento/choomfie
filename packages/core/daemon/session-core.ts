@@ -18,22 +18,38 @@ const CHANNEL_SERVER_NAME = "choomfie";
 const CHANNEL_TARGET = `server:${CHANNEL_SERVER_NAME}`;
 
 /**
- * Opt the Choomfie MCP server in to pushing inbound messages.
+ * Try to opt the Choomfie MCP server in to pushing inbound messages.
+ *
+ * Expected to fail, and no longer load-bearing — kept as a tripwire.
  *
  * The `--dangerously-load-development-channels` flag only makes the server
  * *eligible*: it puts it on the allowlist. Something still has to enable it,
- * and interactive Claude Code does that for you. A session driven through the
- * Agent SDK does not, so the capability was never registered and every
- * `notifications/claude/channel` was dropped — the worker booted, Discord went
- * green, the typing indicator started, and no message ever reached Claude.
- * Confirmed against the MCP logs: of every daemon session ever recorded, none
- * logged "Channel notifications registered"; the one foreground session did,
- * and answered six messages.
+ * and interactive Claude Code does that automatically on its MCP-connect path.
+ * A session driven through the Agent SDK never runs that path, so the
+ * capability was never registered and every `notifications/claude/channel` was
+ * dropped — the worker booted, Discord went green, the typing indicator
+ * started, and no message ever reached Claude.
+ *
+ * The one SDK-facing way in is `Query.enableChannel()`, and it refuses:
+ *
+ *   server choomfie is not plugin-sourced; channel_enable requires a
+ *   marketplace plugin
+ *
+ * It resolves `config.pluginSource` to a `name@marketplace` pair before it will
+ * consider anything else, and `SdkPluginConfig` only offers `{ type: 'local',
+ * path }`. Unlike the automatic path, there is no `dev` bypass. Nothing on our
+ * side can satisfy it.
+ *
+ * So daemon sessions get their messages another way: the worker writes each one
+ * to `meta/incoming` and the daemon injects it directly (`daemon/incoming.ts`). This
+ * call stays because the day it starts succeeding is worth knowing about, and
+ * because silence is what made the original failure take a day to find. It is
+ * safe to leave failing — the worker sends no notification for a registered
+ * capability to receive, so nothing double-delivers if it ever works.
  *
  * `enableChannel` is real on the Query object but absent from the SDK's `.d.ts`
  * (`SDKControlChannelEnableRequest` is referenced in the control-request union
- * and never declared), hence the cast and the runtime check. If a future SDK
- * renames it we want a loud log, not a bot that silently goes deaf again.
+ * and never declared), hence the cast and the runtime check.
  */
 export async function enableChannelNotifications(session: Query): Promise<void> {
   const enable = (
@@ -153,13 +169,12 @@ export function createSession(
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       plugins: [{ type: "local", path: PLUGIN_DIR }],
-      // Without this the session loads Choomfie's MCP server but refuses to
-      // register its `claude/channel` capability ("server choomfie not in
-      // --channels list for this session"). The worker still boots and the bot
-      // still shows online, but every incoming Discord message — forwarded as a
-      // `notifications/claude/channel` notification — is dropped on the floor,
-      // so Choomfie never answers. Foreground mode passes the same flag; see
-      // the `choomfie` launcher script.
+      // Puts the server on the session's channel allowlist. Foreground mode
+      // needs this — without it Claude Code skips registration with "server
+      // choomfie not in --channels list for this session" and every Discord
+      // message is dropped. Here it is necessary but not sufficient (see
+      // `enableChannelNotifications` above), and kept so both launch paths
+      // stay identical in what they ask for.
       extraArgs: { [CHANNELS_FLAG]: CHANNEL_TARGET },
       systemPrompt: {
         type: "preset",

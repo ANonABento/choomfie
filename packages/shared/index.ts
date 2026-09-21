@@ -71,6 +71,17 @@ export {
   type DaemonControlCommand,
   type DaemonControlRequest,
 } from "./daemon-control.ts";
+export {
+  INCOMING_POLL_INTERVAL_MS,
+  INCOMING_MESSAGE_STALE_MS,
+  INCOMING_MAX_PENDING,
+  daemonIncomingDir,
+  inboundMessageFilename,
+  parseInboundMessage,
+  isInboundMessageStale,
+  isDaemonOwnedProcess,
+  type InboundMessage,
+} from "./daemon-incoming.ts";
 
 // Paths
 export {

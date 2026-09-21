@@ -7,13 +7,17 @@
  * `meta/control.json` (written by `requestDaemonControl` below) is the worker's.
  */
 
-import { readFile } from "node:fs/promises";
+import { readdir, readFile, unlink } from "node:fs/promises";
 import {
+  INCOMING_MAX_PENDING,
   daemonControlPath,
+  daemonIncomingDir,
+  inboundMessageFilename,
   readLiveDaemonPid,
   writeJsonAtomic,
   type DaemonControlCommand,
   type DaemonControlRequest,
+  type InboundMessage,
 } from "@choomfie/shared";
 
 /** The subset of the state file anything here reads. */
@@ -190,6 +194,57 @@ export async function requestDaemonControl(
     chatId: opts.chatId,
   };
   await writeJsonAtomic(daemonControlPath(dataDir), request);
+}
+
+/**
+ * Hand an inbound Discord message to the daemon.
+ *
+ * The worker's other write-up path. Only used when the daemon launched this
+ * worker: a daemon session cannot register the `claude/channel` capability, so
+ * the MCP notification that carries messages in foreground mode would be
+ * dropped. See `@choomfie/shared/daemon-incoming.ts` for why, and
+ * `daemon/incoming.ts` for the reader.
+ *
+ * Fire-and-forget, like `requestDaemonControl`: there is no reply channel and
+ * nothing the worker could usefully do with a failure except say so loudly.
+ */
+export async function deliverInboundMessage(
+  dataDir: string,
+  content: string,
+  meta: Record<string, string>,
+): Promise<void> {
+  const receivedAt = Date.now();
+  const message: InboundMessage = { content, meta, receivedAt };
+  const dir = daemonIncomingDir(dataDir);
+
+  await writeJsonAtomic(
+    `${dir}/${inboundMessageFilename(receivedAt, meta.message_id)}`,
+    message,
+  );
+
+  await pruneIncoming(dir);
+}
+
+/**
+ * Drop the oldest pending messages once the incoming queue grows past its cap.
+ *
+ * Nothing consumes the incoming queue while the daemon is down, and the worker cannot
+ * tell the difference between "down" and "busy". Staleness already means those
+ * messages will never be answered; this keeps them from accumulating in the
+ * data dir until someone notices.
+ */
+async function pruneIncoming(dir: string): Promise<void> {
+  try {
+    const names = (await readdir(dir)).filter((n) => n.endsWith(".json")).sort();
+    if (names.length <= INCOMING_MAX_PENDING) return;
+
+    for (const name of names.slice(0, names.length - INCOMING_MAX_PENDING)) {
+      await unlink(`${dir}/${name}`).catch(() => {});
+    }
+  } catch {
+    // Racing the daemon's sweep, or the directory is gone. Either way the next
+    // write recreates it and the cap applies again.
+  }
 }
 
 /** Human-readable context line, e.g. "48,120 / 120,000 (37.4% of window)". */

@@ -75,23 +75,17 @@ daemon.ts (always running)
 
 `daemon.ts` is a thin CLI entry point; the runtime lives in `packages/core/daemon/`. Sessions are cycled when context gets heavy (~120k tokens or 80 turns), capturing a handoff summary first. Full detail in [docs/daemon.md](docs/daemon.md).
 
-**`createSession` must pass `extraArgs: { "dangerously-load-development-channels": "server:choomfie" }`.** Claude Code gates the experimental `claude/channel` capability behind an explicit opt-in list; without the flag the session loads the MCP server and all its tools, the worker boots, and the bot shows online — but every incoming Discord message, forwarded as a `notifications/claude/channel` notification, is dropped and Choomfie never answers. Foreground mode passes the same flag in `bin/choomfie`.
+**Both launch paths must pass `--dangerously-load-development-channels server:choomfie`** — `extraArgs` in `createSession`, the flag itself in `bin/choomfie`. It puts the server on the session's channel allowlist. In foreground that is all it takes: without it every incoming Discord message is dropped and Choomfie never answers. In daemon mode it is necessary but not sufficient — see below.
 
-### Known broken: daemon mode does not receive Discord messages
+### Inbound messages: two routes, one per process
 
-**As of Agent SDK 0.2.90, `--daemon` cannot deliver inbound Discord messages.** The bot boots, shows online, starts typing on a message — and the session never sees it. `/status` looks healthy; turns and cost stay at zero.
+**A daemon session can never register Claude Code's `claude/channel` capability**, so the MCP notification that carries a Discord message in foreground mode is dropped. That is why daemon mode was deaf for so long: bot online, typing indicator on, zero turns. The automatic registration runs only on the **interactive** MCP-connect path, and the SDK-facing `Query.enableChannel()` refuses anything that isn't marketplace-sourced, which `{ type: 'local', path }` can never be.
 
-Verified across every session in `~/Library/Caches/claude-cli-nodejs/-Users-bentomac-choomfie/mcp-logs-choomfie/`: no daemon session has ever logged `Channel notifications registered`. The one foreground session that did handled six messages. Choomfie's own handoff summaries say "No Discord messages were handled this session."
+The capability was only a notification-to-prompt adapter, and the daemon already owns the prompt queue. So daemon-launched workers write each message to `meta/incoming/` and the daemon injects it itself (`packages/shared/daemon-incoming.ts` → `daemon/incoming.ts`). Full detail in [docs/daemon.md](docs/daemon.md).
 
-Why: Claude Code gates channel registration in a function that runs on the **interactive** MCP-connect path, logging either `Channel notifications registered` or `Channel notifications skipped: <reason>`. Daemon sessions log neither, so the gate never runs. The only SDK-facing entry point is `Query.enableChannel(serverName)` — real, but absent from the SDK's `.d.ts` — and it refuses with:
-
-```
-server choomfie is not plugin-sourced; channel_enable requires a marketplace plugin
-```
-
-because it requires `config.pluginSource` to resolve to a marketplace, while `SdkPluginConfig` only offers `{ type: 'local', path }`. `startSession` calls it anyway: it either starts working when that changes, or logs exactly why it didn't. Do not remove that call to quiet the warning — silence is what made this take a day to find.
-
-**Use foreground mode** (`choomfie`, or `choomfie --tmux --always-on` for always-on) until this is resolved. The likely fix is publishing Choomfie through a marketplace (`.claude-plugin/marketplace.json` + `extraKnownMarketplaces` + `enabledPlugins`), which would let `enableChannel` succeed.
+- **Exactly one route per process**, chosen by `isDaemonOwnedProcess()`. A daemon-launched worker writes the file and sends **no** notification — that is what keeps the capability harmless if it ever starts registering.
+- The injected prompt is byte-identical to Claude Code's `<channel …>` block, pinned by a test. Changing that shape changes how the persona behaves, invisibly.
+- `enableChannelNotifications()` still runs and still fails; it is a tripwire, logged at `--verbose`. Do not remove it to quiet the log — silence is what made this take a day to find.
 
 ### Two launch paths, one behaviour
 
@@ -143,7 +137,7 @@ Shapes and constraints that don't announce themselves. Getting one wrong compile
 - **Console output goes to stderr — stdout is the MCP stdio transport.** Entry point is `packages/core/supervisor.ts`.
 - **Hot-reload boundary:** worker code in `packages/core/` and all plugin packages are hot-reloadable via worker restart. Supervisor code (`supervisor.ts`, IPC types, MCP server) requires a full session restart (exit + re-run `choomfie`). `packages/shared/` changes require a worker restart at minimum.
 - Auto-restart triggers: persona switch, plugin enable/disable, voice config change — all send `request_restart` IPC → supervisor restarts worker → confirmation to the Discord channel.
-- The worker sits two processes below the daemon, so there is no IPC between them. `meta/worker-health.json` carries the heartbeat up; `meta/control.json` carries `/compact` and `/clear` requests down; `meta/daemon-state.json` carries daemon state down (read by `/status`, `/usage`, and the rate-limit alerter).
+- The worker sits two processes below the daemon, so there is no IPC between them. `meta/worker-health.json` carries the heartbeat up; `meta/incoming/` carries inbound Discord messages up; `meta/control.json` carries `/compact` and `/clear` requests down; `meta/daemon-state.json` carries daemon state down (read by `/status`, `/usage`, and the rate-limit alerter).
 
 **Settings**
 - `model` / `fallbackModel` are **top level, not under `daemon`** — they are not daemon-specific. Both the daemon (via the Agent SDK) and foreground/`--tmux` (via `bin/choomfie` → `scripts/resolve-model.ts`) read the same value. They used to live at `daemon.model`, which meant `/model` silently did nothing in foreground mode; `mergeConfig` migrates the old key forward and drops it.
