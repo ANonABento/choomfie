@@ -77,6 +77,22 @@ daemon.ts (always running)
 
 **`createSession` must pass `extraArgs: { "dangerously-load-development-channels": "server:choomfie" }`.** Claude Code gates the experimental `claude/channel` capability behind an explicit opt-in list; without the flag the session loads the MCP server and all its tools, the worker boots, and the bot shows online — but every incoming Discord message, forwarded as a `notifications/claude/channel` notification, is dropped and Choomfie never answers. Foreground mode passes the same flag in `bin/choomfie`.
 
+### Known broken: daemon mode does not receive Discord messages
+
+**As of Agent SDK 0.2.90, `--daemon` cannot deliver inbound Discord messages.** The bot boots, shows online, starts typing on a message — and the session never sees it. `/status` looks healthy; turns and cost stay at zero.
+
+Verified across every session in `~/Library/Caches/claude-cli-nodejs/-Users-bentomac-choomfie/mcp-logs-choomfie/`: no daemon session has ever logged `Channel notifications registered`. The one foreground session that did handled six messages. Choomfie's own handoff summaries say "No Discord messages were handled this session."
+
+Why: Claude Code gates channel registration in a function that runs on the **interactive** MCP-connect path, logging either `Channel notifications registered` or `Channel notifications skipped: <reason>`. Daemon sessions log neither, so the gate never runs. The only SDK-facing entry point is `Query.enableChannel(serverName)` — real, but absent from the SDK's `.d.ts` — and it refuses with:
+
+```
+server choomfie is not plugin-sourced; channel_enable requires a marketplace plugin
+```
+
+because it requires `config.pluginSource` to resolve to a marketplace, while `SdkPluginConfig` only offers `{ type: 'local', path }`. `startSession` calls it anyway: it either starts working when that changes, or logs exactly why it didn't. Do not remove that call to quiet the warning — silence is what made this take a day to find.
+
+**Use foreground mode** (`choomfie`, or `choomfie --tmux --always-on` for always-on) until this is resolved. The likely fix is publishing Choomfie through a marketplace (`.claude-plugin/marketplace.json` + `extraKnownMarketplaces` + `enabledPlugins`), which would let `enableChannel` succeed.
+
 ### Two launch paths, one behaviour
 
 `packages/core/daemon/session-core.ts` (`createSession`) and `bin/choomfie` start the same bot two different ways, and **anything that decides how a session behaves has to be set in both.** This has now drifted three times — the channels flag, `daemon.model` vs top-level `model`, and permission mode — each time producing a bot that looked fine and quietly wouldn't do its job.
