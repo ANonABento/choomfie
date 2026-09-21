@@ -38,6 +38,7 @@ export function createInitialState(settings: DaemonSettings): MetaState {
     modelUsage: {},
     rateLimit: null,
     controlTimer: null,
+    incomingTimer: null,
     totalCycles: 0,
     lastCycleReason: null,
     thresholds: { tokenThreshold, turnThreshold },
@@ -57,6 +58,10 @@ export async function cleanup(state: MetaState): Promise<void> {
   if (state.controlTimer) {
     clearInterval(state.controlTimer);
     state.controlTimer = null;
+  }
+  if (state.incomingTimer) {
+    clearInterval(state.incomingTimer);
+    state.incomingTimer = null;
   }
   try {
     state.closeGenerator?.();

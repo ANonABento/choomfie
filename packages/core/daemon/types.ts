@@ -106,6 +106,8 @@ export type MetaState = {
   rateLimit: RateLimitSnapshot | null;
   /** Polls for `/compact` and `/clear` requests from the worker. */
   controlTimer: ReturnType<typeof setInterval> | null;
+  /** Polls `meta/incoming` for inbound Discord messages from the worker. */
+  incomingTimer: ReturnType<typeof setInterval> | null;
   totalCycles: number;
   lastCycleReason: string | null;
   /** Cycling thresholds for this run, from config.json. */

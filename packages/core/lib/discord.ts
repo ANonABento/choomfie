@@ -25,9 +25,11 @@ import { clearGuildCommands, deployGlobalCommands } from "./command-deploy.ts";
 import { isAllowed, isOwner } from "./access.ts";
 import {
   errorMessage,
+  isDaemonOwnedProcess,
   type McpTransport,
   type NotificationMessage,
 } from "@choomfie/shared";
+import { deliverInboundMessage } from "./daemon-status.ts";
 import {
   dispatchPluginMessage,
   initializePlugins,
@@ -323,16 +325,36 @@ export function createDiscordClient(ctx: AppContext): Client {
       .replace(new RegExp(`<@!?${discord.user!.id}>`, "g"), "")
       .trim();
 
-    // Forward to Claude Code
-    notifyMcp(ctx, {
-      method: "notifications/claude/channel",
-      params: {
-        content:
-          cleanContent ||
-          "(empty message — user may have just mentioned you)",
-        meta,
-      },
-    });
+    const content =
+      cleanContent || "(empty message — user may have just mentioned you)";
+
+    // Forward to Claude Code — by whichever route this process actually has.
+    //
+    // Foreground sessions register the `claude/channel` capability and get the
+    // message as an MCP notification. Daemon sessions cannot register it (the
+    // SDK's `enableChannel` requires a marketplace-sourced plugin), so the
+    // notification would be dropped on the floor and the bot would type
+    // forever without answering. There, the message goes up the file channel
+    // and the daemon injects it into the session itself.
+    //
+    // Exactly one route per process, chosen by who launched it: if the
+    // capability ever starts registering under the daemon, no notification is
+    // waiting for it and nothing double-delivers.
+    if (isDaemonOwnedProcess()) {
+      try {
+        await deliverInboundMessage(ctx.DATA_DIR, content, meta);
+      } catch (error: unknown) {
+        // Nothing else can carry this message; the user is owed the reason.
+        console.error(
+          `[choomfie] failed to hand message ${message.id} to the daemon: ${errorMessage(error)}`
+        );
+      }
+    } else {
+      notifyMcp(ctx, {
+        method: "notifications/claude/channel",
+        params: { content, meta },
+      });
+    }
   });
 
   // Handle interactions (buttons, slash commands, modals)
