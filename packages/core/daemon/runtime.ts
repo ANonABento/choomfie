@@ -35,6 +35,7 @@ import { createMessageGenerator } from "./message-generator.ts";
 import { getErrorMessage } from "./error.ts";
 import {
   createSession,
+  enableChannelNotifications,
   extractAssistantText,
   generateSessionId,
   isUnrecoverableAnthropicError,
@@ -89,6 +90,20 @@ export async function startSession(
   });
 
   await new Promise((resolve) => setTimeout(resolve, 3000));
+
+  // Must happen before the session is advertised as ACTIVE: until the channel
+  // is enabled, every Discord message is dropped on the floor, and the worker
+  // has no way to know that — it starts a typing indicator and waits forever.
+  try {
+    await enableChannelNotifications(state.session);
+    log("Channel notifications enabled (choomfie MCP server)");
+  } catch (error: unknown) {
+    log(
+      `WARNING: could not enable channel notifications: ${getErrorMessage(error)}. ` +
+        "Discord messages will NOT reach this session — the bot will appear online, " +
+        "type, and never answer.",
+    );
+  }
 
   state.state = "ACTIVE";
   log("Session active");

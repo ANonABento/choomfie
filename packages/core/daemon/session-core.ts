@@ -13,7 +13,39 @@ import type { ModelSettings } from "./types.ts";
  * keep it in sync with the server name in `.mcp.json`.
  */
 const CHANNELS_FLAG = "dangerously-load-development-channels";
-const CHANNEL_TARGET = "server:choomfie";
+/** The MCP server name from .mcp.json. Keep both of these in sync with it. */
+const CHANNEL_SERVER_NAME = "choomfie";
+const CHANNEL_TARGET = `server:${CHANNEL_SERVER_NAME}`;
+
+/**
+ * Opt the Choomfie MCP server in to pushing inbound messages.
+ *
+ * The `--dangerously-load-development-channels` flag only makes the server
+ * *eligible*: it puts it on the allowlist. Something still has to enable it,
+ * and interactive Claude Code does that for you. A session driven through the
+ * Agent SDK does not, so the capability was never registered and every
+ * `notifications/claude/channel` was dropped — the worker booted, Discord went
+ * green, the typing indicator started, and no message ever reached Claude.
+ * Confirmed against the MCP logs: of every daemon session ever recorded, none
+ * logged "Channel notifications registered"; the one foreground session did,
+ * and answered six messages.
+ *
+ * `enableChannel` is real on the Query object but absent from the SDK's `.d.ts`
+ * (`SDKControlChannelEnableRequest` is referenced in the control-request union
+ * and never declared), hence the cast and the runtime check. If a future SDK
+ * renames it we want a loud log, not a bot that silently goes deaf again.
+ */
+export async function enableChannelNotifications(session: Query): Promise<void> {
+  const enable = (
+    session as unknown as { enableChannel?: (serverName: string) => Promise<void> }
+  ).enableChannel;
+  if (typeof enable !== "function") {
+    throw new Error(
+      "this Agent SDK build has no Query.enableChannel() — Discord messages cannot be delivered",
+    );
+  }
+  await enable.call(session, CHANNEL_SERVER_NAME);
+}
 
 export function generateSessionId(): string {
   return `s-${Date.now().toString(36)}`;
