@@ -110,6 +110,18 @@ export type MetaState = {
   incomingTimer: ReturnType<typeof setInterval> | null;
   totalCycles: number;
   lastCycleReason: string | null;
+  /**
+   * A prompt has been pushed (or the model is producing output) and no `result`
+   * has closed it yet. Cleared by every result, success or error.
+   */
+  turnInFlight: boolean;
+  /** Last prompt pushed or stream message received — the idle debounce clock. */
+  lastActivityAt: number;
+  /**
+   * A soft threshold was crossed; the cycle waits for the session to go idle.
+   * Holds the reason it will be recorded under. Null when nothing is pending.
+   */
+  pendingCycleReason: string | null;
   /** Cycling thresholds for this run, from config.json. */
   thresholds: DaemonThresholds;
   /** Model settings for this run, from config.json. Applied to every session. */

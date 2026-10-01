@@ -43,6 +43,8 @@ export async function writeDaemonState(state: MetaState): Promise<void> {
     costUsd: state.totalCostUsd,
     totalCycles: state.totalCycles,
     lastCycleReason: state.lastCycleReason,
+    /** A threshold was crossed and the cycle is waiting for the session to go idle. */
+    pendingCycleReason: state.pendingCycleReason,
     workerHealth: {
       processAlive: state.workerHealth.processAlive,
       lastHealthyAt: state.workerHealth.lastHealthyAt || null,
