@@ -20,8 +20,8 @@ daemon.ts (always running)
 - Uses `@anthropic-ai/claude-agent-sdk` to spawn Claude Code sessions programmatically
 - Inbound Discord messages arrive through `meta/incoming`, **not** the `claude/channel` MCP capability — see **Inbound Message Delivery** below. Everything outbound (tool calls, `reply`) still goes through MCP as normal
 - **`createSession` must pass `extraArgs: { "dangerously-load-development-channels": "server:choomfie" }`.** Claude Code gates the experimental `claude/channel` capability behind an explicit opt-in list. Necessary but not sufficient here (the flag only puts the server on the allowlist; something still has to enable it, and nothing can on the SDK path), and kept so both launch paths ask for the same thing. Foreground mode passes the same flag in `bin/choomfie`, where it *is* sufficient
-- Sessions are cycled when context gets heavy (~120k tokens or 80 turns)
-- Before cycling: captures a handoff summary from Claude, persists to `meta/handoffs.json`
+- Sessions are cycled when context gets heavy (~120k tokens or 80 turns) — **but only once the session is idle**. See **When a Cycle Runs** below
+- Before cycling: captures a handoff summary from Claude, persists to `meta/handoffs.json`. If a turn is still running it waits for it first (up to `HANDOFF_TURN_DRAIN_TIMEOUT`, 2 min)
 - New session gets handoff context injected into system prompt
 - `/compact` and `/clear` in Discord cycle on demand — see **Daemon Control Channel** below
 - Worker health monitored via the worker's heartbeat file (`meta/worker-health.json`, rewritten every 10s) every 30s; unhealthy = stale beat (>45s) or Discord gateway not ready. 3 consecutive failures trigger a full session cycle. Falls back to a `choomfie.pid` process check when no heartbeat exists yet (worker still booting)
@@ -29,6 +29,16 @@ daemon.ts (always running)
 - Daemon state written to `meta/daemon-state.json` for `/status` integration. `context` reports the live `getContextUsage()` reading — the number cycling is actually compared against — alongside its threshold; `cumulativeInputTokens` is the separate ever-growing total. These were once one field named `tokens.current`, which reported the cumulative figure against the context threshold and so could never reach it
 - Sessions always run on Anthropic. Authentication/billing errors abort the retry loop immediately; rate limits and overload still retry with backoff
 - Crash recovery with exponential backoff (2s → 60s max)
+
+### When a Cycle Runs
+
+The context monitor checks every 60s, on a timer that knows nothing about turns. It used to cycle the moment a threshold was crossed, which replaced sessions halfway through multi-step work. The handoff was worse than useless: `waitForResult` takes the *next* result, so the summary request got back the in-flight turn's own result. One handoff read, in full, "Reading the mockup and the gripper memory before I build the real symmetric version."
+
+- Crossing `tokenThreshold` or `turnThreshold` only sets `pendingCycleReason` (also written to `daemon-state.json`)
+- The pending cycle runs from the incoming sweep (every 1s), once `isIdleForCycle` holds: no turn in flight, `meta/incoming/` empty, and `CYCLE_IDLE_DEBOUNCE_MS` (45s) since the last prompt or stream message. Any new message restarts that clock
+- `turnInFlight` is set by every push onto the prompt queue and by any assistant output, and cleared by every `result`, error results included, so a failed turn cannot block cycling forever
+- **Hard ceiling:** at `hardCeiling()` the cycle is forced even mid-task (`token_ceiling`). That is 1.5× `tokenThreshold` (180k by default), capped at 90% of the model's reported window and never below the threshold
+- Not deferred: worker-unhealthy cycles and `/compact` / `/clear`. They still wait for an in-flight turn before taking the summary
 
 ### Usage Reporting (`/usage`)
 

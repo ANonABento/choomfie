@@ -6,12 +6,17 @@ import type {
   SDKRateLimitEvent,
   SDKResultMessage,
   SDKResultSuccess,
+  SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   CONTEXT_CHECK_FAILURE_LIMIT,
   CONTEXT_CHECK_INTERVAL,
+  CONTEXT_HARD_CEILING_MAX_FRACTION,
+  CONTEXT_HARD_CEILING_RATIO,
+  CYCLE_IDLE_DEBOUNCE_MS,
   DATA_DIR,
   HANDOFF_SUMMARY_TIMEOUT,
+  HANDOFF_TURN_DRAIN_TIMEOUT,
   INITIAL_RESTART_BACKOFF,
   MAX_ERROR_RETRIES,
   MAX_RESTART_BACKOFF,
@@ -72,6 +77,9 @@ export async function startSession(
   // Per-session, so it resets with the session. `state.rateLimit` deliberately
   // does not — plan windows belong to the account and outlive any session.
   state.modelUsage = {};
+  state.turnInFlight = false;
+  state.lastActivityAt = Date.now();
+  state.pendingCycleReason = null;
 
   const sessionId = generateSessionId();
   state.sessionId = sessionId;
@@ -79,7 +87,14 @@ export async function startSession(
 
   log("Starting new Claude Code session...");
 
-  const { generator, push, close } = createMessageGenerator();
+  const { generator, push: enqueue, close } = createMessageGenerator();
+  // Every prompt opens a turn and restarts the idle clock, whoever pushed it —
+  // the incoming sweep, the cycle announcement, or the handoff request.
+  const push = (msg: SDKUserMessage) => {
+    state.turnInFlight = true;
+    state.lastActivityAt = Date.now();
+    enqueue(msg);
+  };
   state.pushMessage = push;
   state.closeGenerator = close;
 
@@ -250,6 +265,13 @@ export async function handleStreamError(
 }
 
 export function handleSessionMessage(state: MetaState, message: SDKMessage): void {
+  // Anything the session emits means it is not idle. A result closes the turn
+  // (error results too, or a failed turn would block cycling forever); output
+  // from the model means one is open, even if the SDK merged queued prompts.
+  state.lastActivityAt = Date.now();
+  if (message.type === "result") state.turnInFlight = false;
+  else if (message.type === "assistant") state.turnInFlight = true;
+
   switch (message.type) {
     case "result": {
       const result = message as SDKResultMessage;
@@ -377,16 +399,25 @@ export function startContextMonitor(state: MetaState): void {
           `$${state.totalCostUsd.toFixed(4)}`
       );
 
-      void writeDaemonState(state);
+      if (tokens >= hardCeiling(state)) {
+        // The one case that doesn't wait: past here the session is about to
+        // hit the real context limit, finished or not.
+        state.lastCycleReason = "token_ceiling";
+        log(`Hard ceiling reached (${tokens} >= ${hardCeiling(state)}) — forcing session cycle`);
+        await cycleSession(state, tokens);
+        return;
+      }
 
       if (shouldCycle(state, tokens)) {
-        state.lastCycleReason =
+        markCyclePending(
+          state,
           state.turnCount >= state.thresholds.turnThreshold
             ? "turn_threshold"
-            : "token_threshold";
-        log("Threshold reached — initiating session cycle");
-        await cycleSession(state, tokens);
+            : "token_threshold"
+        );
       }
+
+      void writeDaemonState(state);
     } catch (error: unknown) {
       state.contextCheckFailures++;
       log(
@@ -396,9 +427,7 @@ export function startContextMonitor(state: MetaState): void {
       if (state.contextCheckFailures >= CONTEXT_CHECK_FAILURE_LIMIT) {
         log("Context checks failing repeatedly — falling back to turn-count cycling");
         if (shouldCycle(state)) {
-          state.lastCycleReason = "turn_threshold_fallback";
-          log("Turn threshold reached (fallback) — initiating session cycle");
-          await cycleSession(state);
+          markCyclePending(state, "turn_threshold_fallback");
         }
       }
     }
@@ -416,8 +445,96 @@ export function shouldCycle(state: MetaState, contextTokens?: number): boolean {
   return false;
 }
 
-export async function captureHandoffSummary(state: MetaState): Promise<string> {
+/**
+ * Past this, a cycle is forced even mid-task. Never below the soft threshold,
+ * and kept under the model's real window when `getContextUsage` reported one.
+ */
+export function hardCeiling(state: MetaState): number {
+  const { tokenThreshold } = state.thresholds;
+  let ceiling = Math.round(tokenThreshold * CONTEXT_HARD_CEILING_RATIO);
+  if (state.context.maxTokens) {
+    ceiling = Math.min(
+      ceiling,
+      Math.floor(state.context.maxTokens * CONTEXT_HARD_CEILING_MAX_FRACTION)
+    );
+  }
+  return Math.max(ceiling, tokenThreshold);
+}
+
+/**
+ * Record that a soft threshold was crossed. The cycle itself waits for
+ * `isIdleForCycle` — cycling straight from the context timer is what used to
+ * replace sessions halfway through a multi-step task.
+ */
+export function markCyclePending(state: MetaState, reason: string): void {
+  if (state.pendingCycleReason) return;
+  state.pendingCycleReason = reason;
+  log(`Threshold reached (${reason}) — cycle pending until the session is idle`);
+}
+
+/**
+ * Idle enough to cycle without cutting anything off: no turn in flight, no
+ * inbound message waiting, and quiet for the debounce period.
+ */
+export function isIdleForCycle(
+  state: MetaState,
+  incomingEmpty: boolean,
+  now = Date.now()
+): boolean {
+  return (
+    state.state === "ACTIVE" &&
+    !state.turnInFlight &&
+    incomingEmpty &&
+    now - state.lastActivityAt >= CYCLE_IDLE_DEBOUNCE_MS
+  );
+}
+
+/** Run the pending cycle, if there is one and the session has gone idle. */
+export async function runPendingCycleIfIdle(
+  state: MetaState,
+  incomingEmpty: boolean
+): Promise<void> {
+  if (!state.pendingCycleReason || !isIdleForCycle(state, incomingEmpty)) return;
+  state.lastCycleReason = state.pendingCycleReason;
+  log(`Session idle — running pending cycle (${state.pendingCycleReason})`);
+  await cycleSession(state, state.context.tokens ?? undefined);
+}
+
+/**
+ * Wait (bounded) for the in-flight turn to finish. `waitForResult` takes the
+ * *next* result, so asking for a summary while a turn is running hands back
+ * that turn's result instead — which is how a handoff once read, in full,
+ * "Reading the mockup and the gripper memory before I build the real
+ * symmetric version."
+ */
+export async function waitForTurnToFinish(
+  state: MetaState,
+  timeoutMs: number,
+  pollMs = 250
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (state.turnInFlight) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  return true;
+}
+
+export async function captureHandoffSummary(
+  state: MetaState,
+  drainTimeoutMs = HANDOFF_TURN_DRAIN_TIMEOUT
+): Promise<string> {
   if (!state.pushMessage || !state.session) {
+    return "No summary available (no active session)";
+  }
+
+  if (state.turnInFlight) {
+    log("Waiting for the in-flight turn to finish before requesting a summary...");
+    if (!(await waitForTurnToFinish(state, drainTimeoutMs))) {
+      log(`Turn still running after ${drainTimeoutMs}ms — requesting summary anyway`);
+    }
+  }
+  if (!state.pushMessage) {
     return "No summary available (no active session)";
   }
 
@@ -615,6 +732,12 @@ export function startIncomingMonitor(state: MetaState): void {
     sweeping = true;
     try {
       const messages = await takeInboundMessages();
+      if (messages.length === 0) {
+        // The queue is empty, so this is the one place that can tell whether a
+        // pending cycle may run. Delivered messages restart the idle clock.
+        await runPendingCycleIfIdle(state, true);
+        return;
+      }
       for (const [index, message] of messages.entries()) {
         // Re-checked per message: a batch can outlive the session it started
         // under. `push` on a closed generator does not throw — it appends to a

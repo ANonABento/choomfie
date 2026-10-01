@@ -12,7 +12,16 @@ import {
   isAnthropicError,
   isUnrecoverableAnthropicError,
 } from "../../daemon/session-core.ts";
-import { handleSessionMessage, shouldCycle } from "../../daemon/runtime.ts";
+import { CYCLE_IDLE_DEBOUNCE_MS } from "../../daemon/constants.ts";
+import {
+  captureHandoffSummary,
+  handleSessionMessage,
+  hardCeiling,
+  isIdleForCycle,
+  markCyclePending,
+  runPendingCycleIfIdle,
+  shouldCycle,
+} from "../../daemon/runtime.ts";
 import type { MetaState } from "../../daemon/types.ts";
 
 function activeState(turnThreshold = 80, tokenThreshold = 120_000): MetaState {
@@ -52,6 +61,119 @@ describe("shouldCycle", () => {
   test("token threshold is ignored when context usage is unavailable", () => {
     const state = activeState(80, 10);
     expect(shouldCycle(state)).toBe(false);
+  });
+});
+
+describe("deferred cycling", () => {
+  function idleState(): MetaState {
+    const state = activeState();
+    state.turnInFlight = false;
+    state.lastActivityAt = Date.now() - CYCLE_IDLE_DEBOUNCE_MS - 1;
+    return state;
+  }
+
+  test("idle only with no turn in flight, an empty queue, and the debounce elapsed", () => {
+    const state = idleState();
+    expect(isIdleForCycle(state, true)).toBe(true);
+
+    expect(isIdleForCycle(state, false)).toBe(false);
+
+    state.turnInFlight = true;
+    expect(isIdleForCycle(state, true)).toBe(false);
+    state.turnInFlight = false;
+
+    state.lastActivityAt = Date.now() - CYCLE_IDLE_DEBOUNCE_MS + 1_000;
+    expect(isIdleForCycle(state, true)).toBe(false);
+  });
+
+  test("never idle outside ACTIVE", () => {
+    const state = idleState();
+    for (const phase of ["STARTING", "DRAINING", "CYCLING"] as const) {
+      state.state = phase;
+      expect(isIdleForCycle(state, true)).toBe(false);
+    }
+  });
+
+  test("stream output opens a turn and restarts the clock; any result closes it", () => {
+    const state = idleState();
+
+    handleSessionMessage(state, { type: "assistant", message: { content: [] } } as never);
+    expect(state.turnInFlight).toBe(true);
+    expect(isIdleForCycle(state, true)).toBe(false);
+
+    handleSessionMessage(state, { type: "result", subtype: "error_during_execution" } as never);
+    expect(state.turnInFlight).toBe(false);
+    // Closed, but the debounce restarts from the result.
+    expect(isIdleForCycle(state, true)).toBe(false);
+    expect(isIdleForCycle(state, true, Date.now() + CYCLE_IDLE_DEBOUNCE_MS)).toBe(true);
+  });
+
+  test("a threshold crossing only marks the cycle pending", async () => {
+    const state = activeState();
+    state.turnInFlight = true;
+    state.lastActivityAt = Date.now();
+
+    markCyclePending(state, "token_threshold");
+    expect(state.pendingCycleReason).toBe("token_threshold");
+
+    // Busy: runPendingCycleIfIdle must leave the session alone.
+    await runPendingCycleIfIdle(state, true);
+    expect(state.state).toBe("ACTIVE");
+    expect(state.totalCycles).toBe(0);
+
+    // A second crossing doesn't overwrite the first reason.
+    markCyclePending(state, "turn_threshold");
+    expect(state.pendingCycleReason).toBe("token_threshold");
+  });
+
+  test("hard ceiling is 1.5x the threshold, capped below the real window", () => {
+    const state = activeState(80, 120_000);
+    expect(hardCeiling(state)).toBe(180_000);
+
+    state.context.maxTokens = 150_000;
+    expect(hardCeiling(state)).toBe(135_000);
+
+    // Never below the soft threshold, however small the window.
+    state.context.maxTokens = 100_000;
+    expect(hardCeiling(state)).toBe(120_000);
+  });
+
+  test("handoff summary waits for the in-flight turn instead of taking its result", async () => {
+    const state = activeState();
+    state.session = {} as never;
+    state.turnInFlight = true;
+    const pushed: string[] = [];
+    state.pushMessage = (msg) => {
+      state.turnInFlight = true;
+      pushed.push(String(msg.message.content));
+    };
+
+    const summary = captureHandoffSummary(state, 5_000);
+
+    // The in-flight turn finishes first; its text must not become the summary.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(pushed).toHaveLength(0);
+    handleSessionMessage(state, {
+      type: "result",
+      subtype: "success",
+      num_turns: 3,
+      total_cost_usd: 0,
+      result: "Reading the mockup before I build the real version.",
+    } as never);
+
+    // Then the summary prompt goes out, and its own result is what's captured.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]).toContain("handoff summary");
+    handleSessionMessage(state, {
+      type: "result",
+      subtype: "success",
+      num_turns: 1,
+      total_cost_usd: 0,
+      result: "## Handoff Summary",
+    } as never);
+
+    expect(await summary).toBe("## Handoff Summary");
   });
 });
 

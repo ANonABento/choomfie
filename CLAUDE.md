@@ -73,7 +73,7 @@ daemon.ts (always running)
        └→ supervisor.ts (MCP stdio) → worker.ts (Discord)
 ```
 
-`daemon.ts` is a thin CLI entry point; the runtime lives in `packages/core/daemon/`. Sessions are cycled when context gets heavy (~120k tokens or 80 turns), capturing a handoff summary first. Full detail in [docs/daemon.md](docs/daemon.md).
+`daemon.ts` is a thin CLI entry point; the runtime lives in `packages/core/daemon/`. Sessions are cycled when context gets heavy (~120k tokens or 80 turns) — once the session is idle, unless a 180k hard ceiling forces it — capturing a handoff summary first. Full detail in [docs/daemon.md](docs/daemon.md).
 
 **Both launch paths must pass `--dangerously-load-development-channels server:choomfie`** — `extraArgs` in `createSession`, the flag itself in `bin/choomfie`. It puts the server on the session's channel allowlist. In foreground that is all it takes: without it every incoming Discord message is dropped and Choomfie never answers. In daemon mode it is necessary but not sufficient — see below.
 

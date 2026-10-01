@@ -41,6 +41,9 @@ export function createInitialState(settings: DaemonSettings): MetaState {
     incomingTimer: null,
     totalCycles: 0,
     lastCycleReason: null,
+    turnInFlight: false,
+    lastActivityAt: 0,
+    pendingCycleReason: null,
     thresholds: { tokenThreshold, turnThreshold },
     models: { model, fallbackModel },
   };
