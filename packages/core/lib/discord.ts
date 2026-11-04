@@ -30,7 +30,7 @@ import {
   type NotificationMessage,
 } from "@choomfie/shared";
 import { deliverInboundMessage } from "./daemon-status.ts";
-import { decideRoute, dispatchToBrain, installBrainPoster } from "./brain-router.ts";
+import { decideRoute, dispatchToBrain, installBrainPoster, parentChannelId } from "./brain-router.ts";
 import {
   dispatchPluginMessage,
   initializePlugins,
@@ -326,7 +326,7 @@ export function createDiscordClient(ctx: AppContext): Client {
     // with /brain — and even then only for whoever brainAccess permits.
     const route = decideRoute({
       channelId: message.channelId,
-      parentId: message.channel.isThread() ? message.channel.parentId : null,
+      parentId: parentChannelId(message.channel),
       isOwner: owner,
       isConversationMode,
       access: ctx.config.getBrainAccess(),

@@ -97,7 +97,20 @@ export interface SendableChannel {
     reply?: { messageReference: string };
     components?: unknown[];
     embeds?: unknown[];
+    allowedMentions?: { parse: never[]; repliedUser?: boolean };
   }): Promise<{ id: string } | unknown>;
+}
+
+/**
+ * Brain output is outside text: an `@everyone` or `<@&role>` in it must not
+ * ping anyone. Replying to the asker still notifies them, as a normal reply.
+ */
+export const NO_MENTIONS = { parse: [] as never[], repliedUser: true };
+
+/** The parent channel of a thread, so a thread can inherit its channel's brain. */
+export function parentChannelId(channel: unknown): string | null {
+  const c = channel as { isThread?: () => boolean; parentId?: string | null } | null;
+  return c?.isThread?.() ? (c.parentId ?? null) : null;
 }
 
 export interface PendingApproval {
@@ -184,6 +197,7 @@ export async function postBrainReply(
   for (let i = 0; i < chunks.length; i++) {
     const last = i === chunks.length - 1;
     const sent = await channel.send({
+      allowedMentions: NO_MENTIONS,
       content: chunks[i],
       ...(i === 0 && replyTo ? { reply: { messageReference: replyTo } } : {}),
       ...(last && reply.files?.length ? { files: reply.files } : {}),
@@ -195,7 +209,7 @@ export async function postBrainReply(
   // One message per approval, so each card is resolved on its own.
   const label = getBrain(brainId)?.label ?? brainId;
   for (const approval of reply.approvals ?? []) {
-    const sent = await channel.send(approvalMessage(label, approval));
+    const sent = await channel.send({ ...approvalMessage(label, approval), allowedMentions: NO_MENTIONS });
     const id = (sent as { id?: unknown } | undefined)?.id;
     if (typeof id === "string") pendingApprovals.set(id, { brainId, chatKey, approval });
   }
@@ -228,6 +242,7 @@ export function dispatchToBrain(
       console.error(`[brain:${brain.id}] ${errorMessage(e)}`);
       await channel
         .send({
+          allowedMentions: NO_MENTIONS,
           content: `⚠️ ${brain.label} didn't answer: ${errorMessage(e).slice(0, 300)}`,
           reply: { messageReference: message.messageId },
         })

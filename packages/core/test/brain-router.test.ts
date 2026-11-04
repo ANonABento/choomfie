@@ -179,3 +179,63 @@ describe("approval cards", () => {
     expect(sent).toHaveLength(1);
   });
 });
+
+describe("brain output never pings", () => {
+  test("replies, approvals and errors all go out with mentions disabled", async () => {
+    const sent: { allowedMentions?: { parse: unknown[] } }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: `m${sent.length}` }) };
+    await postBrainReply(channel, "waymond", "c1", {
+      text: "@everyone <@&123> hi",
+      approvals: [{ id: "x", title: "t", detail: "@everyone", approveLabel: "Send", declineLabel: "No" }],
+    });
+    await dispatchToBrain({} as never, fake("waymond", async () => { throw new Error("@everyone boom"); }), channel, {
+      chatKey: "c9", messageId: "m", content: "x", meta: {}, filePaths: [],
+    });
+    expect(sent).toHaveLength(3);
+    for (const s of sent) expect(s.allowedMentions?.parse).toEqual([]);
+  });
+});
+
+describe("/clear and /compact follow the channel's brain", () => {
+  async function run(command: "clear" | "compact", channelBrain: string | undefined, reset = true) {
+    const { commands, registerBrain, unregisterBrain } = await import("@choomfie/shared");
+    await import("../lib/handlers/session-commands.ts");
+    const resets: string[] = [];
+    registerBrain({ id: "testbrain", label: "TestBrain", send: async () => ({ text: "" }), ...(reset ? { reset: async (k: string) => void resets.push(k) } : {}) });
+    const replies: { content?: string; embeds?: unknown[] }[] = [];
+    const interaction = {
+      channelId: "chan1",
+      channel: { isThread: () => false },
+      user: { id: "owner" },
+      reply: async (o: (typeof replies)[number]) => void replies.push(o),
+    };
+    const ctx = {
+      ownerUserId: "owner",
+      DATA_DIR: "/nonexistent-choomfie-test",
+      config: { getChannelBrain: (id: string) => (id === "chan1" ? channelBrain : undefined) },
+    };
+    try {
+      await commands.get(command)!.handler(interaction as never, ctx as never);
+    } finally {
+      unregisterBrain("testbrain");
+    }
+    return { replies, resets };
+  }
+
+  test("/clear in a brain channel resets that brain's conversation for this channel only", async () => {
+    const { replies, resets } = await run("clear", "testbrain");
+    expect(resets).toEqual(["chan1"]);
+    expect(JSON.stringify(replies[0].embeds)).toContain("Fresh TestBrain conversation");
+  });
+
+  test("/compact in a brain channel explains instead of touching Claude", async () => {
+    const { replies, resets } = await run("compact", "testbrain");
+    expect(resets).toEqual([]);
+    expect(replies[0].content).toContain("manages its own context");
+  });
+
+  test("Claude channels keep the daemon behaviour (foreground notice here)", async () => {
+    const { replies } = await run("clear", undefined);
+    expect(replies[0].content).toContain("foreground mode");
+  });
+});

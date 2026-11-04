@@ -2,7 +2,6 @@
  * `/brain` — choose who answers in this channel (owner only).
  *
  *   /brain set brain:<id>   this channel/thread now answers with <id>; `claude` clears it
- *   /brain new              start a fresh backend conversation here
  *   /brain stop             interrupt the reply in progress here
  *   /brain status           what answers here, and who it answers
  *
@@ -10,7 +9,8 @@
  * (`brain:choice:<n>`): clicking one sends that option to the brain.
  *
  * Threads inherit their parent channel's brain unless set directly, but each
- * thread is its own backend conversation.
+ * thread is its own backend conversation. Starting over is `/clear`, which
+ * follows the channel's brain — one command for every brain.
  */
 
 import {
@@ -28,6 +28,7 @@ import {
   clearPendingApproval,
   dispatchToBrain,
   getPendingApproval,
+  parentChannelId,
   resolveBrainId,
   takeChoices,
   type SendableChannel,
@@ -36,10 +37,6 @@ import { isAllowed, isOwner } from "../access.ts";
 import { onMessageReceived } from "../typing.ts";
 import { requireOwner } from "./shared.ts";
 
-function parentOf(channel: unknown): string | null {
-  const c = channel as { isThread?: () => boolean; parentId?: string | null } | null;
-  return c?.isThread?.() ? (c.parentId ?? null) : null;
-}
 
 function label(id: string): string {
   return id === CLAUDE_BRAIN ? "Claude" : (getBrain(id)?.label ?? `${id} (not loaded)`);
@@ -57,7 +54,6 @@ registerCommand("brain", {
           o.setName("brain").setDescription("claude, or a loaded brain").setRequired(true).setAutocomplete(true)
         )
     )
-    .addSubcommand((s) => s.setName("new").setDescription("Start a fresh conversation with this channel's brain"))
     .addSubcommand((s) => s.setName("stop").setDescription("Interrupt the reply in progress here"))
     .addSubcommand((s) => s.setName("status").setDescription("Show what answers here"))
     .toJSON(),
@@ -74,7 +70,7 @@ registerCommand("brain", {
   handler: async (interaction, ctx) => {
     if (await requireOwner(interaction, ctx)) return;
     const channelId = interaction.channelId;
-    const parentId = parentOf(interaction.channel);
+    const parentId = parentChannelId(interaction.channel);
     const sub = interaction.options.getSubcommand();
     const current = resolveBrainId(channelId, parentId, (id) => ctx.config.getChannelBrain(id));
     const reply = (content: string) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
@@ -95,21 +91,6 @@ registerCommand("brain", {
           : `This channel is now answered by **${label(now)}** — for ${who}. Others still get Claude. ` +
               "Change who with `/config setting:brainAccess`."
       );
-      return;
-    }
-
-    if (sub === "new") {
-      if (current === CLAUDE_BRAIN) {
-        await reply("Claude's conversation is shared by every channel — use `/compact` or `/clear` instead.");
-        return;
-      }
-      const brain = getBrain(current);
-      if (!brain?.reset) {
-        await reply(`**${label(current)}** can't start a fresh conversation.`);
-        return;
-      }
-      await brain.reset(channelId);
-      await interaction.reply(`Started a fresh **${brain.label}** conversation in this channel.`);
       return;
     }
 

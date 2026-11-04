@@ -27,8 +27,12 @@ const BRAIN_ID = "waymond";
 const WATCH_EVERY_MS = 60_000;
 const WATCH_FOR_MS = 3 * 60 * 60_000;
 
+type Quiet = { content: string; allowedMentions: { parse: never[] } };
+/** Status lines quote Waymond's own words (intent, tool labels): never let them ping anyone. */
+const quiet = (content: string): Quiet => ({ content, allowedMentions: { parse: [] } });
+
 interface StatusChannel {
-  send(content: string): Promise<{ edit(content: string): Promise<unknown>; delete(): Promise<unknown> }>;
+  send(options: Quiet): Promise<{ edit(options: Quiet): Promise<unknown>; delete(): Promise<unknown> }>;
   sendTyping?(): Promise<unknown>;
 }
 
@@ -189,13 +193,13 @@ function createBrain(ctx: PluginContext): Brain {
               lastEdit = now;
               statusBusy = true;
               const line = progressLine(turn, elapsed);
-              void (status ? status.edit(line) : channel.send(line).then((m) => (status = m)))
+              void (status ? status.edit(quiet(line)) : channel.send(quiet(line)).then((m) => (status = m)))
                 .catch(() => {})
                 .finally(() => (statusBusy = false));
             },
             onApprovalNeeded(convId) {
               void channel
-                ?.send(`🔐 Waymond is waiting for your OK on something. Approve or decline it here: ${chatUrl(convId)}`)
+                ?.send(quiet(`🔐 Waymond is waiting for your OK on something. Approve or decline it here: ${chatUrl(convId)}`))
                 .catch(() => {});
             },
           },
