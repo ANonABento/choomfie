@@ -1,7 +1,7 @@
 /**
  * Shared steps for anything that hands a Discord prompt to a responder:
  * downloading attachments and forwarding to the Claude session. Used by the
- * MessageCreate handler and by `/ask`.
+ * MessageCreate handler and by `/choomfie`.
  */
 
 import { mkdir } from "node:fs/promises";

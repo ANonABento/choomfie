@@ -9,7 +9,7 @@
  * replies, quick-reply buttons and approval cards work unchanged.
  *
  * Claude replies through the `reply` tool, which addresses a `chat_id`. An
- * `/ask` hands Claude a synthetic `ask:<interaction id>` chat id, and `reply`
+ * `/choomfie` hands Claude a synthetic `ask:<interaction id>` chat id, and `reply`
  * looks it up here instead of fetching a channel.
  */
 
@@ -93,7 +93,7 @@ export function isAskChatId(chatId: unknown): boolean {
   return typeof chatId === "string" && chatId.startsWith(ASK_CHAT_PREFIX);
 }
 
-/** Register an `/ask` for Claude to answer; returns the chat id to give it. */
+/** Register an `/choomfie` for Claude to answer; returns the chat id to give it. */
 export function openAskRelay(interactionId: string, relay: RelayChannel): string {
   sweep(askRelays);
   const chatId = `${ASK_CHAT_PREFIX}${interactionId}`;
@@ -118,10 +118,10 @@ export function getBrainRelay(chatKey: string): RelayChannel | undefined {
   return relay?.alive() ? relay : undefined;
 }
 
-/** What Claude sees in front of an `/ask` prompt, so it doesn't reach for tools that can't work there. */
+/** What Claude sees in front of an `/choomfie` prompt, so it doesn't reach for tools that can't work there. */
 export const ASK_NOTE =
-  "[Sent with /ask from a chat Choomfie isn't in. Answer with `reply` to this chat_id " +
+  "[Sent with /choomfie from a chat Choomfie isn't in. Answer with `reply` to this chat_id " +
   "(follow-ups are fine for 15 minutes). react, edit, fetch/search, threads, polls and pins don't work here.]";
 
 export const ASK_ONLY_REPLY =
-  "This chat came from /ask — Choomfie isn't in it, so only `reply` works here.";
+  "This chat came from /choomfie — Choomfie isn't in it, so only `reply` works here.";

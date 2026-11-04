@@ -222,10 +222,10 @@ const tools: ToolDef[] = [
         opts.files = validated;
       }
 
-      // An /ask from a chat the bot isn't in: answer through the interaction.
+      // An /choomfie from a chat the bot isn't in: answer through the interaction.
       if (isAskChatId(args.chat_id)) {
         const relay = getAskRelay(args.chat_id as string);
-        if (!relay) return err("This /ask can't be answered any more — Discord closes it after 15 minutes.");
+        if (!relay) return err("This /choomfie can't be answered any more — Discord closes it after 15 minutes.");
         const sent = (await relay.send(opts as never)) as { id?: string } | undefined;
         ctx.messageStats.sent++;
         return text(`sent (id: ${sent?.id ?? "?"})`);

@@ -21,7 +21,7 @@ describe("slash command set", () => {
   // Other test files register throwaway commands in the same shared registry,
   // so pin what must exist and what must be gone rather than the exact list.
   const EXPECTED = [
-    "access", "ask", "brain", "clear", "compact", "config", "github", "help", "memory",
+    "access", "brain", "choomfie", "clear", "compact", "config", "github", "help", "memory",
     "model", "persona", "plugins", "remind", "status", "stop", "usage", "voice",
   ];
   const REMOVED = ["reminders", "cancel", "savememory", "newpersona", "allow", "revoke"];
@@ -52,12 +52,12 @@ describe("slash command set", () => {
     for (const c of slash()) walk(c);
   });
 
-  test("only /ask, /brain, /stop and the Ask Choomfie menu work outside the bot's servers", () => {
+  test("only /choomfie, /brain, /stop and the Ask Choomfie menu work outside the bot's servers", () => {
     const anywhere = (getCommandDefs() as Json[])
       .filter((c) => c.integration_types?.includes(IT.UserInstall))
       .map((c) => c.name)
       .sort();
-    expect(anywhere).toEqual(["Ask Choomfie", "ask", "brain", "stop"]);
+    expect(anywhere).toEqual(["Ask Choomfie", "brain", "choomfie", "stop"]);
     for (const c of getCommandDefs() as Json[]) {
       expect(c.integration_types?.length).toBeGreaterThan(0);
       if (anywhere.includes(c.name)) expect(c.contexts).toContain(CT.PrivateChannel);

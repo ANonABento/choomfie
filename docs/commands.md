@@ -44,13 +44,13 @@ Defined in `packages/core/lib/commands.ts`, deployed via `packages/core/scripts/
 - `/lesson` — start or continue a structured lesson (button-driven, no Claude roundtrip)
 - `/progress` — show learning progress with unit bars and completion stats (ephemeral)
 - `/help` — show all commands and capabilities
-- `/ask <prompt> [file] [private]` and the **Ask Choomfie** message menu (right-click → Apps) — see below
+- `/choomfie <prompt> [file] [private]` and the **Ask Choomfie** message menu (right-click → Apps) — see below
 
-### Group DMs and other chats the bot isn't in (`/ask`)
+### Group DMs and other chats the bot isn't in (`/choomfie`)
 
 A bot can't join a group DM, but a **user-installed** app can be used there. Setup, once, in the Developer Portal: your app → **Installation** → tick **User Install**, add the `applications.commands` scope under its default install settings, then open the install link and choose **Add to My Apps**.
 
-Only `/ask`, the **Ask Choomfie** menu, `/brain` and `/stop` are user-installable (`ANYWHERE` in `@choomfie/shared`). Every other command is deployed with explicit `integration_types: [GuildInstall]` / `contexts: [Guild, BotDM]` (`GUILD_INSTALL_ONLY`, applied in `getCommandDefs`) — left unset, Discord would fall back to the app's install types and enabling User Install would make every owner command usable from any chat.
+Only `/choomfie`, the **Ask Choomfie** menu, `/brain` and `/stop` are user-installable (`ANYWHERE` in `@choomfie/shared`). Every other command is deployed with explicit `integration_types: [GuildInstall]` / `contexts: [Guild, BotDM]` (`GUILD_INSTALL_ONLY`, applied in `getCommandDefs`) — left unset, Discord would fall back to the app's install types and enabling User Install would make every owner command usable from any chat.
 
 There, Choomfie sees only the command text or the one right-clicked message (plus its attachments) — never the chat — and can only answer through the interaction, which Discord keeps open for **15 minutes**. `lib/ask-relay.ts` wraps the interaction as a `SendableChannel` (first send replaces the "thinking…" reply, the rest are follow-ups), so brain replies, quick-reply buttons and approval cards work unchanged. Claude gets a synthetic `ask:<interaction id>` chat id: `reply` answers through the relay, every other Discord tool returns a clear "only `reply` works here". Same gates as a typed message — allowlist, rate limit, then the chat's brain under `brainAccess` — and `/brain` works per group DM. A brain's late background results post there only while the 15 minutes last; after that they stay in the brain's own app.
 

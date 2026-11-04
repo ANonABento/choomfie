@@ -1,5 +1,5 @@
 /**
- * `/ask <prompt>` and the "Ask Choomfie" message menu — Choomfie in chats the
+ * `/choomfie <prompt>` and the "Ask Choomfie" message menu — Choomfie in chats the
  * bot isn't in.
  *
  * Both are user-installable (Developer Portal → Installation → User Install),
@@ -105,10 +105,10 @@ export function menuPrompt(author: string, text: string, attachmentCount: number
   return `${author} said:\n${body}`;
 }
 
-registerCommand("ask", {
+registerCommand("choomfie", {
   data: {
     ...new SlashCommandBuilder()
-      .setName("ask")
+      .setName("choomfie")
       .setDescription("Ask Choomfie anything — works in group DMs too")
       .addStringOption((o) =>
         o.setName("prompt").setDescription("What to ask").setRequired(true).setMaxLength(4000)

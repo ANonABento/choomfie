@@ -56,7 +56,7 @@ registerCommand("brain", {
           .setAutocomplete(true)
       )
       .toJSON(),
-    // Usable in group DMs (user install), so /ask there can be pointed at a brain.
+    // Usable in group DMs (user install), so /choomfie there can be pointed at a brain.
     ...ANYWHERE,
   },
   // Lists only brains actually loaded right now — in-memory, well inside 3s.
@@ -170,7 +170,7 @@ registerButtonHandler("brain", async (interaction, parts, ctx) => {
   const index = Number(parts[2]);
   const choice = pending?.choices[index];
   const brain = pending ? getBrain(pending.brainId) : undefined;
-  // In a chat the bot isn't in (a group DM /ask), answer through the button's own interaction.
+  // In a chat the bot isn't in (a group DM /choomfie), answer through the button's own interaction.
   const absent = botIsAbsent(interaction);
   if (!pending || choice === undefined || !brain || (!absent && !interaction.channel)) {
     await interaction.reply({ content: "Those options have expired — just type your answer.", flags: MessageFlags.Ephemeral });

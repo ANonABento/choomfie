@@ -220,7 +220,7 @@ export async function postBrainReply(
 export function installBrainPoster(ctx: AppContext): void {
   setBrainPoster(async (brainId, chatKey, reply) => {
     const fetched = await ctx.discord?.channels.fetch(chatKey).catch(() => null);
-    // A chat the bot isn't in (group DM /ask) can still be answered while its
+    // A chat the bot isn't in (group DM /choomfie) can still be answered while its
     // interaction is open; after that the result stays in the brain's own app.
     const channel = fetched && "send" in fetched ? (fetched as unknown as SendableChannel) : getBrainRelay(chatKey);
     if (!channel) throw new Error(`channel ${chatKey} not reachable`);
