@@ -10,6 +10,7 @@
  * One page, one request at a time across all chats: it is one logged-in user.
  */
 
+import { basename } from "node:path";
 import { chromium, type BrowserContext, type Page } from "patchright";
 import { errorMessage } from "@choomfie/shared";
 import {
@@ -21,8 +22,10 @@ import {
   messagesUrl,
   parseMessages,
   parseTurn,
+  stopUrl,
   turnUrl,
   waitingCardsUrl,
+  type ChatMessage,
   type TurnState,
 } from "./api.ts";
 
@@ -62,6 +65,21 @@ export async function launchWaymondContext(profileDir: string, headless: boolean
   }
 }
 
+export interface SendResult {
+  reply: string;
+  /** Quick replies Waymond offered; sending one continues the conversation. */
+  options: string[];
+  conversationId: string;
+  /** The turn ended because /brain stop was used. */
+  stopped: boolean;
+  /** Waymond handed work to a background job; results arrive later. */
+  background: boolean;
+  /** Watermark for collecting those late results. */
+  lastMessageId?: string;
+  /** Waymond messages this answer delivered (so a watcher never re-posts them). */
+  messageIds: string[];
+}
+
 export class WaymondDriver {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
@@ -70,6 +88,9 @@ export class WaymondDriver {
   private readonly turnTimeoutMs: number;
   private readonly pollMs: number;
   private readonly idleCloseMs: number;
+  /** Conversation the in-flight send is waiting on, if any. */
+  private activeConversation: string | null = null;
+  private stopRequested = false;
 
   constructor(private opts: DriverOptions) {
     this.turnTimeoutMs = opts.turnTimeoutMs ?? 15 * 60_000;
@@ -77,15 +98,49 @@ export class WaymondDriver {
     this.idleCloseMs = opts.idleCloseMs ?? 10 * 60_000;
   }
 
-  /** Send `text` into `conversationId` (or a new chat). Resolves with the reply and the conversation id. */
+  /** Send `text` (and optional files) into `conversationId`, or a new chat. */
   send(
     text: string,
     conversationId: string | undefined,
-    hooks: DriverHooks = {}
-  ): Promise<{ reply: string; conversationId: string }> {
-    const run = this.lock.then(() => this.sendLocked(text, conversationId, hooks));
+    hooks: DriverHooks = {},
+    files: string[] = []
+  ): Promise<SendResult> {
+    const run = this.lock.then(() => this.sendLocked(text, conversationId, hooks, files));
     this.lock = run.catch(() => {});
     return run;
+  }
+
+  /** Read the conversation's recent messages (queued behind any send in flight). */
+  readMessages(conversationId: string): Promise<ChatMessage[]> {
+    const run = this.lock.then(async () => {
+      const page = await this.getPage();
+      try {
+        // fetch() needs the app origin for the session cookie and CORS.
+        if (!page.url().startsWith(APP_ORIGIN)) await page.goto(`${APP_ORIGIN}/chat`, { waitUntil: "domcontentloaded" });
+        return parseMessages(await this.getJson(page, messagesUrl(conversationId)));
+      } finally {
+        this.scheduleIdleClose();
+      }
+    });
+    this.lock = run.catch(() => {});
+    return run;
+  }
+
+  /**
+   * Ask Waymond to stop the turn running in `conversationId`. Runs alongside
+   * the in-flight send (it only issues one request on the same page); the send
+   * then returns whatever Waymond had produced. False if nothing was running there.
+   */
+  async stop(conversationId: string): Promise<boolean> {
+    if (!this.page || this.page.isClosed() || this.activeConversation !== conversationId) return false;
+    this.stopRequested = true;
+    const status = (await this.page.evaluate(async (u: string) => {
+      const r = await fetch(u, { method: "POST", credentials: "include" });
+      return r.status;
+    }, stopUrl(conversationId))) as number;
+    if (status === 401 || status === 403) throw new LoginRequiredError();
+    if (status >= 400) throw new Error(`Ambition refused the stop (${status})`);
+    return true;
   }
 
   async close(): Promise<void> {
@@ -129,9 +184,11 @@ export class WaymondDriver {
   private async sendLocked(
     text: string,
     conversationId: string | undefined,
-    hooks: DriverHooks
-  ): Promise<{ reply: string; conversationId: string }> {
+    hooks: DriverHooks,
+    files: string[]
+  ): Promise<SendResult> {
     const page = await this.getPage();
+    this.stopRequested = false;
     try {
       await page.goto(chatUrl(conversationId), { waitUntil: "domcontentloaded" });
       const composer = page.getByPlaceholder(COMPOSER_PLACEHOLDER).first();
@@ -147,6 +204,8 @@ export class WaymondDriver {
         convId ? parseMessages(await this.getJson(page, messagesUrl(convId))).map((m) => m.id) : []
       );
 
+      await this.clearDraftAttachments(page);
+      if (files.length) await this.attach(page, files);
       await composer.click();
       await composer.fill(text);
       await composer.press("Enter");
@@ -155,6 +214,7 @@ export class WaymondDriver {
         await page.waitForURL(CONVERSATION_PATH_RE, { timeout: 30_000 });
         convId = CONVERSATION_PATH_RE.exec(page.url())![1];
       }
+      this.activeConversation = convId;
 
       const started = Date.now();
       let approvalNotified = false;
@@ -167,8 +227,16 @@ export class WaymondDriver {
         if (!turn.active) {
           const messages = parseMessages(await this.getJson(page, messagesUrl(convId)));
           const state = answerState(messages, baseline, turn.active, sawActive);
-          if (state.done) {
-            return { reply: state.reply || "(Waymond finished without a text reply)", conversationId: convId };
+          if (state.done || (this.stopRequested && !turn.active)) {
+            return {
+              reply: state.reply || (this.stopRequested ? "" : "(Waymond finished without a text reply)"),
+              options: state.options,
+              conversationId: convId,
+              stopped: this.stopRequested,
+              background: state.background,
+              lastMessageId: state.lastMessageId,
+              messageIds: state.messageIds,
+            };
           }
         }
         const elapsed = Date.now() - started;
@@ -188,7 +256,45 @@ export class WaymondDriver {
       if (!(e instanceof LoginRequiredError)) await page.goto("about:blank").catch(() => {});
       throw e instanceof Error ? e : new Error(errorMessage(e));
     } finally {
+      this.activeConversation = null;
       this.scheduleIdleClose();
+    }
+  }
+
+  /**
+   * The composer keeps attachments as a draft until the message is sent, and
+   * the draft survives reloads — a send that failed after attaching would leak
+   * its files into the next message. So every send starts by clearing it.
+   * Scoped to the composer (the element holding both the message box and the
+   * attach button), so no other "Remove …" control on the page is touched.
+   */
+  private async clearDraftAttachments(page: Page): Promise<void> {
+    for (let i = 0; i < 20; i++) {
+      const removed = await page.evaluate((placeholder: string) => {
+        let box: Element | null = document.querySelector(`[placeholder="${placeholder}"]`);
+        while (box && !box.querySelector('button[aria-label="Attach files"]')) box = box.parentElement;
+        const btn = box?.querySelector<HTMLButtonElement>('button[aria-label^="Remove "]');
+        if (!btn) return false;
+        btn.click();
+        return true;
+      }, COMPOSER_PLACEHOLDER);
+      if (!removed) return;
+      await page.waitForTimeout(150);
+    }
+  }
+
+  /** Put files on the composer's hidden file input and wait until each shows as attached. */
+  private async attach(page: Page, files: string[]): Promise<void> {
+    const input = page.locator('input[type="file"]').first();
+    if (!(await input.count())) throw new Error("Waymond's attach control is gone (the page layout may have changed).");
+    await input.setInputFiles(files);
+    for (const file of files) {
+      const name = basename(file);
+      try {
+        await page.locator(`button[aria-label="Remove ${name.replace(/"/g, '\\"')}"]`).first().waitFor({ timeout: 30_000 });
+      } catch {
+        throw new Error(`Waymond didn't accept the attachment ${name}`);
+      }
     }
   }
 }

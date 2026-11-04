@@ -123,6 +123,8 @@ export {
   unregisterBrain,
   getBrain,
   listBrainIds,
+  setBrainPoster,
+  pushBrainReply,
   type Brain,
   type BrainMessage,
   type BrainReply,

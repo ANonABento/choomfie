@@ -3,11 +3,12 @@ import {
   CONVERSATION_PATH_RE,
   hasWaitingCard,
   answerState,
+  lateMessages,
   parseMessages,
   parseTurn,
   replyFor,
 } from "../../../plugins/waymond/api.ts";
-import { framePrompt } from "../../../plugins/waymond/index.ts";
+import { framePrompt, originalName } from "../../../plugins/waymond/index.ts";
 
 // Shapes as observed from app.ambition.inc on 2026-11-04.
 const turn = (over: Record<string, unknown> = {}) => ({
@@ -91,10 +92,56 @@ describe("waymond api parsing", () => {
   });
 });
 
+describe("quick replies and background jobs (observed 2026-11-04)", () => {
+  const observed = parseMessages([
+    { id: "u1", role: "user", content: "pizza or tacos?", tool_calls: null },
+    {
+      id: "a1",
+      role: "assistant",
+      content: "Pizza or tacos?",
+      tool_calls: [{ tool: "offer_replies", status: "completed", data: { options: ["I’ll go with pizza", "I’m choosing tacos"] } }],
+    },
+    { id: "u2", role: "user", content: "research the Raspberry Pi", tool_calls: null },
+    {
+      id: "a2",
+      role: "assistant",
+      content: "I've started researching…",
+      tool_calls: [{ tool: "start_task", status: "completed", data: { research_job_id: "j" } }],
+    },
+  ]);
+
+  test("offer_replies options are surfaced as choices", () => {
+    const st = answerState(observed.slice(0, 2), new Set(), false, false);
+    expect(st.options).toEqual(["I’ll go with pizza", "I’m choosing tacos"]);
+    expect(st.background).toBe(false);
+  });
+
+  test("start_task marks the answer as continuing in the background", () => {
+    const st = answerState(observed, new Set(["u1", "a1"]), false, false);
+    expect(st).toMatchObject({ done: true, background: true, lastMessageId: "a2" });
+  });
+
+  test("late results: everything Waymond posted after the watermark that wasn't delivered", () => {
+    const later = [...observed, ...parseMessages([
+      { id: "u3", role: "user", content: "thanks" },
+      { id: "a4", role: "assistant", content: "np" },
+      // Background result landing after the newer exchange.
+      { id: "a5", role: "assistant", content: "Here is the report." },
+    ])];
+    expect(lateMessages(later, "a2", new Set(["a4"])).map((m) => m.id)).toEqual(["a5"]);
+    expect(lateMessages(later, "a2", new Set(["a4", "a5"]))).toEqual([]);
+    expect(lateMessages(later, "unknown")).toEqual([]); // never re-post the window
+  });
+});
+
 describe("framePrompt", () => {
-  test("owner messages pass through; others are labelled; attachments are named", () => {
-    expect(framePrompt("hi", { role: "owner" }, [])).toBe("hi");
-    expect(framePrompt("hi", { role: "user", user: "alex" }, [])).toBe("[Discord message from alex]\nhi");
-    expect(framePrompt("look", { role: "owner" }, ["a.png (image/png, 3KB)"])).toContain("not forwarded: a.png");
+  test("owner messages pass through; others are labelled", () => {
+    expect(framePrompt("hi", { role: "owner" })).toBe("hi");
+    expect(framePrompt("hi", { role: "user", user: "alex" })).toBe("[Discord message from alex]\nhi");
+  });
+
+  test("inbox prefixes are stripped from attachment names", () => {
+    expect(originalName("/x/inbox/1793824118401_ab12cd_photo.png")).toBe("photo.png");
+    expect(originalName("/x/inbox/plain.txt")).toBe("plain.txt");
   });
 });

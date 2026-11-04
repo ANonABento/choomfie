@@ -30,7 +30,7 @@ import {
   type NotificationMessage,
 } from "@choomfie/shared";
 import { deliverInboundMessage } from "./daemon-status.ts";
-import { decideRoute, dispatchToBrain } from "./brain-router.ts";
+import { decideRoute, dispatchToBrain, installBrainPoster } from "./brain-router.ts";
 import {
   dispatchPluginMessage,
   initializePlugins,
@@ -125,6 +125,9 @@ export function createDiscordClient(ctx: AppContext): Client {
     if (ctx._inboxInterval) clearInterval(ctx._inboxInterval);
     ctx._inboxInterval = setInterval(cleanInbox, 60 * 60 * 1000);
     cleanInbox(); // Run on startup
+
+    // Brains may post late results (background jobs) — give them the poster first.
+    installBrainPoster(ctx);
 
     // Initialize plugins
     await initializePlugins(ctx.plugins, ctx);

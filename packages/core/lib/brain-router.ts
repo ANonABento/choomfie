@@ -11,12 +11,15 @@
  * whether someone may talk to Choomfie at all — that stays in access.json.
  */
 
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import {
   CLAUDE_BRAIN,
   errorMessage,
   getBrain,
+  setBrainPoster,
   type Brain,
   type BrainMessage,
+  type BrainReply,
 } from "@choomfie/shared";
 import type { BrainAccess } from "./config.ts";
 import type { AppContext } from "./types.ts";
@@ -86,8 +89,80 @@ export function chunkForDiscord(text: string, limit = DISCORD_LIMIT): string[] {
   return chunks;
 }
 
-interface SendableChannel {
-  send(options: { content?: string; files?: string[]; reply?: { messageReference: string } }): Promise<unknown>;
+export interface SendableChannel {
+  send(options: {
+    content?: string;
+    files?: string[];
+    reply?: { messageReference: string };
+    components?: unknown[];
+  }): Promise<{ id: string } | unknown>;
+}
+
+/** Discord: 5 buttons per row, 5 rows, 80-char labels, 100-char custom ids. */
+const MAX_CHOICES = 25;
+
+export interface PendingChoices {
+  brainId: string;
+  chatKey: string;
+  choices: string[];
+}
+
+/** Button message id → the quick replies it offers. In memory: a restart expires them. */
+const pendingChoices = new Map<string, PendingChoices>();
+
+export function takeChoices(messageId: string): PendingChoices | undefined {
+  const p = pendingChoices.get(messageId);
+  pendingChoices.delete(messageId);
+  return p;
+}
+
+export function choiceRows(choices: string[]) {
+  const rows = [];
+  for (let r = 0; r * 5 < Math.min(choices.length, MAX_CHOICES); r++) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        choices.slice(r * 5, r * 5 + 5).map((label, i) =>
+          new ButtonBuilder()
+            .setCustomId(`brain:choice:${r * 5 + i}`)
+            .setLabel(label.length > 80 ? label.slice(0, 77) + "…" : label)
+            .setStyle(ButtonStyle.Secondary)
+        )
+      )
+    );
+  }
+  return rows;
+}
+
+/** Post a brain's reply: chunked, threaded to `replyTo` when given, quick replies as buttons on the last chunk. */
+export async function postBrainReply(
+  channel: SendableChannel,
+  brainId: string,
+  chatKey: string,
+  reply: BrainReply,
+  replyTo?: string
+): Promise<void> {
+  const choices = (reply.choices ?? []).filter(Boolean).slice(0, MAX_CHOICES);
+  const chunks = chunkForDiscord(reply.text || (choices.length ? "(pick one)" : "(no reply)"));
+  for (let i = 0; i < chunks.length; i++) {
+    const last = i === chunks.length - 1;
+    const sent = await channel.send({
+      content: chunks[i],
+      ...(i === 0 && replyTo ? { reply: { messageReference: replyTo } } : {}),
+      ...(last && reply.files?.length ? { files: reply.files } : {}),
+      ...(last && choices.length ? { components: choiceRows(choices) } : {}),
+    });
+    const id = (sent as { id?: unknown } | undefined)?.id;
+    if (last && choices.length && typeof id === "string") pendingChoices.set(id, { brainId, chatKey, choices });
+  }
+}
+
+/** Lets plugins post late results (background jobs) through the same formatting. */
+export function installBrainPoster(ctx: AppContext): void {
+  setBrainPoster(async (brainId, chatKey, reply) => {
+    const channel = await ctx.discord?.channels.fetch(chatKey).catch(() => null);
+    if (!channel || !("send" in channel)) throw new Error(`channel ${chatKey} not reachable`);
+    await postBrainReply(channel as unknown as SendableChannel, brainId, chatKey, reply);
+  });
 }
 
 /** One in-flight request per backend conversation; later messages queue behind it. */
@@ -103,15 +178,7 @@ export function dispatchToBrain(
   const run = prev.then(async () => {
     try {
       const reply = await brain.send(message, ctx);
-      const chunks = chunkForDiscord(reply.text || "(no reply)");
-      for (let i = 0; i < chunks.length; i++) {
-        const last = i === chunks.length - 1;
-        await channel.send({
-          content: chunks[i],
-          ...(i === 0 ? { reply: { messageReference: message.messageId } } : {}),
-          ...(last && reply.files?.length ? { files: reply.files } : {}),
-        });
-      }
+      await postBrainReply(channel, brain.id, message.chatKey, reply, message.messageId);
     } catch (e) {
       console.error(`[brain:${brain.id}] ${errorMessage(e)}`);
       await channel

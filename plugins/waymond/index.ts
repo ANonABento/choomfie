@@ -6,18 +6,25 @@
  * the Claude session nothing.
  */
 
+import { copyFileSync, mkdirSync, rmSync } from "node:fs";
+import { basename, join } from "node:path";
 import {
   errorMessage,
+  pushBrainReply,
   registerBrain,
   unregisterBrain,
   type Brain,
   type Plugin,
   type PluginContext,
 } from "@choomfie/shared";
-import { chatUrl, type TurnState } from "./api.ts";
+import { chatUrl, lateMessages, type TurnState } from "./api.ts";
 import { WaymondDriver } from "./driver.ts";
-import { chatMapPath, profileDir } from "./paths.ts";
+import { chatMapPath, profileDir, waymondDir } from "./paths.ts";
 import { ChatMap } from "./store.ts";
+
+const BRAIN_ID = "waymond";
+const WATCH_EVERY_MS = 60_000;
+const WATCH_FOR_MS = 3 * 60 * 60_000;
 
 interface StatusChannel {
   send(content: string): Promise<{ edit(content: string): Promise<unknown>; delete(): Promise<unknown> }>;
@@ -34,10 +41,14 @@ async function channelFor(ctx: PluginContext, chatKey: string): Promise<StatusCh
 }
 
 /** Waymond only ever sees one account, so say who's talking when it isn't the owner. */
-export function framePrompt(content: string, meta: Record<string, string>, attachmentNames: string[]): string {
+export function framePrompt(content: string, meta: Record<string, string>): string {
   const from = meta.role === "owner" ? "" : `[Discord message from ${meta.user ?? "someone"}]\n`;
-  const files = attachmentNames.length ? `\n\n(Attached on Discord, not forwarded: ${attachmentNames.join(", ")})` : "";
-  return `${from}${content}${files}`;
+  return `${from}${content}`;
+}
+
+/** Discord inbox files are named `<ts>_<rand>_<name>`; give Waymond the original name. */
+export function originalName(inboxPath: string): string {
+  return basename(inboxPath).replace(/^\d+_[a-z0-9]+_/, "") || basename(inboxPath);
 }
 
 function progressLine(turn: TurnState, elapsedMs: number): string {
@@ -47,18 +58,87 @@ function progressLine(turn: TurnState, elapsedMs: number): string {
 
 let driver: WaymondDriver | null = null;
 
+/**
+ * After an answer that started a background job, poll for the results and
+ * post them when they land. In memory: a worker restart drops the watch (the
+ * results are still in the Ambition chat).
+ */
+class Watchers {
+  private watches = new Map<
+    string,
+    { convId: string; afterId: string; posted: Set<string>; until: number; timer: ReturnType<typeof setInterval> }
+  >();
+
+  start(chatKey: string, convId: string, afterId: string) {
+    const existing = this.watches.get(chatKey);
+    if (existing) {
+      // Another job in the same chat: keep the older watermark so neither result is skipped.
+      existing.until = Date.now() + WATCH_FOR_MS;
+      return;
+    }
+    const timer = setInterval(() => void this.tick(chatKey), WATCH_EVERY_MS);
+    this.watches.set(chatKey, { convId, afterId, posted: new Set(), until: Date.now() + WATCH_FOR_MS, timer });
+  }
+
+  /** Messages a normal send already delivered — never post them again. */
+  delivered(chatKey: string, ids: string[]) {
+    const w = this.watches.get(chatKey);
+    if (w) for (const id of ids) w.posted.add(id);
+  }
+
+  stop(chatKey: string) {
+    const w = this.watches.get(chatKey);
+    if (w) clearInterval(w.timer);
+    this.watches.delete(chatKey);
+  }
+
+  stopAll() {
+    for (const key of [...this.watches.keys()]) this.stop(key);
+  }
+
+  private async tick(chatKey: string) {
+    const w = this.watches.get(chatKey);
+    if (!w || !driver) return;
+    if (Date.now() > w.until) {
+      this.stop(chatKey);
+      return;
+    }
+    try {
+      const late = lateMessages(await driver.readMessages(w.convId), w.afterId, w.posted);
+      if (!late.length) return;
+      for (const m of late) w.posted.add(m.id);
+      const text = late.map((m) => m.content.trim()).filter(Boolean).join("\n\n");
+      const choices = [...late].reverse().find((m) => m.options.length)?.options ?? [];
+      if (text || choices.length) await pushBrainReply(BRAIN_ID, chatKey, { text, choices });
+      // Keep watching only if the results themselves kicked off more work.
+      if (!late.some((m) => m.startsTask)) this.stop(chatKey);
+    } catch (e) {
+      console.error(`[waymond] background watch for ${chatKey}: ${errorMessage(e)}`);
+    }
+  }
+}
+
+let watchers: Watchers | null = null;
+
 function createBrain(ctx: PluginContext): Brain {
   const chats = new ChatMap(chatMapPath(ctx.DATA_DIR));
+  const outbox = join(waymondDir(ctx.DATA_DIR), "outbox");
   driver = new WaymondDriver({
     profileDir: profileDir(ctx.DATA_DIR),
     headless: process.env.CHOOMFIE_WAYMOND_HEADED !== "1",
   });
+  watchers = new Watchers();
 
   return {
-    id: "waymond",
+    id: BRAIN_ID,
     label: "Waymond",
     async reset(chatKey) {
+      watchers?.stop(chatKey);
       chats.delete(chatKey);
+    },
+    async stop(chatKey) {
+      const convId = chats.get(chatKey);
+      return convId && driver ? driver.stop(convId) : false;
     },
     async send(message) {
       const channel = await channelFor(ctx, message.chatKey);
@@ -67,10 +147,18 @@ function createBrain(ctx: PluginContext): Brain {
       let lastTyping = 0;
       let statusBusy = false;
 
-      const names = (message.meta.attachments ?? "").split("; ").filter(Boolean);
+      // Copy attachments under their original names so Waymond sees "photo.png".
+      const batch = join(outbox, `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+      const files = message.filePaths.map((p) => {
+        mkdirSync(batch, { recursive: true });
+        const dest = join(batch, originalName(p));
+        copyFileSync(p, dest);
+        return dest;
+      });
+
       try {
-        const { reply, conversationId } = await driver!.send(
-          framePrompt(message.content, message.meta, names),
+        const result = await driver!.send(
+          framePrompt(message.content, message.meta),
           chats.get(message.chatKey),
           {
             onProgress(turn, elapsed) {
@@ -93,14 +181,25 @@ function createBrain(ctx: PluginContext): Brain {
                 ?.send(`🔐 Waymond is waiting for your OK on something. Approve or decline it here: ${chatUrl(convId)}`)
                 .catch(() => {});
             },
-          }
+          },
+          files
         );
-        chats.set(message.chatKey, conversationId);
-        return { text: reply };
+        chats.set(message.chatKey, result.conversationId);
+        watchers!.delivered(message.chatKey, result.messageIds);
+        if (result.background && result.lastMessageId) {
+          watchers!.start(message.chatKey, result.conversationId, result.lastMessageId);
+        }
+        const text = result.stopped
+          ? `${result.reply ? `${result.reply}\n\n` : ""}⏹️ Stopped.`
+          : result.background
+            ? `${result.reply}\n\n-# I'll post the results here when Waymond finishes.`
+            : result.reply;
+        return { text, choices: result.options };
       } catch (e) {
         throw new Error(errorMessage(e));
       } finally {
         await (status as { delete(): Promise<unknown> } | null)?.delete().catch(() => {});
+        rmSync(batch, { recursive: true, force: true });
       }
     },
   };
@@ -115,7 +214,9 @@ const waymondPlugin: Plugin = {
   },
 
   async destroy() {
-    unregisterBrain("waymond");
+    unregisterBrain(BRAIN_ID);
+    watchers?.stopAll();
+    watchers = null;
     await driver?.close();
     driver = null;
   },

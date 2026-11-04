@@ -13,6 +13,8 @@ export const turnUrl = (conversationId: string) =>
   `${API_ORIGIN}/api/waymond/conversations/${conversationId}/turn`;
 export const messagesUrl = (conversationId: string) =>
   `${API_ORIGIN}/api/conversations/${conversationId}/messages?limit=60`;
+export const stopUrl = (conversationId: string) =>
+  `${API_ORIGIN}/api/waymond/conversations/${conversationId}/stop`;
 export const waitingCardsUrl = () => `${API_ORIGIN}/api/waymond/cards/waiting`;
 
 export interface TurnState {
@@ -45,6 +47,21 @@ export interface ChatMessage {
   id: string;
   role: string;
   content: string;
+  /** Quick-reply choices Waymond offered (`offer_replies` tool call); clicking one sends its text. */
+  options: string[];
+  /** Handed work to a background job (`start_task`); its results arrive as later messages. */
+  startsTask: boolean;
+}
+
+function offeredReplies(toolCalls: unknown): string[] {
+  if (!Array.isArray(toolCalls)) return [];
+  const out: string[] = [];
+  for (const call of toolCalls) {
+    const c = call as { tool?: unknown; data?: { options?: unknown } } | null;
+    if (c?.tool !== "offer_replies" || !Array.isArray(c.data?.options)) continue;
+    for (const o of c.data.options) if (typeof o === "string" && o.trim()) out.push(o.trim());
+  }
+  return out;
 }
 
 export function parseMessages(raw: unknown): ChatMessage[] {
@@ -55,6 +72,10 @@ export function parseMessages(raw: unknown): ChatMessage[] {
       id: String(m.id ?? ""),
       role: String(m.role ?? ""),
       content: typeof m.content === "string" ? m.content : "",
+      options: offeredReplies(m.tool_calls),
+      startsTask:
+        Array.isArray(m.tool_calls) &&
+        m.tool_calls.some((c) => (c as { tool?: unknown } | null)?.tool === "start_task"),
     }));
 }
 
@@ -63,18 +84,31 @@ export function parseMessages(raw: unknown): ChatMessage[] {
  * up to the next user message. Falls back to the trailing non-user run when
  * the source id isn't in the window.
  */
-export function replyFor(messages: ChatMessage[], sourceUserMessageId: string | undefined): string {
+function answerRun(messages: ChatMessage[], sourceUserMessageId: string | undefined): ChatMessage[] {
   let start = sourceUserMessageId ? messages.findIndex((m) => m.id === sourceUserMessageId) : -1;
   if (start < 0) {
     start = messages.length - 1;
     while (start >= 0 && messages[start].role !== "user") start--;
   }
-  const out: string[] = [];
+  const out: ChatMessage[] = [];
   for (let i = start + 1; i < messages.length; i++) {
     if (messages[i].role === "user") break;
-    if (messages[i].content.trim()) out.push(messages[i].content.trim());
+    out.push(messages[i]);
   }
-  return out.join("\n\n");
+  return out;
+}
+
+export function replyFor(messages: ChatMessage[], sourceUserMessageId: string | undefined): string {
+  return answerRun(messages, sourceUserMessageId)
+    .map((m) => m.content.trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/** The quick replies offered in the answer to this message (the latest offer wins). */
+export function optionsFor(messages: ChatMessage[], sourceUserMessageId: string | undefined): string[] {
+  const offers = answerRun(messages, sourceUserMessageId).filter((m) => m.options.length);
+  return offers.length ? offers[offers.length - 1].options : [];
 }
 
 /**
@@ -86,16 +120,48 @@ export function replyFor(messages: ChatMessage[], sourceUserMessageId: string | 
  * wasn't there before we sent), and call it done once the turn is idle and we
  * either saw it working or an answer already sits after our message.
  */
+export interface AnswerState {
+  done: boolean;
+  reply: string;
+  options: string[];
+  /** The answer started a background job; more messages will follow later. */
+  background: boolean;
+  /** Newest message belonging to this exchange — the watermark for late results. */
+  lastMessageId?: string;
+  /** Waymond messages this answer delivered. */
+  messageIds: string[];
+}
+
+/**
+ * Waymond messages after `afterId` that nobody has posted yet (background
+ * results). A result can land after a newer user message, so this doesn't
+ * stop at one; `posted` holds what sends already delivered. Unknown
+ * watermark → nothing, rather than re-posting the whole window.
+ */
+export function lateMessages(messages: ChatMessage[], afterId: string, posted: Set<string> = new Set()): ChatMessage[] {
+  const at = messages.findIndex((m) => m.id === afterId);
+  if (at < 0) return [];
+  return messages.slice(at + 1).filter((m) => m.role !== "user" && !posted.has(m.id));
+}
+
 export function answerState(
   messages: ChatMessage[],
   baselineIds: Set<string>,
   turnActive: boolean,
   sawActive: boolean
-): { done: boolean; reply: string; ourMessageId?: string } {
+): AnswerState {
   const ours = messages.find((m) => m.role === "user" && !baselineIds.has(m.id));
-  if (!ours) return { done: false, reply: "" };
+  if (!ours) return { done: false, reply: "", options: [], background: false, messageIds: [] };
+  const run = answerRun(messages, ours.id);
   const reply = replyFor(messages, ours.id);
-  return { done: !turnActive && (sawActive || reply.length > 0), reply, ourMessageId: ours.id };
+  return {
+    done: !turnActive && (sawActive || reply.length > 0),
+    reply,
+    options: optionsFor(messages, ours.id),
+    background: run.some((m) => m.startsTask),
+    lastMessageId: (run[run.length - 1] ?? ours).id,
+    messageIds: run.map((m) => m.id),
+  };
 }
 
 /** `cards/waiting` → whether this conversation has an approval parked. */

@@ -7,6 +7,8 @@ import {
   chunkForDiscord,
   decideRoute,
   dispatchToBrain,
+  postBrainReply,
+  takeChoices,
   resolveBrainId,
   type RouteInput,
 } from "../lib/brain-router.ts";
@@ -120,5 +122,31 @@ describe("brain config", () => {
     reloaded.setChannelBrain("c1", undefined);
     expect(reloaded.getConfig().brainChannels).toBeUndefined();
     expect(setting.write(reloaded, "default")).toEqual({ ok: true, value: "owner" });
+  });
+});
+
+describe("quick-reply buttons", () => {
+  test("choices ride on the last chunk and can be taken once", async () => {
+    const sent: { content?: string; components?: unknown[] }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: `msg${sent.length}` }) };
+    await postBrainReply(channel, "waymond", "c1", { text: "Pizza or tacos?", choices: ["Pizza", "Tacos"] }, "src");
+    expect(sent).toHaveLength(1);
+    const row = (sent[0].components![0] as { toJSON(): { components: { custom_id: string; label: string }[] } }).toJSON();
+    expect(row.components.map((c) => [c.custom_id, c.label])).toEqual([
+      ["brain:choice:0", "Pizza"],
+      ["brain:choice:1", "Tacos"],
+    ]);
+    expect(takeChoices("msg1")).toEqual({ brainId: "waymond", chatKey: "c1", choices: ["Pizza", "Tacos"] });
+    expect(takeChoices("msg1")).toBeUndefined();
+  });
+
+  test("long labels are trimmed to Discord's 80 characters and rows hold 5", async () => {
+    const sent: { components?: unknown[] }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: "m" }) };
+    const choices = Array.from({ length: 7 }, (_, i) => `option ${i} ` + "x".repeat(100));
+    await postBrainReply(channel, "waymond", "c1", { text: "pick", choices });
+    const rows = sent[0].components!.map((r) => (r as { toJSON(): { components: { label: string }[] } }).toJSON());
+    expect(rows.map((r) => r.components.length)).toEqual([5, 2]);
+    for (const r of rows) for (const c of r.components) expect(c.label.length).toBeLessThanOrEqual(80);
   });
 });

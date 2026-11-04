@@ -27,6 +27,8 @@ export interface BrainMessage {
 export interface BrainReply {
   text: string;
   files?: string[];
+  /** Quick replies; shown as buttons, and clicking one sends that text to the brain. */
+  choices?: string[];
 }
 
 export interface Brain {
@@ -37,6 +39,25 @@ export interface Brain {
   send(message: BrainMessage, ctx: PluginContext): Promise<BrainReply>;
   /** Forget the backend conversation for this key, so the next message starts fresh. */
   reset?(chatKey: string): Promise<void>;
+  /** Interrupt the reply in progress for this key. False if nothing was running. */
+  stop?(chatKey: string): Promise<boolean>;
+}
+
+/**
+ * Posting a message a brain produced *outside* a request — e.g. a background
+ * job finishing an hour later. Core installs the poster at boot (it owns the
+ * Discord formatting and the quick-reply buttons); plugins only call push.
+ */
+type BrainPoster = (brainId: string, chatKey: string, reply: BrainReply) => Promise<void>;
+let poster: BrainPoster | null = null;
+
+export function setBrainPoster(fn: BrainPoster): void {
+  poster = fn;
+}
+
+export async function pushBrainReply(brainId: string, chatKey: string, reply: BrainReply): Promise<void> {
+  if (!poster) throw new Error("brain poster not installed");
+  await poster(brainId, chatKey, reply);
 }
 
 const brains = new Map<string, Brain>();

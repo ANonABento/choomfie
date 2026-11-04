@@ -3,16 +3,28 @@
  *
  *   /brain set brain:<id>   this channel/thread now answers with <id>; `claude` clears it
  *   /brain new              start a fresh backend conversation here
+ *   /brain stop             interrupt the reply in progress here
  *   /brain status           what answers here, and who it answers
+ *
+ * Also handles the quick-reply buttons a brain's answer can carry
+ * (`brain:choice:<n>`): clicking one sends that option to the brain.
  *
  * Threads inherit their parent channel's brain unless set directly, but each
  * thread is its own backend conversation.
  */
 
-import { MessageFlags, SlashCommandBuilder } from "discord.js";
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  MessageFlags,
+  SlashCommandBuilder,
+} from "discord.js";
 import { AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds } from "@choomfie/shared";
-import { registerCommand } from "../register.ts";
-import { resolveBrainId } from "../brain-router.ts";
+import { registerButtonHandler, registerCommand } from "../register.ts";
+import { dispatchToBrain, resolveBrainId, takeChoices, type SendableChannel } from "../brain-router.ts";
+import { isAllowed, isOwner } from "../access.ts";
+import { onMessageReceived } from "../typing.ts";
 import { requireOwner } from "./shared.ts";
 
 function parentOf(channel: unknown): string | null {
@@ -37,6 +49,7 @@ registerCommand("brain", {
         )
     )
     .addSubcommand((s) => s.setName("new").setDescription("Start a fresh conversation with this channel's brain"))
+    .addSubcommand((s) => s.setName("stop").setDescription("Interrupt the reply in progress here"))
     .addSubcommand((s) => s.setName("status").setDescription("Show what answers here"))
     .toJSON(),
   // Lists only brains actually loaded right now — in-memory, well inside 3s.
@@ -91,6 +104,22 @@ registerCommand("brain", {
       return;
     }
 
+    if (sub === "stop") {
+      const brain = current === CLAUDE_BRAIN ? undefined : getBrain(current);
+      if (!brain?.stop) {
+        await reply(`**${label(current)}** can't be stopped from here.`);
+        return;
+      }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        const stopped = await brain.stop(channelId);
+        await interaction.editReply(stopped ? `Asked **${brain.label}** to stop.` : "Nothing is running here.");
+      } catch (e) {
+        await interaction.editReply(`Couldn't stop **${brain.label}**: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      return;
+    }
+
     // status
     const own = ctx.config.getChannelBrain(channelId);
     const source = own ? "set on this channel" : parentId && ctx.config.getChannelBrain(parentId) ? "inherited from the parent channel" : "default";
@@ -101,4 +130,53 @@ registerCommand("brain", {
     ].filter(Boolean);
     await reply(lines.join("\n"));
   },
+});
+
+// Quick-reply buttons on a brain's answer. Same gate as typing a message to
+// that brain: owner, or anyone allowlisted when brainAccess is "allowlist".
+registerButtonHandler("brain", async (interaction, parts, ctx) => {
+  if (parts[1] !== "choice") return;
+  const userId = interaction.user.id;
+  const owner = isOwner(ctx, userId);
+  if (!owner && !(ctx.config.getBrainAccess() === "allowlist" && isAllowed(ctx, userId))) {
+    await interaction.reply({ content: "Only the owner can answer this one~", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const pending = takeChoices(interaction.message.id);
+  const index = Number(parts[2]);
+  const choice = pending?.choices[index];
+  const brain = pending ? getBrain(pending.brainId) : undefined;
+  if (!pending || choice === undefined || !brain || !interaction.channel) {
+    await interaction.reply({ content: "Those options have expired — just type your answer.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  // Freeze the buttons, highlighting the pick, so nobody answers twice.
+  const rows = interaction.message.components.map((row) =>
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      (row as unknown as { components: { customId?: string; label?: string }[] }).components.map((c) =>
+        new ButtonBuilder()
+          .setCustomId(c.customId ?? `brain:done:${Math.random()}`)
+          .setLabel(c.label ?? "…")
+          .setStyle(c.customId === `brain:choice:${index}` ? ButtonStyle.Success : ButtonStyle.Secondary)
+          .setDisabled(true)
+      )
+    )
+  );
+  await interaction.update({ components: rows });
+
+  const channel = interaction.channel as unknown as SendableChannel;
+  onMessageReceived(pending.chatKey, interaction.channel as never, false);
+  void dispatchToBrain(ctx, brain, channel, {
+    chatKey: pending.chatKey,
+    messageId: interaction.message.id,
+    content: choice,
+    meta: {
+      chat_id: pending.chatKey,
+      user: interaction.user.username,
+      user_id: userId,
+      role: owner ? "owner" : "user",
+    },
+    filePaths: [],
+  });
 });

@@ -563,7 +563,7 @@ Study these for real-world patterns:
 | **voice** | `@choomfie/voice` | Manager pattern, extra Discord intents (`GuildVoiceStates`), module-scoped state. |
 | **tutor** | `@choomfie/tutor` | `onMessage` hook for exercise handling, multiple databases, button interactions, SRS timers, sub-module init/destroy. |
 | **socials** | `@choomfie/socials` | MCP notification forwarding, provider initialization from config, polling loops. |
-| **waymond** | `@choomfie/waymond` | A **brain** instead of tools: `registerBrain` in `init`, zero tool/instruction tokens. Drives Ambition's Waymond in a headless Patchright browser (log in once: `bun run waymond:login`; `CHOOMFIE_WAYMOND_HEADED=1` for a visible window). Sends via the composer, reads `/turn` + `/messages`. Chat map in `<data>/waymond/chats.json`. |
+| **waymond** | `@choomfie/waymond` | A **brain** instead of tools: `registerBrain` in `init`, zero tool/instruction tokens. Drives Ambition's Waymond in a headless Patchright browser (log in once: `bun run waymond:login`; `CHOOMFIE_WAYMOND_HEADED=1` for a visible window). Sends via the composer (clearing any stale draft attachments first; Discord attachments are uploaded under their original names), reads `/turn` + `/messages`. Quick replies (`offer_replies`) become buttons; `start_task` answers are followed by a 1-minute watcher (3h cap, in memory) that posts the background results via `pushBrainReply`. `/brain stop` → `POST …/stop`. Chat map in `<data>/waymond/chats.json`. |
 
 ### Browser — minimal plugin
 
