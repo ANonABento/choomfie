@@ -11,6 +11,12 @@
  * the daemon can replace it; in foreground mode the session belongs to the
  * `claude` CLI in your terminal and there is no remote way in. Rather than hide
  * the commands, they say so — the names match what you would type there.
+ *
+ * Both follow the channel's brain (`/brain`). In a channel answered by another
+ * brain, Claude's shared session isn't what's talking, so `/clear` starts a
+ * fresh conversation with *that* brain for this channel only — no daemon
+ * needed, no confirm (the old conversation still exists on the brain's side) —
+ * and `/compact` explains that the brain manages its own context.
  */
 
 import {
@@ -26,8 +32,56 @@ import {
 import type { DaemonControlCommand } from "@choomfie/shared";
 import { registerCommand, registerButtonHandler } from "../register.ts";
 import { isDaemonMode, requestDaemonControl } from "../daemon-status.ts";
+import { CLAUDE_BRAIN, getBrain } from "@choomfie/shared";
 import { requireOwner } from "./shared.ts";
+import { parentChannelId, resolveBrainId } from "../brain-router.ts";
 import type { AppContext } from "../types.ts";
+
+/**
+ * If this channel is answered by a non-Claude brain, handle the command for
+ * that brain and return true. Claude channels return false and carry on.
+ */
+async function handledByOtherBrain(
+  interaction: ChatInputCommandInteraction,
+  ctx: AppContext,
+  command: DaemonControlCommand,
+): Promise<boolean> {
+  const brainId = resolveBrainId(interaction.channelId, parentChannelId(interaction.channel), (id) =>
+    ctx.config.getChannelBrain(id),
+  );
+  if (brainId === CLAUDE_BRAIN) return false;
+
+  const brain = getBrain(brainId);
+  const name = brain?.label ?? brainId;
+  if (command === "compact") {
+    await interaction.reply({
+      content: `This channel is answered by **${name}**, which manages its own context — nothing to compact. ` +
+        "`/clear` starts a fresh conversation with it here.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+  if (!brain?.reset) {
+    await interaction.reply({
+      content: brain ? `**${name}** can't start over from here.` : `The \`${brainId}\` brain isn't loaded right now.`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+  await brain.reset(interaction.channelId);
+  await interaction.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0x57f287)
+        .setTitle(`Fresh ${name} conversation`)
+        .setDescription(
+          `My next message to ${name} from this channel starts a new chat. ` +
+            "The old one is still in its app if you need it. Claude's session and other channels are untouched.",
+        ),
+    ],
+  });
+  return true;
+}
 
 const FOREGROUND_NOTICE =
   "Choomfie is running in **foreground mode**, where the session belongs to the " +
@@ -79,6 +133,7 @@ registerCommand("compact", {
     .toJSON(),
   handler: async (interaction, ctx) => {
     if (await requireOwner(interaction, ctx)) return;
+    if (await handledByOtherBrain(interaction, ctx, "compact")) return;
 
     if (!(await isDaemonMode(ctx.DATA_DIR))) {
       await interaction.reply({
@@ -104,6 +159,7 @@ registerCommand("clear", {
     .toJSON(),
   handler: async (interaction, ctx) => {
     if (await requireOwner(interaction, ctx)) return;
+    if (await handledByOtherBrain(interaction, ctx, "clear")) return;
 
     if (!(await isDaemonMode(ctx.DATA_DIR))) {
       await interaction.reply({

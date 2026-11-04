@@ -10,6 +10,7 @@ const PLUGIN_PACKAGES: Record<string, string> = {
   browser: "@choomfie/browser",
   tutor: "@choomfie/tutor",
   socials: "@choomfie/socials",
+  waymond: "@choomfie/waymond",
 };
 
 export interface PluginConfigSource {

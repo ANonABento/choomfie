@@ -18,6 +18,11 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { writeFile, unlink } from "node:fs/promises";
 import { VERSION } from "./lib/version.ts";
 import {
+  ensureRemoteMcpToken,
+  loadRemoteMcpConfig,
+  startRemoteMcp,
+} from "./lib/remote-mcp.ts";
+import {
   PERMISSION_REQUEST_METHOD,
   PermissionRequestNotificationSchema,
   requirePermissionRequestParams,
@@ -471,12 +476,37 @@ mcp = createMcp();
 await mcp.connect(new StdioServerTransport());
 console.error("Supervisor: MCP connected");
 
+// Optional remote MCP endpoint (off by default). A failure here — bad config,
+// port taken during a daemon session handoff — must never take down stdio.
+let remoteMcpServer: ReturnType<typeof startRemoteMcp> | null = null;
+try {
+  const remoteCfg = loadRemoteMcpConfig(DATA_DIR);
+  if (remoteCfg.enabled) {
+    remoteMcpServer = startRemoteMcp(remoteCfg, ensureRemoteMcpToken(DATA_DIR), {
+      name: "choomfie",
+      version: VERSION,
+      listTools: () => [...SUPERVISOR_TOOLS, ...currentTools],
+      callTool: (name, args) =>
+        SUPERVISOR_TOOLS.some((t) => t.name === name)
+          ? handleSupervisorTool(name, args)
+          : callWorkerTool(name, args),
+    });
+    console.error(
+      `Supervisor: remote MCP on http://${remoteCfg.host}:${remoteCfg.port}/mcp ` +
+        `(${remoteCfg.tools.length} tools allowed)`
+    );
+  }
+} catch (e) {
+  console.error(`Supervisor: remote MCP not started: ${errorMessage(e)}`);
+}
+
 // Graceful shutdown
 let shutdownCalled = false;
 const shutdown = async () => {
   if (shutdownCalled) return;
   shutdownCalled = true;
   console.error("Supervisor: shutting down");
+  try { remoteMcpServer?.stop(true); } catch {}
 
   // Tell worker to shut down gracefully (even if not ready yet)
   if (worker) {

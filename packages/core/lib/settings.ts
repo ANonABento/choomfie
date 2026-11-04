@@ -261,6 +261,22 @@ export const SETTINGS: Setting[] = [
     read: (config) => config.getFallbackModel(),
     write: (config, model) => config.setFallbackModel(model),
   }),
+  {
+    key: "brainAccess",
+    description: "Who a non-Claude brain (/brain) answers: owner, or everyone allowlisted",
+    example: "owner or allowlist",
+    suggestions: ["owner", "allowlist"],
+    scope: "immediately",
+    read: (config) => config.getBrainAccess(),
+    write: (config, raw) => {
+      const value = isReset(raw) ? "owner" : raw.trim().toLowerCase();
+      if (value !== "owner" && value !== "allowlist") {
+        return { ok: false, error: "Must be `owner` or `allowlist`." };
+      }
+      config.setBrainAccess(value);
+      return { ok: true, value };
+    },
+  },
   countSetting({
     key: "daemon.tokenThreshold",
     description: "Cycle the daemon session past this much context",

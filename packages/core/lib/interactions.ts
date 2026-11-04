@@ -153,6 +153,7 @@ export function registerAllHandlers(): Promise<void> {
     await import("./handlers/session-commands.ts");
     await import("./handlers/access-commands.ts");
     await import("./handlers/usage-command.ts");
+    await import("./handlers/brain-command.ts");
   })();
   return handlersLoaded;
 }

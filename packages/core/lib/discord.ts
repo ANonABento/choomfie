@@ -30,6 +30,7 @@ import {
   type NotificationMessage,
 } from "@choomfie/shared";
 import { deliverInboundMessage } from "./daemon-status.ts";
+import { decideRoute, dispatchToBrain, installBrainPoster, parentChannelId } from "./brain-router.ts";
 import {
   dispatchPluginMessage,
   initializePlugins,
@@ -124,6 +125,9 @@ export function createDiscordClient(ctx: AppContext): Client {
     if (ctx._inboxInterval) clearInterval(ctx._inboxInterval);
     ctx._inboxInterval = setInterval(cleanInbox, 60 * 60 * 1000);
     cleanInbox(); // Run on startup
+
+    // Brains may post late results (background jobs) — give them the poster first.
+    installBrainPoster(ctx);
 
     // Initialize plugins
     await initializePlugins(ctx.plugins, ctx);
@@ -286,10 +290,10 @@ export function createDiscordClient(ctx: AppContext): Client {
     }
 
     // Handle image/file attachments
+    const filePaths: string[] = [];
     if (message.attachments.size > 0) {
       meta.attachment_count = String(message.attachments.size);
       const descriptions: string[] = [];
-      const filePaths: string[] = [];
       const downloadDir = `${ctx.DATA_DIR}/inbox`;
       await mkdir(downloadDir, { recursive: true });
 
@@ -316,8 +320,27 @@ export function createDiscordClient(ctx: AppContext): Client {
       if (filePaths.length > 1) meta.file_paths = filePaths.join(";");
     }
 
-    // Show typing indicator while Claude processes (state machine in lib/typing.ts)
     const isConversationMode = meta.conversation_mode === "true";
+
+    // Which brain answers here? Claude unless this channel was set otherwise
+    // with /brain — and even then only for whoever brainAccess permits.
+    const route = decideRoute({
+      channelId: message.channelId,
+      parentId: parentChannelId(message.channel),
+      isOwner: owner,
+      isConversationMode,
+      access: ctx.config.getBrainAccess(),
+      channelBrain: (id) => ctx.config.getChannelBrain(id),
+    });
+    if (route.kind === "ignore") return;
+    if (route.kind === "unavailable") {
+      await message
+        .reply(`The \`${route.brainId}\` brain isn't loaded right now. \`/brain status\` for details, or \`/brain set claude\`.`)
+        .catch(() => {});
+      return;
+    }
+
+    // Show typing indicator while the brain processes (state machine in lib/typing.ts)
     onMessageReceived(message.channelId, message.channel, isConversationMode);
 
     // Strip bot @mention from the message so Claude sees clean text
@@ -327,6 +350,17 @@ export function createDiscordClient(ctx: AppContext): Client {
 
     const content =
       cleanContent || "(empty message — user may have just mentioned you)";
+
+    if (route.kind === "brain") {
+      void dispatchToBrain(ctx, route.brain, message.channel as never, {
+        chatKey: message.channelId,
+        messageId: message.id,
+        content,
+        meta,
+        filePaths,
+      });
+      return;
+    }
 
     // Forward to Claude Code — by whichever route this process actually has.
     //

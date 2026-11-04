@@ -20,7 +20,8 @@
     "prepare": "husky || true",
     "deploy-commands": "bun packages/core/scripts/deploy-commands.ts",
     "daemon": "bun packages/core/daemon.ts",
-    "install:launchd": "packages/core/scripts/install-launchd.sh"
+    "install:launchd": "packages/core/scripts/install-launchd.sh",
+    "waymond:login": "bun plugins/waymond/login.ts"
   },
   "lint-staged": {
     "*.ts": "eslint --fix"
@@ -33,6 +34,7 @@
     "@choomfie/socials": "workspace:*",
     "@choomfie/tutor": "workspace:*",
     "@choomfie/voice": "workspace:*",
+    "@choomfie/waymond": "workspace:*",
     "@discordjs/opus": "^0.10.0",
     "@discordjs/voice": "^0.19.2",
     "@modelcontextprotocol/sdk": "^1.0.0",
