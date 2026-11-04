@@ -24,7 +24,8 @@ import {
   SlashCommandBuilder,
   type ButtonInteraction,
 } from "discord.js";
-import { AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds } from "@choomfie/shared";
+import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds } from "@choomfie/shared";
+import { botIsAbsent, interactionChannel, rememberBrainRelay } from "../ask-relay.ts";
 import { registerButtonHandler, registerCommand } from "../register.ts";
 import {
   clearPendingApproval,
@@ -44,16 +45,20 @@ function label(id: string): string {
 }
 
 registerCommand("brain", {
-  data: new SlashCommandBuilder()
-    .setName("brain")
-    .setDescription("Who answers in this channel (owner only)")
-    .addStringOption((o) =>
-      o
-        .setName("name")
-        .setDescription("claude, or a loaded brain — omit to see what answers here")
-        .setAutocomplete(true)
-    )
-    .toJSON(),
+  data: {
+    ...new SlashCommandBuilder()
+      .setName("brain")
+      .setDescription("Who answers in this channel (owner only)")
+      .addStringOption((o) =>
+        o
+          .setName("name")
+          .setDescription("claude, or a loaded brain — omit to see what answers here")
+          .setAutocomplete(true)
+      )
+      .toJSON(),
+    // Usable in group DMs (user install), so /ask there can be pointed at a brain.
+    ...ANYWHERE,
+  },
   // Lists only brains actually loaded right now — in-memory, well inside 3s.
   autocomplete: async (interaction) => {
     const typed = interaction.options.getFocused().toLowerCase();
@@ -110,10 +115,13 @@ registerCommand("brain", {
 
 // /stop — interrupt whoever is answering in this channel.
 registerCommand("stop", {
-  data: new SlashCommandBuilder()
-    .setName("stop")
-    .setDescription("Interrupt the reply in progress in this channel (owner only)")
-    .toJSON(),
+  data: {
+    ...new SlashCommandBuilder()
+      .setName("stop")
+      .setDescription("Interrupt the reply in progress in this channel (owner only)")
+      .toJSON(),
+    ...ANYWHERE,
+  },
   handler: async (interaction, ctx) => {
     if (await requireOwner(interaction, ctx)) return;
     const channelId = interaction.channelId;
@@ -162,7 +170,9 @@ registerButtonHandler("brain", async (interaction, parts, ctx) => {
   const index = Number(parts[2]);
   const choice = pending?.choices[index];
   const brain = pending ? getBrain(pending.brainId) : undefined;
-  if (!pending || choice === undefined || !brain || !interaction.channel) {
+  // In a chat the bot isn't in (a group DM /ask), answer through the button's own interaction.
+  const absent = botIsAbsent(interaction);
+  if (!pending || choice === undefined || !brain || (!absent && !interaction.channel)) {
     await interaction.reply({ content: "Those options have expired — just type your answer.", flags: MessageFlags.Ephemeral });
     return;
   }
@@ -181,8 +191,18 @@ registerButtonHandler("brain", async (interaction, parts, ctx) => {
   );
   await interaction.update({ components: rows });
 
-  const channel = interaction.channel as unknown as SendableChannel;
-  onMessageReceived(pending.chatKey, interaction.channel as never, false);
+  let channel: SendableChannel;
+  if (absent) {
+    const relay = interactionChannel(interaction, {
+      first: "followUp",
+      ephemeral: interaction.message.flags.has(MessageFlags.Ephemeral),
+    });
+    rememberBrainRelay(pending.chatKey, relay);
+    channel = relay;
+  } else {
+    channel = interaction.channel as unknown as SendableChannel;
+    onMessageReceived(pending.chatKey, interaction.channel as never, false);
+  }
   void dispatchToBrain(ctx, brain, channel, {
     chatKey: pending.chatKey,
     messageId: interaction.message.id,

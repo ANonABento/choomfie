@@ -326,6 +326,7 @@ registerCommand("help", {
         {
           name: "Other",
           value: [
+            "`/ask <prompt>` or right-click → Apps → Ask Choomfie — works in group DMs too",
             "`/github <check>` — PRs, issues, notifications",
             "`/status` — bot status, this channel's brain, session and context usage",
             "`/usage` — plan limits and what this session cost",

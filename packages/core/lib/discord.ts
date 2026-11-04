@@ -9,8 +9,7 @@ import {
   Partials,
   type Message,
 } from "discord.js";
-import { mkdir, readdir, stat, unlink } from "node:fs/promises";
-import { basename } from "node:path";
+import { readdir, stat, unlink } from "node:fs/promises";
 import { handleInteraction, getCommandDefs } from "./interactions.ts";
 import type { AppContext } from "./types.ts";
 import { saveAccess } from "./context.ts";
@@ -25,11 +24,10 @@ import { clearGuildCommands, deployGlobalCommands } from "./command-deploy.ts";
 import { isAllowed, isOwner } from "./access.ts";
 import {
   errorMessage,
-  isDaemonOwnedProcess,
   type McpTransport,
   type NotificationMessage,
 } from "@choomfie/shared";
-import { deliverInboundMessage } from "./daemon-status.ts";
+import { downloadAttachments, forwardToClaude } from "./inbound.ts";
 import { decideRoute, dispatchToBrain, installBrainPoster, parentChannelId } from "./brain-router.ts";
 import {
   dispatchPluginMessage,
@@ -40,12 +38,6 @@ const PERMISSION_REPLY_RE = /^\s*(y|yes|n|no)\s+([a-km-z]{5})\s*$/i;
 
 function notifyMcp(ctx: AppContext, message: NotificationMessage): void {
   (ctx.mcp as McpTransport).notification?.(message);
-}
-
-function sanitizeAttachmentName(name?: string | null): string {
-  const safeBase = basename(name || "attachment");
-  const sanitized = safeBase.replace(/[^a-zA-Z0-9._-]/g, "_");
-  return sanitized || "attachment";
 }
 
 function generatePairingCode(): string {
@@ -290,35 +282,7 @@ export function createDiscordClient(ctx: AppContext): Client {
     }
 
     // Handle image/file attachments
-    const filePaths: string[] = [];
-    if (message.attachments.size > 0) {
-      meta.attachment_count = String(message.attachments.size);
-      const descriptions: string[] = [];
-      const downloadDir = `${ctx.DATA_DIR}/inbox`;
-      await mkdir(downloadDir, { recursive: true });
-
-      for (const [, attachment] of message.attachments) {
-        descriptions.push(
-          `${attachment.name} (${attachment.contentType || "unknown"}, ${Math.round((attachment.size || 0) / 1024)}KB)`
-        );
-
-        try {
-          const response = await fetch(attachment.url);
-          if (!response.ok) throw new Error(`download failed: ${response.status}`);
-          const buffer = await response.arrayBuffer();
-          const safeName = sanitizeAttachmentName(attachment.name);
-          const filePath = `${downloadDir}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeName}`;
-          await Bun.write(filePath, buffer);
-          filePaths.push(filePath);
-        } catch {
-          // Download failed, Claude will just see the description
-        }
-      }
-      meta.attachments = descriptions.join("; ");
-      // Pass first path as file_path for backwards compat, all paths as file_paths
-      if (filePaths.length > 0) meta.file_path = filePaths[0];
-      if (filePaths.length > 1) meta.file_paths = filePaths.join(";");
-    }
+    const filePaths = await downloadAttachments(ctx, message.attachments.values(), meta);
 
     const isConversationMode = meta.conversation_mode === "true";
 
@@ -362,33 +326,8 @@ export function createDiscordClient(ctx: AppContext): Client {
       return;
     }
 
-    // Forward to Claude Code — by whichever route this process actually has.
-    //
-    // Foreground sessions register the `claude/channel` capability and get the
-    // message as an MCP notification. Daemon sessions cannot register it (the
-    // SDK's `enableChannel` requires a marketplace-sourced plugin), so the
-    // notification would be dropped on the floor and the bot would type
-    // forever without answering. There, the message goes up the file channel
-    // and the daemon injects it into the session itself.
-    //
-    // Exactly one route per process, chosen by who launched it: if the
-    // capability ever starts registering under the daemon, no notification is
-    // waiting for it and nothing double-delivers.
-    if (isDaemonOwnedProcess()) {
-      try {
-        await deliverInboundMessage(ctx.DATA_DIR, content, meta);
-      } catch (error: unknown) {
-        // Nothing else can carry this message; the user is owed the reason.
-        console.error(
-          `[choomfie] failed to hand message ${message.id} to the daemon: ${errorMessage(error)}`
-        );
-      }
-    } else {
-      notifyMcp(ctx, {
-        method: "notifications/claude/channel",
-        params: { content, meta },
-      });
-    }
+    // Forward to Claude Code (MCP notification, or the daemon's file channel).
+    await forwardToClaude(ctx, content, meta);
   });
 
   // Handle interactions (buttons, slash commands, modals)

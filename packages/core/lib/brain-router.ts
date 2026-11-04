@@ -25,6 +25,7 @@ import {
 import type { BrainAccess } from "./config.ts";
 import type { AppContext } from "./types.ts";
 import { onReplySent } from "./typing.ts";
+import { getBrainRelay } from "./ask-relay.ts";
 
 export type RouteDecision =
   /** Forward to the Claude session as usual. */
@@ -218,9 +219,12 @@ export async function postBrainReply(
 /** Lets plugins post late results (background jobs) through the same formatting. */
 export function installBrainPoster(ctx: AppContext): void {
   setBrainPoster(async (brainId, chatKey, reply) => {
-    const channel = await ctx.discord?.channels.fetch(chatKey).catch(() => null);
-    if (!channel || !("send" in channel)) throw new Error(`channel ${chatKey} not reachable`);
-    await postBrainReply(channel as unknown as SendableChannel, brainId, chatKey, reply);
+    const fetched = await ctx.discord?.channels.fetch(chatKey).catch(() => null);
+    // A chat the bot isn't in (group DM /ask) can still be answered while its
+    // interaction is open; after that the result stays in the brain's own app.
+    const channel = fetched && "send" in fetched ? (fetched as unknown as SendableChannel) : getBrainRelay(chatKey);
+    if (!channel) throw new Error(`channel ${chatKey} not reachable`);
+    await postBrainReply(channel, brainId, chatKey, reply);
   });
 }
 

@@ -14,6 +14,7 @@ import {
   type Interaction,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
+  type MessageContextMenuCommandInteraction,
   type ModalSubmitInteraction,
 } from "discord.js";
 import type { AppContext } from "./types.ts";
@@ -39,12 +40,13 @@ export {
   type CommandHandler,
 } from "./register.ts";
 
-import { buttonHandlers, modalHandlers, commands } from "@choomfie/shared";
+import { buttonHandlers, modalHandlers, commands, messageMenus } from "@choomfie/shared";
 
 // --- Error-safe interaction wrapper ---
 
 type SafeHandleInteraction =
   | ChatInputCommandInteraction
+  | MessageContextMenuCommandInteraction
   | ButtonInteraction
   | ModalSubmitInteraction;
 
@@ -109,6 +111,16 @@ export async function handleInteraction(
     return;
   }
 
+  if (interaction.isMessageContextMenuCommand()) {
+    const menu = messageMenus.get(interaction.commandName);
+    if (menu) {
+      await safeHandle(interaction, `Menu(${interaction.commandName})`, () =>
+        menu.handler(interaction, ctx)
+      );
+    }
+    return;
+  }
+
   if (interaction.isButton()) {
     const parts = interaction.customId.split(":");
     const handler = buttonHandlers.get(parts[0]);
@@ -154,6 +166,7 @@ export function registerAllHandlers(): Promise<void> {
     await import("./handlers/access-commands.ts");
     await import("./handlers/usage-command.ts");
     await import("./handlers/brain-command.ts");
+    await import("./handlers/ask-command.ts");
   })();
   return handlersLoaded;
 }

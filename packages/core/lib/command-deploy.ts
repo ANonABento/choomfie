@@ -15,13 +15,10 @@
  * a newly added or renamed command (in practice usually much less). Edits to an
  * existing command's description or options generally appear immediately.
  */
-import {
-  Routes,
-  type REST,
-  type RESTPostAPIChatInputApplicationCommandsJSONBody,
-} from "discord.js";
+import { Routes, type REST } from "discord.js";
+import type { AnyCommandBody } from "@choomfie/shared";
 
-export type CommandBody = RESTPostAPIChatInputApplicationCommandsJSONBody;
+export type CommandBody = AnyCommandBody;
 
 /** Replace the application's global command list. */
 export async function deployGlobalCommands(

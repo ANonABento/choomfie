@@ -106,7 +106,11 @@ export {
   buttonHandlers,
   modalHandlers,
   commands,
+  messageMenus,
+  registerMessageMenu,
   AUTOCOMPLETE_LIMIT,
+  GUILD_INSTALL_ONLY,
+  ANYWHERE,
 } from "./interactions.ts";
 export type {
   ButtonHandler,
@@ -114,6 +118,9 @@ export type {
   CommandHandler,
   AutocompleteHandler,
   CommandDef,
+  MessageMenuDef,
+  MessageMenuHandler,
+  AnyCommandBody,
 } from "./interactions.ts";
 
 // Brains (alternative Discord responders)

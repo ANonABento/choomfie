@@ -1,27 +1,36 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { commands, getCommandDefs, registerBrain, unregisterBrain } from "@choomfie/shared";
+import { ApplicationIntegrationType as IT, InteractionContextType as CT } from "discord.js";
+import { commands, getCommandDefs, messageMenus, registerBrain, unregisterBrain } from "@choomfie/shared";
 import { registerAllHandlers } from "../lib/interactions.ts";
 
 beforeAll(async () => {
   await registerAllHandlers();
 });
 
-type Json = { name: string; description: string; options?: Json[]; type?: number };
+type Json = {
+  name: string;
+  description: string;
+  options?: Json[];
+  type?: number;
+  integration_types?: number[];
+  contexts?: number[];
+};
+const slash = () => (getCommandDefs() as Json[]).filter((c) => (c.type ?? 1) === 1);
 
 describe("slash command set", () => {
   // Other test files register throwaway commands in the same shared registry,
   // so pin what must exist and what must be gone rather than the exact list.
   const EXPECTED = [
-    "access", "brain", "clear", "compact", "config", "github", "help", "memory",
+    "access", "ask", "brain", "clear", "compact", "config", "github", "help", "memory",
     "model", "persona", "plugins", "remind", "status", "stop", "usage", "voice",
   ];
   const REMOVED = ["reminders", "cancel", "savememory", "newpersona", "allow", "revoke"];
 
   test("is the consolidated set — fewer commands to remember", () => {
-    const names = new Set(getCommandDefs().map((c) => c.name));
+    const names = new Set(slash().map((c) => c.name));
     for (const n of EXPECTED) expect(names.has(n)).toBe(true);
     for (const n of REMOVED) expect(names.has(n)).toBe(false);
-    expect(EXPECTED).toHaveLength(16);
+    expect(EXPECTED).toHaveLength(17);
   });
 
   test("merged commands expose their verbs as subcommands", () => {
@@ -40,7 +49,25 @@ describe("slash command set", () => {
       expect(o.description.length).toBeLessThanOrEqual(100);
       for (const c of o.options ?? []) walk(c);
     };
-    for (const c of getCommandDefs()) walk(c as Json);
+    for (const c of slash()) walk(c);
+  });
+
+  test("only /ask, /brain, /stop and the Ask Choomfie menu work outside the bot's servers", () => {
+    const anywhere = (getCommandDefs() as Json[])
+      .filter((c) => c.integration_types?.includes(IT.UserInstall))
+      .map((c) => c.name)
+      .sort();
+    expect(anywhere).toEqual(["Ask Choomfie", "ask", "brain", "stop"]);
+    for (const c of getCommandDefs() as Json[]) {
+      expect(c.integration_types?.length).toBeGreaterThan(0);
+      if (anywhere.includes(c.name)) expect(c.contexts).toContain(CT.PrivateChannel);
+      else expect(c.contexts).toEqual([CT.Guild, CT.BotDM]);
+    }
+  });
+
+  test("Ask Choomfie is a message menu command", () => {
+    const menu = messageMenus.get("Ask Choomfie");
+    expect(menu?.data.type).toBe(3);
   });
 });
 
