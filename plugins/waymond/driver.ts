@@ -55,6 +55,9 @@ export interface DriverOptions {
 }
 
 const COMPOSER_PLACEHOLDER = "Ask Waymond...";
+/** Max wait for tool calls to attach after the text lands (observed ~2.3s). */
+const SETTLE_MS = 8_000;
+const SETTLE_POLL_MS = 800;
 
 export async function launchWaymondContext(profileDir: string, headless: boolean): Promise<BrowserContext> {
   const opts = { headless, viewport: null } as const;
@@ -256,6 +259,7 @@ export class WaymondDriver {
       const started = Date.now();
       let approvalNotified = false;
       let sawActive = false;
+      let doneSince = 0;
       let polls = 0;
       for (;;) {
         await page.waitForTimeout(this.pollMs);
@@ -264,6 +268,14 @@ export class WaymondDriver {
         if (!turn.active) {
           const messages = parseMessages(await this.getJson(page, messagesUrl(convId)));
           const state = answerState(messages, baseline, turn.active, sawActive);
+          // Done, but give Waymond a moment to attach quick replies / cards.
+          if (state.done && !state.settled && !this.stopRequested) {
+            doneSince ||= Date.now();
+            if (Date.now() - doneSince < SETTLE_MS) {
+              await page.waitForTimeout(SETTLE_POLL_MS);
+              continue;
+            }
+          }
           if (state.done || (this.stopRequested && !turn.active)) {
             return {
               reply: state.reply || (this.stopRequested ? "" : "(Waymond finished without a text reply)"),

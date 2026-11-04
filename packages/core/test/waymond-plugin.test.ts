@@ -192,3 +192,24 @@ describe("approval cards (offer_post observed 2026-11-04)", () => {
     expect(openOffers(parseMessages([card("sent")]))).toEqual([]);
   });
 });
+
+describe("settling (race observed 2026-11-04)", () => {
+  test("an answer isn't settled until its tool calls are attached", () => {
+    const base = new Set<string>();
+    const early = parseMessages([
+      { id: "u", role: "user", content: "cats or dogs?", tool_calls: null },
+      { id: "a", role: "assistant", content: "Cats or dogs?", tool_calls: null },
+    ]);
+    expect(answerState(early, base, false, false)).toMatchObject({ done: true, settled: false, options: [] });
+    const late = parseMessages([
+      { id: "u", role: "user", content: "cats or dogs?", tool_calls: null },
+      {
+        id: "a",
+        role: "assistant",
+        content: "Cats or dogs?",
+        tool_calls: [{ tool: "offer_replies", status: "completed", data: { options: ["Cats", "Dogs"] } }],
+      },
+    ]);
+    expect(answerState(late, base, false, false)).toMatchObject({ done: true, settled: true, options: ["Cats", "Dogs"] });
+  });
+});

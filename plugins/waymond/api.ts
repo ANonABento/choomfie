@@ -53,6 +53,11 @@ export interface ChatMessage {
   startsTask: boolean;
   /** Approval cards (`offer_post`, `offer_message`, …) attached to this message. */
   offers: Offer[];
+  /**
+   * Tool calls have been attached. Waymond writes the text first and adds
+   * `tool_calls` (quick replies, cards) ~2s later; until then it is null.
+   */
+  settled: boolean;
 }
 
 export interface Offer {
@@ -114,6 +119,7 @@ export function parseMessages(raw: unknown): ChatMessage[] {
         Array.isArray(m.tool_calls) &&
         m.tool_calls.some((c) => (c as { tool?: unknown } | null)?.tool === "start_task"),
       offers: offersIn(m.tool_calls),
+      settled: Array.isArray(m.tool_calls),
     }));
 }
 
@@ -170,6 +176,8 @@ export interface AnswerState {
   messageIds: string[];
   /** Approval cards still open in this answer. */
   offers: Offer[];
+  /** Every message in the answer has its tool calls attached (quick replies, cards). */
+  settled: boolean;
 }
 
 /**
@@ -191,7 +199,7 @@ export function answerState(
   sawActive: boolean
 ): AnswerState {
   const ours = messages.find((m) => m.role === "user" && !baselineIds.has(m.id));
-  if (!ours) return { done: false, reply: "", options: [], background: false, messageIds: [], offers: [] };
+  if (!ours) return { done: false, reply: "", options: [], background: false, messageIds: [], offers: [], settled: false };
   const run = answerRun(messages, ours.id);
   const reply = replyFor(messages, ours.id);
   return {
@@ -202,6 +210,7 @@ export function answerState(
     lastMessageId: (run[run.length - 1] ?? ours).id,
     messageIds: run.map((m) => m.id),
     offers: openOffers(run),
+    settled: run.length > 0 && run.every((m) => m.settled),
   };
 }
 
