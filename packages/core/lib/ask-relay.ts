@@ -64,6 +64,8 @@ export function replyRow() {
 
 const DISCORD_LIMIT = 2000;
 
+export const NO_ANSWER = "⌛ No answer this time — try again.";
+
 /** `> **alice:** what's 2+2` — the question, which nobody else in the chat can see. */
 export function questionHeader(user: string, question: string): string {
   const oneLine = question.replace(/\s+/g, " ").trim();
@@ -105,6 +107,19 @@ export function interactionChannel(
     chain = run.catch(() => {});
     return run;
   };
+
+  // If nothing answers before the window closes, say so instead of leaving
+  // "thinking…" to turn into Discord's "The application did not respond".
+  if (!edited) {
+    const timer = setTimeout(() => {
+      void inOrder(async () => {
+        if (edited) return;
+        edited = true;
+        await interaction.editReply({ content: NO_ANSWER, allowedMentions: { parse: [] } } as never);
+      }).catch(() => {});
+    }, RELAY_WINDOW_MS - 10_000);
+    (timer as { unref?: () => void }).unref?.();
+  }
 
   const post = async (body: Record<string, unknown>) => {
     if (opts.replyButton && !(body.components as unknown[] | undefined)?.length) {
@@ -192,6 +207,9 @@ export function getBrainRelay(chatKey: string): RelayChannel | undefined {
 export const ASK_NOTE =
   "[Sent with /choomfie from a chat Choomfie isn't in. Answer with `reply` to this chat_id " +
   "(follow-ups are fine for 15 minutes). react, edit, fetch/search, threads, polls and pins don't work here.]";
+
+/** Shown to someone in the chat who isn't allowed to talk to Choomfie. */
+export const NOT_ALLOWED = "Only people Choomfie's owner has allowed can chat with it here — you can still read along.";
 
 export const ASK_ONLY_REPLY =
   "This chat came from /choomfie — Choomfie isn't in it, so only `reply` works here.";

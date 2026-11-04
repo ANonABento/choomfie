@@ -32,7 +32,8 @@ import {
 import type { DaemonControlCommand } from "@choomfie/shared";
 import { registerCommand, registerButtonHandler } from "../register.ts";
 import { isDaemonMode, requestDaemonControl } from "../daemon-status.ts";
-import { CLAUDE_BRAIN, getBrain } from "@choomfie/shared";
+import { ANYWHERE, CLAUDE_BRAIN, getBrain } from "@choomfie/shared";
+import { botIsAbsent } from "../ask-relay.ts";
 import { requireOwner } from "./shared.ts";
 import { parentChannelId, resolveBrainId } from "../brain-router.ts";
 import type { AppContext } from "../types.ts";
@@ -103,7 +104,8 @@ async function submit(
 ): Promise<void> {
   await requestDaemonControl(ctx.DATA_DIR, command, {
     requestedBy: interaction.user.id,
-    chatId: interaction.channelId ?? undefined,
+    // The fresh session says hello here, unless this is a chat the bot can't post in.
+    chatId: botIsAbsent(interaction) ? undefined : (interaction.channelId ?? undefined),
   });
 
   const embed = new EmbedBuilder()
@@ -153,10 +155,14 @@ registerCommand("compact", {
 // someone else is mid-conversation with Choomfie, this wipes it for them too,
 // and unlike /compact there is no summary to fall back on.
 registerCommand("clear", {
-  data: new SlashCommandBuilder()
-    .setName("clear")
-    .setDescription("Clear conversation history and start fresh (owner only)")
-    .toJSON(),
+  data: {
+    ...new SlashCommandBuilder()
+      .setName("clear")
+      .setDescription("Clear conversation history and start fresh (owner only)")
+      .toJSON(),
+    // In a group DM answered by another brain, this is the only way to start it fresh.
+    ...ANYWHERE,
+  },
   handler: async (interaction, ctx) => {
     if (await requireOwner(interaction, ctx)) return;
     if (await handledByOtherBrain(interaction, ctx, "clear")) return;

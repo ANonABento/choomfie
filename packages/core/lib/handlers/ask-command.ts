@@ -39,6 +39,7 @@ import { isRateLimited } from "../conversation.ts";
 import { downloadAttachments, forwardToClaude, type AttachmentLike } from "../inbound.ts";
 import {
   ASK_NOTE,
+  NOT_ALLOWED,
   RELAY_WINDOW_MS,
   botIsAbsent,
   interactionChannel,
@@ -68,7 +69,7 @@ export async function runAsk(interaction: AskInteraction, ctx: AppContext, input
   const userId = interaction.user.id;
   const refuse = (content: string) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
   if (!isAllowed(ctx, userId)) {
-    await refuse("You're not on Choomfie's allowlist.");
+    await refuse(NOT_ALLOWED);
     return;
   }
   if (isRateLimited(ctx.lastMessageTime, userId, ctx.config.getRateLimitMs())) {
@@ -210,7 +211,7 @@ registerMessageMenu(ASK_MENU_NAME, {
   },
   handler: async (interaction, ctx) => {
     if (!isAllowed(ctx, interaction.user.id)) {
-      await interaction.reply({ content: "You're not on Choomfie's allowlist.", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: NOT_ALLOWED, flags: MessageFlags.Ephemeral });
       return;
     }
     const now = Date.now();
@@ -236,7 +237,7 @@ registerMessageMenu(ASK_MENU_NAME, {
 registerButtonHandler("ask", async (interaction, parts, ctx) => {
   if (parts[1] !== "reply") return;
   if (!isAllowed(ctx, interaction.user.id)) {
-    await interaction.reply({ content: "You're not on Choomfie's allowlist.", flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: NOT_ALLOWED, flags: MessageFlags.Ephemeral });
     return;
   }
   await interaction.showModal(

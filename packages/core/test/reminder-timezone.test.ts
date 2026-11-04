@@ -214,3 +214,19 @@ test("Tomorrow button snooze without timezone keeps 24 hour fallback", () => {
 
   expect(dateToSQLite(next!)).toBe("2026-03-08 17:00:00");
 });
+
+test("set_reminder from a /choomfie chat goes to the user's DM, since that chat can't receive it", async () => {
+  const { memory } = await makeMemory();
+  const ctx = {
+    ...fakeContext(memory),
+    discord: { users: { fetch: async (id: string) => ({ createDM: async () => ({ id: `dm-${id}` }) }) } },
+  } as unknown as AppContext;
+  const result = await tool("set_reminder").handler(
+    { user_id: "u1", chat_id: "ask:999", message: "stretch", due_at: "in 1h" },
+    ctx
+  );
+  expect(result.isError).toBeUndefined();
+  expect(resultText(result)).toContain("Delivered by DM");
+  expect(memory.getActiveReminders().find((r) => r.message === "stretch")?.chatId).toBe("dm-u1");
+  memory.close();
+});

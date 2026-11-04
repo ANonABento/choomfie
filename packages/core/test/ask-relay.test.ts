@@ -12,7 +12,8 @@ import {
 } from "../lib/ask-relay.ts";
 import { postBrainReply } from "../lib/brain-router.ts";
 import { menuPrompt, replyExcerpt, replyPrompt } from "../lib/handlers/ask-command.ts";
-import { REPLY_BUTTON_ID, questionHeader } from "../lib/ask-relay.ts";
+import { NO_ANSWER, REPLY_BUTTON_ID, questionHeader } from "../lib/ask-relay.ts";
+import { jest } from "bun:test";
 import { discordTools } from "../lib/tools/discord-tools.ts";
 
 function fakeInteraction() {
@@ -195,4 +196,21 @@ describe("keeping a group-DM conversation going", () => {
     expect(menuPrompt("bob", "  ", 2)).toBe("bob said:\n(attachments only)");
     expect(menuPrompt("alice", "the sky is green", 0, "fact check")).toBe("fact check\n\nalice said:\nthe sky is green");
   });
+});
+
+test("a placeholder nobody answers says so before Discord gives up", async () => {
+  jest.useFakeTimers();
+  try {
+    const i = fakeInteraction();
+    interactionChannel(i);
+    const answered = fakeInteraction();
+    await interactionChannel(answered).send({ content: "hi" });
+    jest.advanceTimersByTime(RELAY_WINDOW_MS);
+    await new Promise((r) => queueMicrotask(() => r(null)));
+    await Promise.resolve();
+    expect(i.calls).toEqual([{ kind: "edit", body: { content: NO_ANSWER, allowedMentions: { parse: [] } } }]);
+    expect(answered.calls).toHaveLength(1);
+  } finally {
+    jest.useRealTimers();
+  }
 });
