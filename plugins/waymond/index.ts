@@ -2,7 +2,7 @@
  * Waymond plugin — registers Ambition's Waymond as a Choomfie brain.
  *
  * Enable with `/plugins`, log in once with `bun run waymond:login`, then
- * `/brain set waymond` in a channel. No tools and no instructions: it costs
+ * `/brain waymond` in a channel. No tools and no instructions: it costs
  * the Claude session nothing.
  */
 

@@ -84,7 +84,7 @@ export interface Config {
   fallbackModel?: string;
   daemon: DaemonConfig;
   /**
-   * Which brain answers in each channel/thread (`/brain set`). Absent = claude.
+   * Which brain answers in each channel/thread (`/brain <name>`). Absent = claude.
    * Only routing — who may use Choomfie at all stays in access.json.
    */
   brainChannels?: Record<string, string>;

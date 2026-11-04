@@ -13,7 +13,7 @@
  * setting.
  *
  * Deliberately not listed here:
- * - `activePersona` / `personas` — `/persona`, `/newpersona`
+ * - `activePersona` / `personas` — `/persona`
  * - `plugins` — `/plugins`
  * - `voice` — `/voice`, which auto-detects providers
  * - `autoSummarize` — currently read by nothing; exposing a switch that does

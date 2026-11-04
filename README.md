@@ -75,10 +75,12 @@ In servers, `@mention` the bot or reply to its messages. In DMs, just talk.
 
 | Command | Description |
 | --- | --- |
-| `/remind` · `/reminders` · `/cancel <id>` | Set / list / cancel reminders |
-| `/memory [search]` · `/savememory` | List/search and save memories |
+| `/remind add` · `list` · `cancel <id>` | Set / list / cancel reminders |
+| `/memory list` · `search` · `save` · `forget` | List, search, save, delete memories |
 | `/github <check>` | Check PRs, issues, notifications |
-| `/persona [switch]` · `/newpersona` | List/switch and create personas |
+| `/persona list` · `switch` · `new` | List, switch, create personas |
+| `/brain [name]` · `/stop` | Who answers this channel (Claude, Waymond, …) / interrupt it |
+| `/access list` · `allow` · `revoke` | Who can talk to the bot |
 | `/plugins` | List, enable, or disable plugins |
 | `/voice` | Voice provider setup |
 | `/lesson` · `/progress` | Start a lesson / show learning progress |

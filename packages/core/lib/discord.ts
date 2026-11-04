@@ -335,7 +335,7 @@ export function createDiscordClient(ctx: AppContext): Client {
     if (route.kind === "ignore") return;
     if (route.kind === "unavailable") {
       await message
-        .reply(`The \`${route.brainId}\` brain isn't loaded right now. \`/brain status\` for details, or \`/brain set claude\`.`)
+        .reply(`The \`${route.brainId}\` brain isn't loaded right now. \`/brain\` for details, or \`/brain claude\` to switch back.`)
         .catch(() => {});
       return;
     }

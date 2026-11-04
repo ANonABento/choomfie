@@ -14,8 +14,11 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  type ChatInputCommandInteraction,
 } from "discord.js";
-import { AUTOCOMPLETE_LIMIT } from "@choomfie/shared";
+import type { AppContext } from "./types.ts";
+import { AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain } from "@choomfie/shared";
+import { parentChannelId, resolveBrainId } from "./brain-router.ts";
 import { VERSION } from "./version.ts";
 import { registerCommand, registerButtonHandler } from "./register.ts";
 import { formatContextUsage, readDaemonStatus } from "./daemon-status.ts";
@@ -38,113 +41,123 @@ import {
 
 // --- Command definitions ---
 
-// /remind — opens a modal form
+// /remind add|list|cancel — reminders in one place
+async function listReminders(interaction: ChatInputCommandInteraction, ctx: AppContext) {
+  const active = ctx.memory.getActiveReminders(interaction.user.id);
+  const unacked = ctx.memory.getUnackedReminders(interaction.user.id);
+
+  if (active.length === 0 && unacked.length === 0) {
+    await interaction.reply({
+      content: "No active reminders. `/remind add` to set one.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const embed = new EmbedBuilder().setColor(0xf0883e).setTitle("Your Reminders");
+
+  if (unacked.length > 0) {
+    const lines = unacked.map((r) => `⚠️ **#${r.id}** — ${r.message}`);
+    embed.addFields({ name: "Nagging", value: lines.join("\n") });
+  }
+  if (active.length > 0) {
+    const lines = active.map((r) => {
+      const ts = Math.floor(fromSQLiteDatetime(r.dueAt).getTime() / 1000);
+      const cron = r.cron ? ` · ${r.cron}` : "";
+      const timezone = r.timezone ? ` · ${r.timezone}` : "";
+      return `⏰ **#${r.id}** — ${r.message} · <t:${ts}:R>${timezone}${cron}`;
+    });
+    embed.addFields({ name: "Pending", value: lines.join("\n") });
+  }
+
+  embed.setFooter({ text: `${active.length + unacked.length} total · /remind cancel <id> to remove` });
+
+  await interaction.reply({
+    embeds: [embed],
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function cancelReminder(interaction: ChatInputCommandInteraction, ctx: AppContext) {
+  const id = interaction.options.getInteger("id", true);
+  const reminder = ctx.memory.getReminder(id);
+
+  if (!reminder) {
+    await interaction.reply({
+      content: `Reminder #${id} not found.`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  if (reminder.userId !== interaction.user.id && !isOwner(ctx, interaction.user.id)) {
+    await interaction.reply({
+      content: "That's not your reminder.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  ctx.memory.cancelReminder(id);
+  ctx.reminderScheduler.clearTimer(id);
+  ctx.reminderScheduler.clearNagTimer(id);
+
+  await interaction.reply({
+    content: `Cancelled reminder **#${id}**: ${reminder.message}`,
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
 registerCommand("remind", {
   data: new SlashCommandBuilder()
     .setName("remind")
-    .setDescription("Set a reminder via form")
-    .toJSON(),
-  handler: async (interaction) => {
-    await interaction.showModal(buildReminderModal());
-  },
-});
-
-// /reminders — list active reminders
-registerCommand("reminders", {
-  data: new SlashCommandBuilder()
-    .setName("reminders")
-    .setDescription("List your active reminders")
-    .toJSON(),
-  handler: async (interaction, ctx) => {
-    const active = ctx.memory.getActiveReminders(interaction.user.id);
-    const unacked = ctx.memory.getUnackedReminders(interaction.user.id);
-
-    if (active.length === 0 && unacked.length === 0) {
-      await interaction.reply({
-        content: "No active reminders.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const embed = new EmbedBuilder().setColor(0xf0883e).setTitle("Your Reminders");
-
-    if (unacked.length > 0) {
-      const lines = unacked.map((r) => `⚠️ **#${r.id}** — ${r.message}`);
-      embed.addFields({ name: "Nagging", value: lines.join("\n") });
-    }
-    if (active.length > 0) {
-      const lines = active.map((r) => {
-        const ts = Math.floor(fromSQLiteDatetime(r.dueAt).getTime() / 1000);
-        const cron = r.cron ? ` · ${r.cron}` : "";
-        const timezone = r.timezone ? ` · ${r.timezone}` : "";
-        return `⏰ **#${r.id}** — ${r.message} · <t:${ts}:R>${timezone}${cron}`;
-      });
-      embed.addFields({ name: "Pending", value: lines.join("\n") });
-    }
-
-    embed.setFooter({ text: `${active.length + unacked.length} total · /cancel <id> to remove` });
-
-    await interaction.reply({
-      embeds: [embed],
-      flags: MessageFlags.Ephemeral,
-    });
-  },
-});
-
-// /cancel <id> — quick cancel a reminder
-registerCommand("cancel", {
-  data: new SlashCommandBuilder()
-    .setName("cancel")
-    .setDescription("Cancel a reminder by ID")
-    .addIntegerOption((o) =>
-      o.setName("id").setDescription("Reminder ID (from /reminders)").setRequired(true)
+    .setDescription("Set, list, or cancel reminders")
+    .addSubcommand((s) => s.setName("add").setDescription("Set a reminder (form)"))
+    .addSubcommand((s) => s.setName("list").setDescription("List your active reminders"))
+    .addSubcommand((s) =>
+      s
+        .setName("cancel")
+        .setDescription("Cancel a reminder by ID")
+        .addIntegerOption((o) =>
+          o.setName("id").setDescription("Reminder ID (from /remind list)").setRequired(true)
+        )
     )
     .toJSON(),
   handler: async (interaction, ctx) => {
-    const id = interaction.options.getInteger("id", true);
-    const reminder = ctx.memory.getReminder(id);
-
-    if (!reminder) {
-      await interaction.reply({
-        content: `Reminder #${id} not found.`,
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
+    switch (interaction.options.getSubcommand()) {
+      case "add":
+        // showModal must be the first response — nothing before it.
+        await interaction.showModal(buildReminderModal());
+        return;
+      case "cancel":
+        await cancelReminder(interaction, ctx);
+        return;
+      default:
+        await listReminders(interaction, ctx);
     }
-
-    if (reminder.userId !== interaction.user.id && !isOwner(ctx, interaction.user.id)) {
-      await interaction.reply({
-        content: "That's not your reminder.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    ctx.memory.cancelReminder(id);
-    ctx.reminderScheduler.clearTimer(id);
-    ctx.reminderScheduler.clearNagTimer(id);
-
-    await interaction.reply({
-      content: `Cancelled reminder **#${id}**: ${reminder.message}`,
-      flags: MessageFlags.Ephemeral,
-    });
   },
 });
 
-// /memory [search] — list or search memories
+// /memory list|search|save|forget — memories in one place
 registerCommand("memory", {
   data: new SlashCommandBuilder()
     .setName("memory")
-    .setDescription("View, search, or forget memories")
-    .addStringOption((o) =>
-      o.setName("search").setDescription("Search term (omit to list all core memories)")
+    .setDescription("List, search, save, or forget memories")
+    .addSubcommand((s) => s.setName("list").setDescription("List core memories"))
+    .addSubcommand((s) =>
+      s
+        .setName("search")
+        .setDescription("Search core and archival memories")
+        .addStringOption((o) => o.setName("query").setDescription("Search term").setRequired(true))
     )
-    .addStringOption((o) =>
-      o
+    .addSubcommand((s) => s.setName("save").setDescription("Save something to memory (form, owner only)"))
+    .addSubcommand((s) =>
+      s
         .setName("forget")
-        .setDescription("Core memory key to delete (owner only)")
-        .setAutocomplete(true)
+        .setDescription("Delete a core memory (owner only)")
+        .addStringOption((o) =>
+          o.setName("key").setDescription("Core memory key").setRequired(true).setAutocomplete(true)
+        )
     )
     .toJSON(),
   // Suggests keys that actually exist, so `forget` can't be a guess at a
@@ -160,23 +173,29 @@ registerCommand("memory", {
     );
   },
   handler: async (interaction, ctx) => {
-    const search = interaction.options.getString("search");
-    const forget = interaction.options.getString("forget");
+    const sub = interaction.options.getSubcommand();
 
-    if (forget) {
+    if (sub === "save") {
       if (await requireOwner(interaction, ctx)) return;
+      await interaction.showModal(buildMemoryModal());
+      return;
+    }
 
+    if (sub === "forget") {
+      if (await requireOwner(interaction, ctx)) return;
+      const forget = interaction.options.getString("key", true);
       const deleted = ctx.memory.deleteCoreMemory(forget);
       await interaction.reply({
         content: deleted
           ? `Forgot **${forget}**.`
-          : `No core memory called **${forget}**. Run \`/memory\` to see what's there.`,
+          : `No core memory called **${forget}**. \`/memory list\` shows what's there.`,
         flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
-    if (search) {
+    if (sub === "search") {
+      const search = interaction.options.getString("query", true);
       const core = ctx.memory.getCoreMemory().filter(
         (m) => m.key.includes(search) || m.value.toLowerCase().includes(search.toLowerCase())
       );
@@ -202,26 +221,27 @@ registerCommand("memory", {
       }
 
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
-    } else {
-      const core = ctx.memory.getCoreMemory();
-      if (core.length === 0) {
-        await interaction.reply({
-          content: "No core memories saved yet.",
-          flags: MessageFlags.Ephemeral,
-        });
-        return;
-      }
-
-      const embed = new EmbedBuilder()
-        .setColor(0x5865f2)
-        .setTitle("Core Memories")
-        .setDescription(
-          core.map((m) => `**${m.key}** — ${m.value.slice(0, 80)}`).join("\n").slice(0, 4000)
-        )
-        .setFooter({ text: `${core.length} memories · /memory <search> to search` });
-
-      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      return;
     }
+
+    const core = ctx.memory.getCoreMemory();
+    if (core.length === 0) {
+      await interaction.reply({
+        content: "No core memories saved yet. `/memory save` to add one.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setTitle("Core Memories")
+      .setDescription(
+        core.map((m) => `**${m.key}** — ${m.value.slice(0, 80)}`).join("\n").slice(0, 4000)
+      )
+      .setFooter({ text: `${core.length} memories · /memory search to search` });
+
+    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   },
 });
 
@@ -239,28 +259,28 @@ registerCommand("help", {
         {
           name: "Reminders",
           value: [
-            "`/remind` — set a reminder (form)",
-            "`/reminders` — list active reminders",
-            "`/cancel <id>` — cancel a reminder",
+            "`/remind add` — set a reminder (form)",
+            "`/remind list` — list active reminders",
+            "`/remind cancel <id>` — cancel a reminder",
           ].join("\n"),
           inline: false,
         },
         {
           name: "Memory",
           value: [
-            "`/memory` — list core memories",
-            "`/memory search:<term>` — search memories",
-            "`/memory forget:<key>` — delete a core memory",
-            "`/savememory` — save a memory (form)",
+            "`/memory list` — list core memories",
+            "`/memory search <term>` — search memories",
+            "`/memory save` — save a memory (form)",
+            "`/memory forget <key>` — delete a core memory",
           ].join("\n"),
           inline: false,
         },
         {
           name: "Personas",
           value: [
-            "`/persona` — list all personas",
-            "`/persona switch:<key>` — switch persona",
-            "`/newpersona` — create a persona (form)",
+            "`/persona list` — list all personas",
+            "`/persona switch <key>` — switch persona",
+            "`/persona new` — create a persona (form)",
           ].join("\n"),
           inline: false,
         },
@@ -284,20 +304,22 @@ registerCommand("help", {
           inline: false,
         },
         {
-          name: "Session (daemon mode, owner only)",
+          name: "Conversation (owner only) — follows the channel's brain",
           value: [
-            "`/compact` — free up context, keep a summary",
-            "`/clear` — start fresh, keep nothing",
-            "_Saved memories and reminders survive both._",
+            "`/brain [name]` — who answers here (Claude, Waymond, …)",
+            "`/stop` — interrupt the reply in progress",
+            "`/clear` — start fresh (Claude: daemon only; other brains: this channel)",
+            "`/compact` — free up Claude's context, keep a summary",
+            "_Saved memories and reminders survive all of these._",
           ].join("\n"),
           inline: false,
         },
         {
           name: "Access (owner only)",
           value: [
-            "`/allow` — list who can talk to me",
-            "`/allow user:@someone` — let them in",
-            "`/revoke user:@someone` — shut them out",
+            "`/access list` — who can talk to me",
+            "`/access allow @someone` — let them in",
+            "`/access revoke @someone` — shut them out",
           ].join("\n"),
           inline: false,
         },
@@ -305,7 +327,7 @@ registerCommand("help", {
           name: "Other",
           value: [
             "`/github <check>` — PRs, issues, notifications",
-            "`/status` — bot status, session and context usage",
+            "`/status` — bot status, this channel's brain, session and context usage",
             "`/usage` — plan limits and what this session cost",
           ].join("\n"),
           inline: false,
@@ -365,6 +387,17 @@ registerCommand("github", {
   },
 });
 
+/** Who answers in this channel, and for whom — the old `/brain status`. */
+function brainHere(interaction: ChatInputCommandInteraction, ctx: AppContext): string {
+  const parentId = parentChannelId(interaction.channel);
+  const id = resolveBrainId(interaction.channelId, parentId, (c) => ctx.config.getChannelBrain(c));
+  if (id === CLAUDE_BRAIN) return "**Claude**";
+  const brain = getBrain(id);
+  const own = ctx.config.getChannelBrain(interaction.channelId) ? "" : " (from parent channel)";
+  const who = ctx.config.getBrainAccess() === "owner" ? "owner only" : "allowlist";
+  return brain ? `**${brain.label}**${own} · ${who}` : `\`${id}\` ⚠️ not loaded`;
+}
+
 // /status
 registerCommand("status", {
   data: new SlashCommandBuilder()
@@ -406,6 +439,7 @@ registerCommand("status", {
         { name: "Reminders", value: `${stats.reminderCount} active`, inline: true },
         { name: "Access", value: `${ctx.allowedUsers.size} users`, inline: true },
         { name: "Plugins", value: pluginStatus, inline: true },
+        { name: "Brain here", value: brainHere(interaction, ctx), inline: true },
       );
 
     // Daemon block — only when a daemon is actually supervising. In foreground
@@ -455,20 +489,44 @@ registerCommand("status", {
   },
 });
 
-// /persona [switch]
+// /persona list|switch|new — personas in one place
 registerCommand("persona", {
   data: new SlashCommandBuilder()
     .setName("persona")
-    .setDescription("View or switch personas")
-    .addStringOption((o) =>
-      o.setName("switch").setDescription("Persona key to switch to (omit to list all)")
+    .setDescription("List, switch, or create personas")
+    .addSubcommand((s) => s.setName("list").setDescription("List personas"))
+    .addSubcommand((s) =>
+      s
+        .setName("switch")
+        .setDescription("Switch persona (owner only, restarts)")
+        .addStringOption((o) =>
+          o.setName("key").setDescription("Persona key").setRequired(true).setAutocomplete(true)
+        )
     )
+    .addSubcommand((s) => s.setName("new").setDescription("Create a persona (form, owner only)"))
     .toJSON(),
+  autocomplete: async (interaction, ctx) => {
+    const typed = interaction.options.getFocused().toLowerCase();
+    await interaction.respond(
+      ctx.config
+        .listPersonas()
+        .filter((p) => p.key.toLowerCase().includes(typed) || p.persona.name.toLowerCase().includes(typed))
+        .slice(0, AUTOCOMPLETE_LIMIT)
+        .map((p) => ({ name: `${p.persona.name} (${p.key})`.slice(0, 100), value: p.key })),
+    );
+  },
   handler: async (interaction, ctx) => {
-    const switchTo = interaction.options.getString("switch");
+    const sub = interaction.options.getSubcommand();
 
-    if (switchTo) {
+    if (sub === "new") {
       if (await requireOwner(interaction, ctx)) return;
+      await interaction.showModal(buildPersonaModal());
+      return;
+    }
+
+    if (sub === "switch") {
+      if (await requireOwner(interaction, ctx)) return;
+      const switchTo = interaction.options.getString("key", true);
       const persona = ctx.config.switchPersona(switchTo);
       if (!persona) {
         const available = ctx.config
@@ -487,40 +545,17 @@ registerCommand("persona", {
       await interaction.reply({
         content: `Switched to **${persona.name}**. Restarting...`,
       });
-    } else {
-      const personas = ctx.config.listPersonas();
-      const lines = personas.map(
-        (p) => `${p.active ? "→ " : "  "}\`${p.key}\` — **${p.persona.name}**`
-      );
-      await interaction.reply({
-        content: `**Personas:**\n${lines.join("\n")}`,
-        flags: MessageFlags.Ephemeral,
-      });
+      return;
     }
-  },
-});
 
-// /newpersona — opens a modal form (owner only)
-registerCommand("newpersona", {
-  data: new SlashCommandBuilder()
-    .setName("newpersona")
-    .setDescription("Create a new persona via form (owner only)")
-    .toJSON(),
-  handler: async (interaction, ctx) => {
-    if (await requireOwner(interaction, ctx)) return;
-    await interaction.showModal(buildPersonaModal());
-  },
-});
-
-// /savememory — opens a modal form (owner only)
-registerCommand("savememory", {
-  data: new SlashCommandBuilder()
-    .setName("savememory")
-    .setDescription("Save something to memory via form (owner only)")
-    .toJSON(),
-  handler: async (interaction, ctx) => {
-    if (await requireOwner(interaction, ctx)) return;
-    await interaction.showModal(buildMemoryModal());
+    const personas = ctx.config.listPersonas();
+    const lines = personas.map(
+      (p) => `${p.active ? "→ " : "  "}\`${p.key}\` — **${p.persona.name}**`
+    );
+    await interaction.reply({
+      content: `**Personas:**\n${lines.join("\n")}`,
+      flags: MessageFlags.Ephemeral,
+    });
   },
 });
 
