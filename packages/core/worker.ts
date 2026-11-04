@@ -71,7 +71,8 @@ const toolDefs: IpcToolDef[] = allTools.map((t) => t.definition);
 process.on("message", async (msg: SupervisorMessage) => {
   if (msg.type === "tool_call") {
     // Start typing when Claude is about to respond to a channel
-    if (msg.args?.chat_id && typeof msg.args.chat_id === "string") {
+    // (`ask:` chat ids are interaction relays, not channels — nothing to fetch.)
+    if (msg.args?.chat_id && typeof msg.args.chat_id === "string" && !msg.args.chat_id.startsWith("ask:")) {
       try {
         const ch = await ctx.discord.channels.fetch(msg.args.chat_id);
         if (ch?.isTextBased() && "sendTyping" in ch) {

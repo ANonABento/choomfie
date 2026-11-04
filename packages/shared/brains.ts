@@ -22,6 +22,11 @@ export interface BrainMessage {
   meta: Record<string, string>;
   /** Downloaded attachment paths. */
   filePaths: string[];
+  /**
+   * Set when the brain can't post to the chat itself (a group DM `/choomfie`):
+   * show a "still working" line here instead. The answer replaces it.
+   */
+  progress?: (line: string) => Promise<void>;
 }
 
 export interface BrainReply {

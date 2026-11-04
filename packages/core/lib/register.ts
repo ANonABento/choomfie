@@ -18,13 +18,16 @@ import type {
   AutocompleteInteraction,
   ButtonInteraction,
   ChatInputCommandInteraction,
+  MessageContextMenuCommandInteraction,
   ModalSubmitInteraction,
   RESTPostAPIChatInputApplicationCommandsJSONBody,
+  RESTPostAPIContextMenuApplicationCommandsJSONBody,
 } from "discord.js";
 import {
   registerButtonHandler as registerSharedButtonHandler,
   registerModalHandler as registerSharedModalHandler,
   registerCommand as registerSharedCommand,
+  registerMessageMenu as registerSharedMessageMenu,
   type PluginContext,
 } from "@choomfie/shared";
 import type { AppContext } from "./types.ts";
@@ -85,5 +88,21 @@ export function registerCommand(
             autocomplete(interaction, asAppContext(ctx)),
         }
       : {}),
+  });
+}
+
+export type MessageMenuHandler = (
+  interaction: MessageContextMenuCommandInteraction,
+  ctx: AppContext
+) => Promise<void>;
+
+/** A right-click → Apps command on a message. `name` is what Discord shows. */
+export function registerMessageMenu(
+  name: string,
+  def: { data: RESTPostAPIContextMenuApplicationCommandsJSONBody; handler: MessageMenuHandler }
+) {
+  registerSharedMessageMenu(name, {
+    data: def.data,
+    handler: (interaction, ctx) => def.handler(interaction, asAppContext(ctx)),
   });
 }

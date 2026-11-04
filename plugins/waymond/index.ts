@@ -162,7 +162,9 @@ function createBrain(ctx: PluginContext): Brain {
       return convId && driver ? driver.stop(convId) : false;
     },
     async send(message) {
-      const channel = await channelFor(ctx, message.chatKey);
+      // In a chat the bot isn't in, status goes in the "thinking…" reply instead.
+      const relayProgress = message.progress;
+      const channel = relayProgress ? null : await channelFor(ctx, message.chatKey);
       let status: Awaited<ReturnType<StatusChannel["send"]>> | null = null;
       let lastEdit = 0;
       let lastTyping = 0;
@@ -188,6 +190,16 @@ function createBrain(ctx: PluginContext): Brain {
                 lastTyping = now;
                 void channel.sendTyping().catch(() => {});
               }
+              if (relayProgress) {
+                // The placeholder is already on screen, so it can say more, sooner.
+                if (statusBusy || elapsed < 10_000 || now - lastEdit < 15_000) return;
+                lastEdit = now;
+                statusBusy = true;
+                void relayProgress(progressLine(turn, elapsed))
+                  .catch(() => {})
+                  .finally(() => (statusBusy = false));
+                return;
+              }
               // Quiet for short answers; one self-updating status line for long tasks.
               if (!channel || statusBusy || elapsed < 45_000 || now - lastEdit < 20_000) return;
               lastEdit = now;
@@ -198,9 +210,8 @@ function createBrain(ctx: PluginContext): Brain {
                 .finally(() => (statusBusy = false));
             },
             onApprovalNeeded(convId) {
-              void channel
-                ?.send(quiet(`🔐 Waymond is waiting for your OK on something. Approve or decline it here: ${chatUrl(convId)}`))
-                .catch(() => {});
+              const line = `🔐 Waymond is waiting for your OK on something. Approve or decline it here: ${chatUrl(convId)}`;
+              void (relayProgress ? relayProgress(line) : channel?.send(quiet(line)))?.catch(() => {});
             },
           },
           files

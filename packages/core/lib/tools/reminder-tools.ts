@@ -2,6 +2,7 @@
  * Reminder tools — set, list, cancel, snooze, acknowledge reminders.
  */
 
+import { isAskChatId } from "../ask-relay.ts";
 import type { ToolDef } from "../types.ts";
 import { text, err } from "../types.ts";
 import type { Reminder } from "../memory.ts";
@@ -113,9 +114,23 @@ export const reminderTools: ToolDef[] = [
         );
       }
 
+      // A chat from /choomfie (ask:…) is gone in 15 minutes and the bot can't
+      // post into it, so the reminder goes to the user's DM instead.
+      let chatId = args.chat_id as string;
+      let viaDm = false;
+      if (isAskChatId(chatId)) {
+        try {
+          const dm = await (await ctx.discord.users.fetch(args.user_id as string)).createDM();
+          chatId = dm.id;
+          viaDm = true;
+        } catch {
+          return err("This chat came from /choomfie and the reminder can't be delivered here, and I couldn't open a DM with that user.");
+        }
+      }
+
       const newId = ctx.memory.addReminder(
         args.user_id as string,
-        args.chat_id as string,
+        chatId,
         args.message as string,
         dateToSQLite(dueAt),
         {
@@ -137,6 +152,7 @@ export const reminderTools: ToolDef[] = [
       if (cron) parts.push(`Recurring: ${cron}`);
       if (args.nag_interval) parts.push(`Nag: every ${args.nag_interval}m until acknowledged`);
       if (args.category) parts.push(`Category: ${args.category}`);
+      if (viaDm) parts.push("Delivered by DM — this chat can't receive it. Tell the user so.");
       return text(parts.join("\n"));
     },
   },

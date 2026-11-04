@@ -16,6 +16,7 @@ import type { ToolDef } from "../types.ts";
 import { text, err } from "../types.ts";
 import { onReplySent } from "../typing.ts";
 import { refreshChannel } from "../conversation.ts";
+import { ASK_ONLY_REPLY, getAskRelay, isAskChatId } from "../ask-relay.ts";
 
 /**
  * Allowed prefixes for files attached via the reply tool.
@@ -132,7 +133,7 @@ function buildEmbed(input: EmbedInput): EmbedBuilder {
   return embed;
 }
 
-export const discordTools: ToolDef[] = [
+const tools: ToolDef[] = [
   {
     definition: {
       name: "reply",
@@ -193,13 +194,6 @@ export const discordTools: ToolDef[] = [
       },
     },
     handler: async (args, ctx) => {
-      const channel = await ctx.discord.channels.fetch(
-        args.chat_id as string
-      );
-      if (!channel?.isTextBased())
-        return err("Channel not found or not text-based");
-
-      const textChannel = channel as TextChannel | ThreadChannel;
       const opts: Record<string, unknown> = {};
 
       // Text content (can be omitted if embeds are provided)
@@ -215,17 +209,6 @@ export const discordTools: ToolDef[] = [
         opts.embeds = (args.embeds as EmbedInput[]).map(buildEmbed);
       }
 
-      if (args.reply_to) {
-        try {
-          const replyMsg = await textChannel.messages.fetch(
-            args.reply_to as string
-          );
-          opts.reply = { messageReference: replyMsg };
-        } catch {
-          // Message not found, send as normal
-        }
-      }
-
       if (args.files && Array.isArray(args.files)) {
         const validated: { attachment: string }[] = [];
         for (const f of args.files as unknown[]) {
@@ -237,6 +220,34 @@ export const discordTools: ToolDef[] = [
           validated.push({ attachment: v.resolved });
         }
         opts.files = validated;
+      }
+
+      // An /choomfie from a chat the bot isn't in: answer through the interaction.
+      if (isAskChatId(args.chat_id)) {
+        const relay = getAskRelay(args.chat_id as string);
+        if (!relay) return err("This /choomfie can't be answered any more — Discord closes it after 15 minutes.");
+        const sent = (await relay.send(opts as never)) as { id?: string } | undefined;
+        ctx.messageStats.sent++;
+        return text(`sent (id: ${sent?.id ?? "?"})`);
+      }
+
+      const channel = await ctx.discord.channels.fetch(
+        args.chat_id as string
+      );
+      if (!channel?.isTextBased())
+        return err("Channel not found or not text-based");
+
+      const textChannel = channel as TextChannel | ThreadChannel;
+
+      if (args.reply_to) {
+        try {
+          const replyMsg = await textChannel.messages.fetch(
+            args.reply_to as string
+          );
+          opts.reply = { messageReference: replyMsg };
+        } catch {
+          // Message not found, send as normal
+        }
       }
 
       const sent = await textChannel.send(opts as any);
@@ -622,3 +633,17 @@ export const discordTools: ToolDef[] = [
     },
   },
 ];
+
+/**
+ * Every tool but `reply` addresses a real channel. Given an `ask:` chat id —
+ * a chat the bot isn't in — say so plainly instead of a fetch error.
+ */
+export const discordTools: ToolDef[] = tools.map((t) =>
+  t.definition.name === "reply"
+    ? t
+    : {
+        ...t,
+        handler: async (args, ctx) =>
+          isAskChatId(args?.chat_id) ? err(ASK_ONLY_REPLY) : t.handler(args, ctx),
+      }
+);

@@ -44,6 +44,25 @@ Defined in `packages/core/lib/commands.ts`, deployed via `packages/core/scripts/
 - `/lesson` — start or continue a structured lesson (button-driven, no Claude roundtrip)
 - `/progress` — show learning progress with unit bars and completion stats (ephemeral)
 - `/help` — show all commands and capabilities
+- `/choomfie <prompt> [file] [private]` and the **Ask Choomfie** message menu (right-click → Apps) — see below
+
+### Group DMs and other chats the bot isn't in (`/choomfie`)
+
+A bot can't join a group DM, but a **user-installed** app can be used there. Setup, once, in the Developer Portal: your app → **Installation** → tick **User Install**, add the `applications.commands` scope under its default install settings, then open the install link and choose **Add to My Apps**.
+
+Only `/choomfie`, the **Ask Choomfie** menu, `/brain`, `/stop` and `/clear` are user-installable (`ANYWHERE` in `@choomfie/shared`). Every other command is deployed with explicit `integration_types: [GuildInstall]` / `contexts: [Guild, BotDM]` (`GUILD_INSTALL_ONLY`, applied in `getCommandDefs`) — left unset, Discord would fall back to the app's install types and enabling User Install would make every owner command usable from any chat.
+
+There, Choomfie sees only the command text or the one right-clicked message (plus its attachments) — never the chat — and can only answer through the interaction, which Discord keeps open for **15 minutes**. `lib/ask-relay.ts` wraps the interaction as a `SendableChannel` (first send replaces the "thinking…" reply, the rest are follow-ups), so brain replies, quick-reply buttons and approval cards work unchanged. Claude gets a synthetic `ask:<interaction id>` chat id: `reply` answers through the relay, every other Discord tool returns a clear "only `reply` works here". Same gates as a typed message — allowlist, rate limit, then the chat's brain under `brainAccess` — and `/brain` works per group DM. A brain's late background results post there only while the 15 minutes last; after that they stay in the brain's own app.
+
+A normal reply can't reach Choomfie there, so the conversation continues through interactions:
+- **💬 Reply** (`ask:reply`) sits under every answer that has no buttons of its own. It's stateless, so it survives restarts and works on older answers too. It opens a text box, and the follow-up quotes a 500-character excerpt of the answer it replies to, so it makes sense even after the Claude session cycles.
+- **Ask Choomfie** opens a text box for an optional instruction ("summarize this") before sending the right-clicked message. The target is held in memory for the few seconds the box is open.
+- **The question is quoted above the answer** (`> **user:** …`, mentions disabled), because nobody else in the chat can see a modal's text or which message was right-clicked.
+- **A placeholder nobody answers** is changed to "⌛ No answer this time" just before the window closes, rather than turning into Discord's "did not respond".
+- **Reminders set from an `ask:` chat go to the user's DM** (`set_reminder` swaps the chat id), since the chat can't receive them later.
+- **`/clear` works there** and follows the chat's brain: a Waymond group DM gets a fresh Waymond chat. A daemon clear started there doesn't try to say hello in a chat it can't post to.
+- **Anyone else in the chat** can read the answers, but 💬 Reply and the menu refuse them unless they're allowlisted (and Waymond answers per `brainAccess`).
+- **Brains get `BrainMessage.progress`**, which updates the "thinking…" placeholder. Waymond uses it for its status line and approval notice. It's ordered with the sends, so a late status line never overwrites the answer.
 
 Commands are deployed **globally** — one command list for every guild and for DMs. Guild-scoped deployment is deliberately not used: Discord keeps the two scopes as separate lists and a guild command *shadows* a global one of the same name, so a leftover guild copy silently pins that guild to a stale definition. Every global deploy therefore also clears guild-scoped commands (`clearGuildCommands`).
 
