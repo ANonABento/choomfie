@@ -167,7 +167,7 @@ Shapes and constraints that don't announce themselves. Getting one wrong compile
 - Allowlist loaded at startup from access.json; `allow_user`/`remove_user` update in-memory + persist (no restart). Manual file edits require a restart
 - Personas stored in config.json, switchable from Discord (auto-restarts worker)
 - `search_messages` paginates up to 1000 messages for user/keyword filtering
-- Owner-only: `/persona switch`, `/newpersona`, `/savememory`, `/plugins`, `/config`, `/model`, `/allow`, `/revoke`, `/compact`, `/clear`, `/brain`, `/voice`, and the birthday tools
+- Owner-only: `/persona switch|new`, `/memory save|forget`, `/plugins`, `/config`, `/model`, `/access`, `/compact`, `/clear`, `/brain`, `/stop`, `/voice`, and the birthday tools
 
 ## Token Budget
 

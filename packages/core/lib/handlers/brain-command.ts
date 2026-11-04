@@ -1,16 +1,18 @@
 /**
- * `/brain` — choose who answers in this channel (owner only).
+ * `/brain [name]` and `/stop` — who answers in this channel, and interrupting it.
  *
- *   /brain set brain:<id>   this channel/thread now answers with <id>; `claude` clears it
- *   /brain stop             interrupt the reply in progress here
- *   /brain status           what answers here, and who it answers
+ *   /brain           show what answers here, for whom, and what's loaded
+ *   /brain <name>    this channel/thread now answers with <name>; `claude` clears it
+ *   /stop            interrupt the reply in progress here, whoever is answering
  *
- * Also handles the quick-reply buttons a brain's answer can carry
- * (`brain:choice:<n>`): clicking one sends that option to the brain.
+ * Starting over is `/clear`, which also follows the channel's brain, and the
+ * channel's brain shows in `/status`. One command per verb, whoever answers.
+ *
+ * Also handles the buttons a brain's answer can carry: quick replies
+ * (`brain:choice:<n>`) and approvals (`brain:approval:yes|no`).
  *
  * Threads inherit their parent channel's brain unless set directly, but each
- * thread is its own backend conversation. Starting over is `/clear`, which
- * follows the channel's brain — one command for every brain.
+ * thread is its own backend conversation.
  */
 
 import {
@@ -37,7 +39,6 @@ import { isAllowed, isOwner } from "../access.ts";
 import { onMessageReceived } from "../typing.ts";
 import { requireOwner } from "./shared.ts";
 
-
 function label(id: string): string {
   return id === CLAUDE_BRAIN ? "Claude" : (getBrain(id)?.label ?? `${id} (not loaded)`);
 }
@@ -45,17 +46,13 @@ function label(id: string): string {
 registerCommand("brain", {
   data: new SlashCommandBuilder()
     .setName("brain")
-    .setDescription("Choose who answers in this channel (owner only)")
-    .addSubcommand((s) =>
-      s
-        .setName("set")
-        .setDescription("Set this channel's brain")
-        .addStringOption((o) =>
-          o.setName("brain").setDescription("claude, or a loaded brain").setRequired(true).setAutocomplete(true)
-        )
+    .setDescription("Who answers in this channel (owner only)")
+    .addStringOption((o) =>
+      o
+        .setName("name")
+        .setDescription("claude, or a loaded brain — omit to see what answers here")
+        .setAutocomplete(true)
     )
-    .addSubcommand((s) => s.setName("stop").setDescription("Interrupt the reply in progress here"))
-    .addSubcommand((s) => s.setName("status").setDescription("Show what answers here"))
     .toJSON(),
   // Lists only brains actually loaded right now — in-memory, well inside 3s.
   autocomplete: async (interaction) => {
@@ -71,54 +68,82 @@ registerCommand("brain", {
     if (await requireOwner(interaction, ctx)) return;
     const channelId = interaction.channelId;
     const parentId = parentChannelId(interaction.channel);
-    const sub = interaction.options.getSubcommand();
     const current = resolveBrainId(channelId, parentId, (id) => ctx.config.getChannelBrain(id));
     const reply = (content: string) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    const wantedRaw = interaction.options.getString("name");
 
-    if (sub === "set") {
-      const wanted = interaction.options.getString("brain", true).trim().toLowerCase();
-      if (wanted !== CLAUDE_BRAIN && !getBrain(wanted)) {
-        await reply(`No brain called \`${wanted}\` is loaded. Available: ${listBrainIds().map((b) => `\`${b}\``).join(", ")}.`);
-        return;
-      }
-      // `claude` clears the override, so a thread falls back to its parent again.
-      ctx.config.setChannelBrain(channelId, wanted === CLAUDE_BRAIN ? undefined : wanted);
-      const now = resolveBrainId(channelId, parentId, (id) => ctx.config.getChannelBrain(id));
-      const who = ctx.config.getBrainAccess() === "owner" ? "only you" : "everyone on the allowlist";
-      await interaction.reply(
-        now === CLAUDE_BRAIN
-          ? "This channel is answered by **Claude**."
-          : `This channel is now answered by **${label(now)}** — for ${who}. Others still get Claude. ` +
-              "Change who with `/config setting:brainAccess`."
-      );
+    if (!wantedRaw) {
+      const own = ctx.config.getChannelBrain(channelId);
+      const source = own
+        ? "set on this channel"
+        : parentId && ctx.config.getChannelBrain(parentId)
+          ? "inherited from the parent channel"
+          : "default";
+      const lines = [
+        `**${label(current)}** answers here (${source}).`,
+        current === CLAUDE_BRAIN
+          ? ""
+          : `Answers: ${ctx.config.getBrainAccess() === "owner" ? "owner only" : "everyone on the allowlist"}; others get Claude.`,
+        `Loaded brains: ${listBrainIds().map((b) => `\`${b}\``).join(", ")} · \`/brain <name>\` to switch`,
+      ].filter(Boolean);
+      await reply(lines.join("\n"));
       return;
     }
 
-    if (sub === "stop") {
-      const brain = current === CLAUDE_BRAIN ? undefined : getBrain(current);
-      if (!brain?.stop) {
-        await reply(`**${label(current)}** can't be stopped from here.`);
-        return;
-      }
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      try {
-        const stopped = await brain.stop(channelId);
-        await interaction.editReply(stopped ? `Asked **${brain.label}** to stop.` : "Nothing is running here.");
-      } catch (e) {
-        await interaction.editReply(`Couldn't stop **${brain.label}**: ${e instanceof Error ? e.message : String(e)}`);
-      }
+    const wanted = wantedRaw.trim().toLowerCase();
+    if (wanted !== CLAUDE_BRAIN && !getBrain(wanted)) {
+      await reply(`No brain called \`${wanted}\` is loaded. Available: ${listBrainIds().map((b) => `\`${b}\``).join(", ")}.`);
       return;
     }
+    // `claude` clears the override, so a thread falls back to its parent again.
+    ctx.config.setChannelBrain(channelId, wanted === CLAUDE_BRAIN ? undefined : wanted);
+    const now = resolveBrainId(channelId, parentId, (id) => ctx.config.getChannelBrain(id));
+    const who = ctx.config.getBrainAccess() === "owner" ? "only you" : "everyone on the allowlist";
+    await interaction.reply(
+      now === CLAUDE_BRAIN
+        ? "This channel is answered by **Claude**."
+        : `This channel is now answered by **${label(now)}** — for ${who}. Others still get Claude. ` +
+            "Change who with `/config setting:brainAccess`."
+    );
+  },
+});
 
-    // status
-    const own = ctx.config.getChannelBrain(channelId);
-    const source = own ? "set on this channel" : parentId && ctx.config.getChannelBrain(parentId) ? "inherited from the parent channel" : "default";
-    const lines = [
-      `**${label(current)}** answers here (${source}).`,
-      current === CLAUDE_BRAIN ? "" : `Answers: ${ctx.config.getBrainAccess() === "owner" ? "owner only" : "everyone on the allowlist"}; others get Claude.`,
-      `Loaded brains: ${listBrainIds().map((b) => `\`${b}\``).join(", ")}`,
-    ].filter(Boolean);
-    await reply(lines.join("\n"));
+// /stop — interrupt whoever is answering in this channel.
+registerCommand("stop", {
+  data: new SlashCommandBuilder()
+    .setName("stop")
+    .setDescription("Interrupt the reply in progress in this channel (owner only)")
+    .toJSON(),
+  handler: async (interaction, ctx) => {
+    if (await requireOwner(interaction, ctx)) return;
+    const channelId = interaction.channelId;
+    const current = resolveBrainId(channelId, parentChannelId(interaction.channel), (id) =>
+      ctx.config.getChannelBrain(id)
+    );
+    if (current === CLAUDE_BRAIN) {
+      // Interrupting the Claude session means reaching into the daemon's turn
+      // loop; not wired yet. Say so rather than pretend.
+      await interaction.reply({
+        content: "Claude can't be interrupted from Discord yet — it finishes its turn. Other brains stop with `/stop`.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    const brain = getBrain(current);
+    if (!brain?.stop) {
+      await interaction.reply({
+        content: brain ? `**${brain.label}** can't be stopped from here.` : `The \`${current}\` brain isn't loaded right now.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const stopped = await brain.stop(channelId);
+      await interaction.editReply(stopped ? `Asked **${brain.label}** to stop.` : "Nothing is running here.");
+    } catch (e) {
+      await interaction.editReply(`Couldn't stop **${brain.label}**: ${e instanceof Error ? e.message : String(e)}`);
+    }
   },
 });
 

@@ -4,7 +4,7 @@
  * "claude" is not registered here: it is the default path (the message goes to
  * the Claude Code session as it always has). Anything else — e.g. a Waymond
  * web-UI driver — registers a Brain, usually from a plugin's init(), and a
- * channel opts into it with `/brain set`.
+ * channel opts into it with `/brain <name>`.
  *
  * Lives in @choomfie/shared, like the interaction registries, so plugins can
  * register without importing core.
@@ -44,7 +44,7 @@ export interface BrainApproval {
 }
 
 export interface Brain {
-  /** Stable id used in config and `/brain set`. Lowercase, no spaces. */
+  /** Stable id used in config and `/brain <name>`. Lowercase, no spaces. */
   id: string;
   /** Display name, e.g. "Waymond". */
   label: string;

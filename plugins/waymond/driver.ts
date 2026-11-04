@@ -75,7 +75,7 @@ export interface SendResult {
   /** Quick replies Waymond offered; sending one continues the conversation. */
   options: string[];
   conversationId: string;
-  /** The turn ended because /brain stop was used. */
+  /** The turn ended because /stop was used. */
   stopped: boolean;
   /** Waymond handed work to a background job; results arrive later. */
   background: boolean;

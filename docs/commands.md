@@ -20,26 +20,23 @@ Discord interactions (buttons, slash commands, modals) use a split architecture:
 - All interactions bypass Claude — handled directly for instant response (<100ms vs ~5s)
 - Key constraint: Discord requires response within 3 seconds; use `deferReply()` for async work
 - Slash command definitions in `packages/core/lib/commands.ts`, deployed via `bun packages/core/scripts/deploy-commands.ts`
-- Access control: `/persona switch`, `/newpersona`, `/savememory` are owner-only via `requireOwner()`
+- Access control: `/persona switch|new`, `/memory save|forget` are owner-only via `requireOwner()`
+- **Fewer commands, verbs as subcommands.** Each area is one command (`/remind`, `/memory`, `/persona`, `/access`), and anything that depends on who answers a channel (`/brain`, `/stop`, `/clear`, `/compact`, `/status`) works the same whatever the brain — the handler resolves the channel's brain once. Discord can't show different commands per channel, so per-brain command lists aren't possible; per-brain *behaviour* is.
 
 ### Slash Commands
 
 Defined in `packages/core/lib/commands.ts`, deployed via `packages/core/scripts/deploy-commands.ts`:
-- `/remind` — opens a modal form to set a reminder (message, time, recurring, nag)
-- `/reminders` — list active reminders with embed (ephemeral)
-- `/cancel <id>` — cancel a reminder by ID
-- `/memory [search] [forget]` — list core memories, search all memories, or delete one by key (ephemeral). `forget` autocompletes from existing core memory keys and is owner-only
-- `/savememory` — opens a modal form to save a memory (key, value)
+- `/remind add|list|cancel <id>` — set a reminder (modal: message, time, recurring, nag), list active ones (embed, ephemeral), or cancel one by ID
+- `/memory list|search <query>|save|forget <key>` — list core memories, search all memories, save one (modal), or delete one by key (ephemeral). `save` and `forget` are owner-only; `forget` autocompletes from existing core memory keys
+- `/persona list|switch <key>|new` — list, switch (owner only, restarts; autocompletes), or create a persona (modal, owner only)
+- `/access list|allow <user>|revoke <user>` — the allowlist (owner only, ephemeral). Refuses to revoke the owner; warns when emptying the list re-opens bootstrap mode
 - `/github <check> [repo]` — check PRs, issues, notifications
-- `/status` — bot status embed with uptime, persona, stats, plugins; plus session/context/cycles when a daemon is supervising (ephemeral)
+- `/status` — bot status embed with uptime, persona, stats, plugins, **the brain answering this channel**; plus session/context/cycles when a daemon is supervising (ephemeral)
 - `/usage` — plan rate-limit windows, session cost, and a per-model token breakdown (daemon mode, ephemeral)
-- `/brain set|stop|status` — choose which brain answers in this channel/thread (`claude` by default, or a loaded brain such as Waymond); `stop` interrupts the reply in progress (owner only). Starting over is `/clear`, which follows the brain. Brain output is posted with mentions disabled, so it can never ping `@everyone`, a role or a user. A brain's quick replies arrive as `brain:choice:<n>` buttons (in-memory, so a restart expires them); clicking one sends that option, gated like typing to the brain. Approval requests arrive as `brain:approval:yes|no` buttons and are **owner-only** whatever `brainAccess` says, since approving acts as the owner's account. Routing lives in `lib/brain-router.ts`; brains register via `registerBrain` and post late results via `pushBrainReply`, both from `@choomfie/shared`
+- `/brain [name]` — who answers in this channel/thread (owner only). No name: what answers here, for whom, and which brains are loaded. A name (`claude`, `waymond`, …) switches; `claude` clears the override. Brain output is posted with mentions disabled, so it can never ping `@everyone`, a role or a user. A brain's quick replies arrive as `brain:choice:<n>` buttons (in-memory, so a restart expires them); clicking one sends that option, gated like typing to the brain. Approval requests arrive as `brain:approval:yes|no` buttons and are **owner-only** whatever `brainAccess` says, since approving acts as the owner's account. Routing lives in `lib/brain-router.ts`; brains register via `registerBrain` and post late results via `pushBrainReply`, both from `@choomfie/shared`
+- `/stop` — interrupt the reply in progress in this channel (owner only). Works for any brain that supports it; Claude can't be interrupted from Discord yet and says so
 - `/compact` — free up daemon context, keeping a handoff summary (owner only, daemon mode). In a channel answered by another brain it explains that the brain manages its own context
 - `/clear` — replace the daemon session with nothing carried over (owner only, daemon mode, confirm button). In a channel answered by another brain it instead starts a fresh conversation with that brain for this channel only — any mode, no confirm, Claude untouched
-- `/allow [user]` — add a user to the allowlist, or list it when no user is given (owner only, ephemeral)
-- `/revoke <user>` — remove a user from the allowlist (owner only, ephemeral)
-- `/persona [switch]` — list or switch personas
-- `/newpersona` — opens a modal form to create a persona (key, name, personality)
 - `/plugins [action] [name]` — list, enable, or disable plugins (owner only, restart needed)
 - `/config [setting] [value]` — list settings with current values, or change one (owner only, ephemeral). `value` autocompletes from the selected setting's suggestions
 - `/model [model]` — view or change the model Choomfie runs on, in every mode (owner only, autocompletes)
