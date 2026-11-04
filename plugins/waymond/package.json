@@ -1,0 +1,14 @@
+{
+  "name": "@choomfie/waymond",
+  "version": "0.4.0",
+  "type": "module",
+  "main": "index.ts",
+  "license": "MIT",
+  "scripts": {
+    "login": "bun login.ts"
+  },
+  "dependencies": {
+    "@choomfie/shared": "workspace:*",
+    "patchright": "1.64.1"
+  }
+}

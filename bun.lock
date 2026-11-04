@@ -12,6 +12,7 @@
         "@choomfie/socials": "workspace:*",
         "@choomfie/tutor": "workspace:*",
         "@choomfie/voice": "workspace:*",
+        "@choomfie/waymond": "workspace:*",
         "@discordjs/opus": "^0.10.0",
         "@discordjs/voice": "^0.19.2",
         "@modelcontextprotocol/sdk": "^1.0.0",
@@ -98,6 +99,14 @@
         "sodium-native": "^5.1.0",
       },
     },
+    "plugins/waymond": {
+      "name": "@choomfie/waymond",
+      "version": "0.4.0",
+      "dependencies": {
+        "@choomfie/shared": "workspace:*",
+        "patchright": "1.64.1",
+      },
+    },
   },
   "trustedDependencies": [
     "onnxruntime-node",
@@ -128,6 +137,8 @@
     "@choomfie/tutor": ["@choomfie/tutor@workspace:plugins/tutor"],
 
     "@choomfie/voice": ["@choomfie/voice@workspace:plugins/voice"],
+
+    "@choomfie/waymond": ["@choomfie/waymond@workspace:plugins/waymond"],
 
     "@csstools/color-helpers": ["@csstools/color-helpers@6.0.2", "", {}, "sha512-LMGQLS9EuADloEFkcTBR3BwV/CGHV7zyDxVRtVDTwdI2Ca4it0CCVTT9wCkxSgokjE5Ho41hEPgb8OEUwoXr6Q=="],
 
@@ -760,6 +771,10 @@
     "parse5": ["parse5@8.0.0", "", { "dependencies": { "entities": "^6.0.0" } }, "sha512-9m4m5GSgXjL4AjumKzq1Fgfp3Z8rsvjRNbnkVwfu2ImRqE5D0LnY2QfDen18FSY9C573YU5XxSapdHZTZ2WolA=="],
 
     "parseurl": ["parseurl@1.3.3", "", {}, "sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ=="],
+
+    "patchright": ["patchright@1.64.1", "", { "dependencies": { "patchright-core": "1.64.1" }, "bin": { "patchright": "cli.js" } }, "sha512-uZYBmH3iofTHhUj9DvNQkdFYAY2weGJtoGIEjGJ9K0kNA/ycC4p9sx3QhioEutIzJjsAzBGKbNAaNNvf7Wyw4Q=="],
+
+    "patchright-core": ["patchright-core@1.64.1", "", { "bin": { "patchright-core": "cli.js" } }, "sha512-nUWuqaaUVd60qepdDPv+i5g257F8jywbzn7aKV8fPRur4dmkFLxYV/xus8f69gKAB7+S/zfdYe0zA3mJkO6+0w=="],
 
     "path-exists": ["path-exists@4.0.0", "", {}, "sha512-ak9Qy5Q7jYb2Wwcey5Fpvg2KoAc/ZIhLSLOSBmRmygPsGwkVVt0fZa0qrtMz+m6tJTAHfZQ8FnmB4MG4LWy7/w=="],
 

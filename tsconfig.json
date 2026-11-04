@@ -18,7 +18,8 @@
       "@choomfie/voice": ["plugins/voice/index.ts"],
       "@choomfie/browser": ["plugins/browser/index.ts"],
       "@choomfie/socials": ["plugins/socials/index.ts"],
-      "@choomfie/tutor": ["plugins/tutor/index.ts"]
+      "@choomfie/tutor": ["plugins/tutor/index.ts"],
+      "@choomfie/waymond": ["plugins/waymond/index.ts"]
     }
   },
   "include": ["packages/**/*.ts", "plugins/**/*.ts"],

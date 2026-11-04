@@ -45,3 +45,26 @@ Settings are declared once in `packages/core/lib/settings.ts` with their parser,
 Editing `config.json` by hand still works. `ConfigManager`'s setters are what `/config` calls; **do not add a setter without a caller** — `setRateLimitMs`, `setConvoTimeoutMs` and `setDaemonConfig` sat uncalled for a long time while this file claimed settings were adjustable via tools, and they weren't.
 
 `autoSummarize` exists in `Config` and is read by nothing. It is deliberately absent from `/config` — a switch that does nothing is worse than no switch.
+
+## Brains (`brainChannels`, `brainAccess`)
+
+`brainChannels` maps a channel or thread id to the brain that answers there, written by `/brain set` (absent = `claude`). Threads inherit their parent's entry unless set directly; each thread is its own backend conversation. `brainAccess` (`/config`, default `owner`) decides who a non-Claude brain answers: `owner`, or everyone on the allowlist. Anyone it turns away is answered by Claude as usual. Neither key is ever an access list: whether someone may talk to Choomfie at all is still access.json, checked first.
+
+A brain channel only answers messages addressed to it (DM, @mention, reply). Ambient conversation-mode messages are dropped there, because a web-UI driver can't decide to stay quiet the way Claude does.
+
+## Remote MCP endpoint (`remoteMcp`)
+
+Lets a cloud agent — built for Ambition's Waymond, which only accepts remote MCP servers by URL — call a small allowlisted set of Choomfie tools over streamable HTTP. Code: `packages/core/lib/remote-mcp.ts`, started by the supervisor after stdio connects. Off by default.
+
+```json
+"remoteMcp": {
+  "enabled": true,
+  "port": 4142,
+  "tools": ["choomfie_status", "list_memories", "search_memory", "memory_stats", "list_reminders"]
+}
+```
+
+- **Loopback only.** A non-loopback `host` is refused; expose it with a tunnel, e.g. `tailscale funnel 4142`, and give the agent `https://<machine>.<tailnet>.ts.net/mcp`.
+- **Bearer token** in `<dataDir>/remote-mcp-token` (mode 0600), generated on first start. In Waymond: Integrations → MCP servers → "The server uses a token instead of a sign-in page".
+- **The allowlist is the boundary.** Remote calls run with owner authority — an IPC tool call carries no Discord role — so the default is read-only. Tools not listed are neither listed nor callable. Adding `reply`, `save_memory` etc. gives the remote agent that power with no further check on Choomfie's side.
+- Stateless: one `Server` + transport per POST, JSON responses, no SSE. Supervisor code, so changes need a full session restart; a bind failure (e.g. port held during a daemon session handoff) is logged and stdio carries on.

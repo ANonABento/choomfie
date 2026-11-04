@@ -151,6 +151,7 @@ const PLUGIN_PACKAGES: Record<string, string> = {
   browser: "@choomfie/browser",
   tutor: "@choomfie/tutor",
   socials: "@choomfie/socials",
+  waymond: "@choomfie/waymond",
   hello: "@choomfie/hello",      // ← add this
 };
 ```
@@ -562,6 +563,7 @@ Study these for real-world patterns:
 | **voice** | `@choomfie/voice` | Manager pattern, extra Discord intents (`GuildVoiceStates`), module-scoped state. |
 | **tutor** | `@choomfie/tutor` | `onMessage` hook for exercise handling, multiple databases, button interactions, SRS timers, sub-module init/destroy. |
 | **socials** | `@choomfie/socials` | MCP notification forwarding, provider initialization from config, polling loops. |
+| **waymond** | `@choomfie/waymond` | A **brain** instead of tools: `registerBrain` in `init`, zero tool/instruction tokens. Drives Ambition's Waymond in a headless Patchright browser (log in once: `bun run waymond:login`; `CHOOMFIE_WAYMOND_HEADED=1` for a visible window). Sends via the composer, reads `/turn` + `/messages`. Chat map in `<data>/waymond/chats.json`. |
 
 ### Browser — minimal plugin
 

@@ -33,6 +33,7 @@ Defined in `packages/core/lib/commands.ts`, deployed via `packages/core/scripts/
 - `/github <check> [repo]` — check PRs, issues, notifications
 - `/status` — bot status embed with uptime, persona, stats, plugins; plus session/context/cycles when a daemon is supervising (ephemeral)
 - `/usage` — plan rate-limit windows, session cost, and a per-model token breakdown (daemon mode, ephemeral)
+- `/brain set|new|status` — choose which brain answers in this channel/thread (`claude` by default, or a loaded brain such as Waymond); `new` starts a fresh backend conversation (owner only). Routing lives in `lib/brain-router.ts`; brains register via `registerBrain` from `@choomfie/shared`
 - `/compact` — free up daemon context, keeping a handoff summary (owner only, daemon mode)
 - `/clear` — replace the daemon session with nothing carried over (owner only, daemon mode, confirm button)
 - `/allow [user]` — add a user to the allowlist, or list it when no user is given (owner only, ephemeral)

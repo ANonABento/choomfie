@@ -33,7 +33,7 @@ packages/
                #   interactions.ts (dispatch), register.ts (typed wrappers),
                #   plugins.ts (explicit workspace package map), tools/, handlers/
     test/, scripts/, skills/, bin/
-plugins/       # voice, browser, tutor, socials — workspace packages, each an
+plugins/       # voice, browser, tutor, socials, waymond — workspace packages, each an
                #   index.ts exporting a Plugin
 docs/, .claude-plugin/, .mcp.json
 ```
@@ -134,6 +134,7 @@ Shapes and constraints that don't announce themselves. Getting one wrong compile
 - `Config` carries a `[key: string]: unknown` index signature, so a removed key survives `...saved` unless actively stripped. `REMOVED_CONFIG_KEYS` in `lib/config.ts` does that, and `ConfigManager` rewrites the file once on load when it finds one.
 
 **Process boundaries**
+- Optional `remoteMcp` HTTP endpoint (supervisor, loopback + bearer token, read-only tool allowlist) — see [docs/configuration.md](docs/configuration.md). Remote calls run with owner authority; the allowlist is the only boundary.
 - **Console output goes to stderr — stdout is the MCP stdio transport.** Entry point is `packages/core/supervisor.ts`.
 - **Hot-reload boundary:** worker code in `packages/core/` and all plugin packages are hot-reloadable via worker restart. Supervisor code (`supervisor.ts`, IPC types, MCP server) requires a full session restart (exit + re-run `choomfie`). `packages/shared/` changes require a worker restart at minimum.
 - Auto-restart triggers: persona switch, plugin enable/disable, voice config change — all send `request_restart` IPC → supervisor restarts worker → confirmation to the Discord channel.
@@ -166,10 +167,10 @@ Shapes and constraints that don't announce themselves. Getting one wrong compile
 - Allowlist loaded at startup from access.json; `allow_user`/`remove_user` update in-memory + persist (no restart). Manual file edits require a restart
 - Personas stored in config.json, switchable from Discord (auto-restarts worker)
 - `search_messages` paginates up to 1000 messages for user/keyword filtering
-- Owner-only: `/persona switch`, `/newpersona`, `/savememory`, `/plugins`, `/config`, `/model`, `/allow`, `/revoke`, `/compact`, `/clear`, `/voice`, and the birthday tools
+- Owner-only: `/persona switch`, `/newpersona`, `/savememory`, `/plugins`, `/config`, `/model`, `/allow`, `/revoke`, `/compact`, `/clear`, `/brain`, `/voice`, and the birthday tools
 
 ## Token Budget
 
 This file is loaded into every daemon session's context and re-read from cache on every turn, as is `docs/` content you open. Measured: at 31.7KB it was ~7,900 tokens — roughly a quarter of the session's entire resident context, for documentation a Discord persona never needs. Keep it to rules and architecture; put inventories, walkthroughs and examples in `docs/`.
 
-The same applies to plugins: their tool schemas and instructions are resident too (voice ~511, browser ~844, tutor ~2,211, socials ~4,232 tokens). Enable only what's in use.
+The same applies to plugins: their tool schemas and instructions are resident too (voice ~511, browser ~844, tutor ~2,211, socials ~4,232 tokens; waymond 0 — it is a brain, not tools). Enable only what's in use.

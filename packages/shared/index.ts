@@ -115,3 +115,15 @@ export type {
   AutocompleteHandler,
   CommandDef,
 } from "./interactions.ts";
+
+// Brains (alternative Discord responders)
+export {
+  CLAUDE_BRAIN,
+  registerBrain,
+  unregisterBrain,
+  getBrain,
+  listBrainIds,
+  type Brain,
+  type BrainMessage,
+  type BrainReply,
+} from "./brains.ts";

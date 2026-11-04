@@ -83,8 +83,17 @@ export interface Config {
   /** Model to fall back to when the primary is overloaded. Unset = no fallback. */
   fallbackModel?: string;
   daemon: DaemonConfig;
+  /**
+   * Which brain answers in each channel/thread (`/brain set`). Absent = claude.
+   * Only routing — who may use Choomfie at all stays in access.json.
+   */
+  brainChannels?: Record<string, string>;
+  /** Who a non-Claude brain answers: the owner only, or everyone on the allowlist. */
+  brainAccess?: BrainAccess;
   [key: string]: unknown;
 }
+
+export type BrainAccess = "owner" | "allowlist";
 
 export const DEFAULT_DAEMON_CONFIG: DaemonConfig = {
   tokenThreshold: 120_000,
@@ -351,6 +360,34 @@ export class ConfigManager {
       ...this.getDaemonConfig(),
       ...daemon,
     };
+    this.save();
+  }
+
+  // --- Brains ---
+
+  /** The brain set directly on this channel/thread, if any. */
+  getChannelBrain(channelId: string): string | undefined {
+    const map = this.config.brainChannels;
+    return map && typeof map === "object" ? map[channelId] : undefined;
+  }
+
+  /** Set a channel's brain; `undefined` removes the override (back to claude). */
+  setChannelBrain(channelId: string, brainId: string | undefined) {
+    const map = { ...(this.config.brainChannels ?? {}) };
+    if (brainId) map[channelId] = brainId;
+    else delete map[channelId];
+    if (Object.keys(map).length) this.config.brainChannels = map;
+    else delete this.config.brainChannels;
+    this.save();
+  }
+
+  getBrainAccess(): BrainAccess {
+    return this.config.brainAccess === "allowlist" ? "allowlist" : "owner";
+  }
+
+  setBrainAccess(access: BrainAccess) {
+    if (access === "owner") delete this.config.brainAccess;
+    else this.config.brainAccess = access;
     this.save();
   }
 
