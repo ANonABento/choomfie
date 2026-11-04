@@ -11,13 +11,14 @@
  * whether someone may talk to Choomfie at all — that stays in access.json.
  */
 
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from "discord.js";
 import {
   CLAUDE_BRAIN,
   errorMessage,
   getBrain,
   setBrainPoster,
   type Brain,
+  type BrainApproval,
   type BrainMessage,
   type BrainReply,
 } from "@choomfie/shared";
@@ -95,7 +96,43 @@ export interface SendableChannel {
     files?: string[];
     reply?: { messageReference: string };
     components?: unknown[];
+    embeds?: unknown[];
   }): Promise<{ id: string } | unknown>;
+}
+
+export interface PendingApproval {
+  brainId: string;
+  chatKey: string;
+  approval: BrainApproval;
+}
+
+/** Approval card message id → what it approves. In memory: a restart expires them (approve in the app instead). */
+const pendingApprovals = new Map<string, PendingApproval>();
+
+export function getPendingApproval(messageId: string): PendingApproval | undefined {
+  return pendingApprovals.get(messageId);
+}
+
+export function clearPendingApproval(messageId: string): void {
+  pendingApprovals.delete(messageId);
+}
+
+export function approvalMessage(brainLabel: string, approval: BrainApproval) {
+  return {
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0xfee75c)
+        .setTitle(`${brainLabel} wants your OK: ${approval.title}`.slice(0, 256))
+        .setDescription(approval.detail.slice(0, 4000) || "(no preview)")
+        .setFooter({ text: "Only the owner can approve or decline this." }),
+    ],
+    components: [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("brain:approval:yes").setLabel(approval.approveLabel.slice(0, 80) || "Approve").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("brain:approval:no").setLabel(approval.declineLabel.slice(0, 80) || "Decline").setStyle(ButtonStyle.Secondary)
+      ),
+    ],
+  };
 }
 
 /** Discord: 5 buttons per row, 5 rows, 80-char labels, 100-char custom ids. */
@@ -142,7 +179,8 @@ export async function postBrainReply(
   replyTo?: string
 ): Promise<void> {
   const choices = (reply.choices ?? []).filter(Boolean).slice(0, MAX_CHOICES);
-  const chunks = chunkForDiscord(reply.text || (choices.length ? "(pick one)" : "(no reply)"));
+  const fallback = choices.length ? "(pick one)" : reply.approvals?.length ? "" : "(no reply)";
+  const chunks = chunkForDiscord(reply.text || fallback);
   for (let i = 0; i < chunks.length; i++) {
     const last = i === chunks.length - 1;
     const sent = await channel.send({
@@ -153,6 +191,13 @@ export async function postBrainReply(
     });
     const id = (sent as { id?: unknown } | undefined)?.id;
     if (last && choices.length && typeof id === "string") pendingChoices.set(id, { brainId, chatKey, choices });
+  }
+  // One message per approval, so each card is resolved on its own.
+  const label = getBrain(brainId)?.label ?? brainId;
+  for (const approval of reply.approvals ?? []) {
+    const sent = await channel.send(approvalMessage(label, approval));
+    const id = (sent as { id?: unknown } | undefined)?.id;
+    if (typeof id === "string") pendingApprovals.set(id, { brainId, chatKey, approval });
   }
 }
 

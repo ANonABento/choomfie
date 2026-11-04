@@ -29,6 +29,18 @@ export interface BrainReply {
   files?: string[];
   /** Quick replies; shown as buttons, and clicking one sends that text to the brain. */
   choices?: string[];
+  /** Actions the brain wants the owner to approve (send a post, an email, …). */
+  approvals?: BrainApproval[];
+}
+
+export interface BrainApproval {
+  id: string;
+  /** What it is, e.g. "RedTeam · New message". */
+  title: string;
+  /** The content that would go out. */
+  detail: string;
+  approveLabel: string;
+  declineLabel: string;
 }
 
 export interface Brain {
@@ -41,6 +53,8 @@ export interface Brain {
   reset?(chatKey: string): Promise<void>;
   /** Interrupt the reply in progress for this key. False if nothing was running. */
   stop?(chatKey: string): Promise<boolean>;
+  /** Approve or decline a pending approval. Returns a short status for the card. */
+  resolveApproval?(chatKey: string, approvalId: string, approve: boolean): Promise<string>;
 }
 
 /**

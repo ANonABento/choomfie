@@ -17,12 +17,21 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  EmbedBuilder,
   MessageFlags,
   SlashCommandBuilder,
+  type ButtonInteraction,
 } from "discord.js";
 import { AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds } from "@choomfie/shared";
 import { registerButtonHandler, registerCommand } from "../register.ts";
-import { dispatchToBrain, resolveBrainId, takeChoices, type SendableChannel } from "../brain-router.ts";
+import {
+  clearPendingApproval,
+  dispatchToBrain,
+  getPendingApproval,
+  resolveBrainId,
+  takeChoices,
+  type SendableChannel,
+} from "../brain-router.ts";
 import { isAllowed, isOwner } from "../access.ts";
 import { onMessageReceived } from "../typing.ts";
 import { requireOwner } from "./shared.ts";
@@ -135,6 +144,7 @@ registerCommand("brain", {
 // Quick-reply buttons on a brain's answer. Same gate as typing a message to
 // that brain: owner, or anyone allowlisted when brainAccess is "allowlist".
 registerButtonHandler("brain", async (interaction, parts, ctx) => {
+  if (parts[1] === "approval") return handleApproval(interaction, parts[2] === "yes", ctx);
   if (parts[1] !== "choice") return;
   const userId = interaction.user.id;
   const owner = isOwner(ctx, userId);
@@ -180,3 +190,41 @@ registerButtonHandler("brain", async (interaction, parts, ctx) => {
     filePaths: [],
   });
 });
+
+/**
+ * Approve/decline a brain's pending action. Owner-only regardless of
+ * brainAccess: approving acts as the owner's account on the brain's side.
+ */
+async function handleApproval(
+  interaction: ButtonInteraction,
+  approve: boolean,
+  ctx: Parameters<Parameters<typeof registerButtonHandler>[1]>[2]
+): Promise<void> {
+  if (!isOwner(ctx, interaction.user.id)) {
+    await interaction.reply({ content: "Only the owner can approve this~", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const pending = getPendingApproval(interaction.message.id);
+  const brain = pending ? getBrain(pending.brainId) : undefined;
+  if (!pending || !brain?.resolveApproval) {
+    await interaction.reply({
+      content: "This approval expired (Choomfie restarted) — approve or decline it in the app.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  await interaction.deferUpdate();
+  try {
+    const status = await brain.resolveApproval(pending.chatKey, pending.approval.id, approve);
+    clearPendingApproval(interaction.message.id);
+    const embed = EmbedBuilder.from(interaction.message.embeds[0])
+      .setColor(approve ? 0x57f287 : 0x99aab5)
+      .setFooter({ text: `${approve ? "Approved" : "Declined"} by ${interaction.user.username} · ${status}` });
+    await interaction.editReply({ embeds: [embed], components: [] });
+  } catch (e) {
+    await interaction.followUp({
+      content: `Couldn't ${approve ? "approve" : "decline"}: ${e instanceof Error ? e.message : String(e)}`,
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+}

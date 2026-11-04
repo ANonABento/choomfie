@@ -7,6 +7,7 @@ import {
   chunkForDiscord,
   decideRoute,
   dispatchToBrain,
+  getPendingApproval,
   postBrainReply,
   takeChoices,
   resolveBrainId,
@@ -148,5 +149,33 @@ describe("quick-reply buttons", () => {
     const rows = sent[0].components!.map((r) => (r as { toJSON(): { components: { label: string }[] } }).toJSON());
     expect(rows.map((r) => r.components.length)).toEqual([5, 2]);
     for (const r of rows) for (const c of r.components) expect(c.label.length).toBeLessThanOrEqual(80);
+  });
+});
+
+describe("approval cards", () => {
+  test("each approval is its own message with approve/decline buttons, tracked until resolved", async () => {
+    const sent: { content?: string; embeds?: unknown[]; components?: unknown[] }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: `m${sent.length}` }) };
+    const approval = { id: "offer-1", title: "RedTeam · New message", detail: "Bridge test", approveLabel: "Send", declineLabel: "Not now" };
+    await postBrainReply(channel, "waymond", "c1", { text: "Drafted it.", approvals: [approval] });
+    expect(sent).toHaveLength(2);
+    const buttons = (sent[1].components![0] as { toJSON(): { components: { custom_id: string; label: string }[] } })
+      .toJSON()
+      .components.map((c) => [c.custom_id, c.label]);
+    expect(buttons).toEqual([
+      ["brain:approval:yes", "Send"],
+      ["brain:approval:no", "Not now"],
+    ]);
+    expect(getPendingApproval("m2")).toEqual({ brainId: "waymond", chatKey: "c1", approval });
+  });
+
+  test("an approval-only reply doesn't post a stray '(no reply)'", async () => {
+    const sent: { content?: string }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: `m${sent.length}` }) };
+    await postBrainReply(channel, "waymond", "c1", {
+      text: "",
+      approvals: [{ id: "x", title: "t", detail: "d", approveLabel: "Send", declineLabel: "No" }],
+    });
+    expect(sent).toHaveLength(1);
   });
 });

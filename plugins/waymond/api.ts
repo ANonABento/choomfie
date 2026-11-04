@@ -51,6 +51,43 @@ export interface ChatMessage {
   options: string[];
   /** Handed work to a background job (`start_task`); its results arrive as later messages. */
   startsTask: boolean;
+  /** Approval cards (`offer_post`, `offer_message`, …) attached to this message. */
+  offers: Offer[];
+}
+
+export interface Offer {
+  id: string;
+  kind: string;
+  title: string;
+  subtitle: string;
+  detail: string;
+  primary: string;
+  secondary: string;
+  /** "open" until sent or declined. */
+  status: string;
+}
+
+/** Observed: `{tool: "offer_post", data: {offer: {offer_id, kind, title, subtitle, detail, primary, secondary, status}}}`. */
+function offersIn(toolCalls: unknown): Offer[] {
+  if (!Array.isArray(toolCalls)) return [];
+  const out: Offer[] = [];
+  for (const call of toolCalls) {
+    const c = call as { tool?: unknown; data?: { offer?: Record<string, unknown> } } | null;
+    const o = c?.data?.offer;
+    if (typeof c?.tool !== "string" || !c.tool.startsWith("offer_") || !o || typeof o.offer_id !== "string") continue;
+    const str = (v: unknown, d = "") => (typeof v === "string" ? v : d);
+    out.push({
+      id: o.offer_id,
+      kind: str(o.kind, c.tool.slice(6)),
+      title: str(o.title),
+      subtitle: str(o.subtitle),
+      detail: str(o.detail),
+      primary: str(o.primary, "Send"),
+      secondary: str(o.secondary, "Not now"),
+      status: str(o.status, "open"),
+    });
+  }
+  return out;
 }
 
 function offeredReplies(toolCalls: unknown): string[] {
@@ -76,6 +113,7 @@ export function parseMessages(raw: unknown): ChatMessage[] {
       startsTask:
         Array.isArray(m.tool_calls) &&
         m.tool_calls.some((c) => (c as { tool?: unknown } | null)?.tool === "start_task"),
+      offers: offersIn(m.tool_calls),
     }));
 }
 
@@ -130,6 +168,8 @@ export interface AnswerState {
   lastMessageId?: string;
   /** Waymond messages this answer delivered. */
   messageIds: string[];
+  /** Approval cards still open in this answer. */
+  offers: Offer[];
 }
 
 /**
@@ -151,7 +191,7 @@ export function answerState(
   sawActive: boolean
 ): AnswerState {
   const ours = messages.find((m) => m.role === "user" && !baselineIds.has(m.id));
-  if (!ours) return { done: false, reply: "", options: [], background: false, messageIds: [] };
+  if (!ours) return { done: false, reply: "", options: [], background: false, messageIds: [], offers: [] };
   const run = answerRun(messages, ours.id);
   const reply = replyFor(messages, ours.id);
   return {
@@ -161,8 +201,16 @@ export function answerState(
     background: run.some((m) => m.startsTask),
     lastMessageId: (run[run.length - 1] ?? ours).id,
     messageIds: run.map((m) => m.id),
+    offers: openOffers(run),
   };
 }
+
+export function openOffers(messages: ChatMessage[]): Offer[] {
+  return messages.flatMap((m) => m.offers).filter((o) => o.status === "open");
+}
+
+export const offerActionUrl = (offerId: string, action: "send" | "decline") =>
+  `${API_ORIGIN}/api/waymond/cards/${encodeURIComponent(offerId)}/${action}`;
 
 /** `cards/waiting` → whether this conversation has an approval parked. */
 export function hasWaitingCard(raw: unknown, conversationId: string): boolean {

@@ -14,10 +14,11 @@ import {
   registerBrain,
   unregisterBrain,
   type Brain,
+  type BrainApproval,
   type Plugin,
   type PluginContext,
 } from "@choomfie/shared";
-import { chatUrl, lateMessages, type TurnState } from "./api.ts";
+import { chatUrl, lateMessages, openOffers, type Offer, type TurnState } from "./api.ts";
 import { WaymondDriver } from "./driver.ts";
 import { chatMapPath, profileDir, waymondDir } from "./paths.ts";
 import { ChatMap } from "./store.ts";
@@ -57,6 +58,16 @@ function progressLine(turn: TurnState, elapsedMs: number): string {
 }
 
 let driver: WaymondDriver | null = null;
+
+export function toApproval(o: Offer): BrainApproval {
+  return {
+    id: o.id,
+    title: [o.title, o.subtitle].filter(Boolean).join(" · ") || o.kind,
+    detail: o.detail,
+    approveLabel: o.primary,
+    declineLabel: o.secondary,
+  };
+}
 
 /**
  * After an answer that started a background job, poll for the results and
@@ -109,7 +120,8 @@ class Watchers {
       for (const m of late) w.posted.add(m.id);
       const text = late.map((m) => m.content.trim()).filter(Boolean).join("\n\n");
       const choices = [...late].reverse().find((m) => m.options.length)?.options ?? [];
-      if (text || choices.length) await pushBrainReply(BRAIN_ID, chatKey, { text, choices });
+      const approvals = openOffers(late).map(toApproval);
+      if (text || choices.length || approvals.length) await pushBrainReply(BRAIN_ID, chatKey, { text, choices, approvals });
       // Keep watching only if the results themselves kicked off more work.
       if (!late.some((m) => m.startsTask)) this.stop(chatKey);
     } catch (e) {
@@ -135,6 +147,11 @@ function createBrain(ctx: PluginContext): Brain {
     async reset(chatKey) {
       watchers?.stop(chatKey);
       chats.delete(chatKey);
+    },
+    async resolveApproval(chatKey, approvalId, approve) {
+      const convId = chats.get(chatKey);
+      if (!convId || !driver) throw new Error("no Waymond conversation for this channel");
+      return driver.resolveOffer(convId, approvalId, approve ? "send" : "decline");
     },
     async stop(chatKey) {
       const convId = chats.get(chatKey);
@@ -194,7 +211,7 @@ function createBrain(ctx: PluginContext): Brain {
           : result.background
             ? `${result.reply}\n\n-# I'll post the results here when Waymond finishes.`
             : result.reply;
-        return { text, choices: result.options };
+        return { text, choices: result.options, approvals: result.offers.map(toApproval) };
       } catch (e) {
         throw new Error(errorMessage(e));
       } finally {

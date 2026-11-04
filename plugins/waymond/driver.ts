@@ -25,7 +25,9 @@ import {
   stopUrl,
   turnUrl,
   waitingCardsUrl,
+  offerActionUrl,
   type ChatMessage,
+  type Offer,
   type TurnState,
 } from "./api.ts";
 
@@ -78,6 +80,8 @@ export interface SendResult {
   lastMessageId?: string;
   /** Waymond messages this answer delivered (so a watcher never re-posts them). */
   messageIds: string[];
+  /** Approval cards waiting on the owner. */
+  offers: Offer[];
 }
 
 export class WaymondDriver {
@@ -106,6 +110,39 @@ export class WaymondDriver {
     files: string[] = []
   ): Promise<SendResult> {
     const run = this.lock.then(() => this.sendLocked(text, conversationId, hooks, files));
+    this.lock = run.catch(() => {});
+    return run;
+  }
+
+  /** Send or decline an approval card (`POST cards/:id/send|decline`). Returns Ambition's status. */
+  resolveOffer(conversationId: string, offerId: string, action: "send" | "decline"): Promise<string> {
+    const run = this.lock.then(async () => {
+      const page = await this.getPage();
+      try {
+        if (!page.url().startsWith(APP_ORIGIN)) await page.goto(`${APP_ORIGIN}/chat`, { waitUntil: "domcontentloaded" });
+        const res = (await page.evaluate(
+          async ([u, conv]: [string, string]) => {
+            const r = await fetch(u, {
+              method: "POST",
+              credentials: "include",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ conversation_id: conv }),
+            });
+            return { status: r.status, body: await r.text() };
+          },
+          [offerActionUrl(offerId, action), conversationId] as [string, string]
+        )) as { status: number; body: string };
+        if (res.status === 401 || res.status === 403) throw new LoginRequiredError();
+        if (res.status >= 400) throw new Error(`Ambition refused (${res.status}): ${res.body.slice(0, 200)}`);
+        try {
+          return String((JSON.parse(res.body) as { status?: unknown }).status ?? action);
+        } catch {
+          return action;
+        }
+      } finally {
+        this.scheduleIdleClose();
+      }
+    });
     this.lock = run.catch(() => {});
     return run;
   }
@@ -236,6 +273,7 @@ export class WaymondDriver {
               background: state.background,
               lastMessageId: state.lastMessageId,
               messageIds: state.messageIds,
+              offers: state.offers,
             };
           }
         }

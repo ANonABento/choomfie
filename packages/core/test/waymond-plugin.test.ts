@@ -4,11 +4,12 @@ import {
   hasWaitingCard,
   answerState,
   lateMessages,
+  openOffers,
   parseMessages,
   parseTurn,
   replyFor,
 } from "../../../plugins/waymond/api.ts";
-import { framePrompt, originalName } from "../../../plugins/waymond/index.ts";
+import { framePrompt, originalName, toApproval } from "../../../plugins/waymond/index.ts";
 
 // Shapes as observed from app.ambition.inc on 2026-11-04.
 const turn = (over: Record<string, unknown> = {}) => ({
@@ -143,5 +144,51 @@ describe("framePrompt", () => {
   test("inbox prefixes are stripped from attachment names", () => {
     expect(originalName("/x/inbox/1793824118401_ab12cd_photo.png")).toBe("photo.png");
     expect(originalName("/x/inbox/plain.txt")).toBe("plain.txt");
+  });
+});
+
+describe("approval cards (offer_post observed 2026-11-04)", () => {
+  const card = (status: string) => ({
+    id: "a9",
+    role: "assistant",
+    content: "I've drafted a one-line post for RedTeam.",
+    tool_calls: [
+      {
+        tool: "offer_post",
+        status: "completed",
+        data: {
+          offer: {
+            kind: "post",
+            title: "RedTeam",
+            detail: "Bridge test, please ignore.",
+            status,
+            primary: "Send",
+            offer_id: "offer-1",
+            subtitle: "New message",
+            image_url: null,
+            secondary: "Not now",
+          },
+        },
+      },
+      { tool: "offer_replies", status: "completed", data: { options: [] } },
+    ],
+  });
+
+  test("open offers become approvals with Ambition's own button labels", () => {
+    const msgs = parseMessages([{ id: "u", role: "user", content: "go" }, card("open")]);
+    const st = answerState(msgs, new Set(), false, false);
+    expect(st.offers).toHaveLength(1);
+    expect(toApproval(st.offers[0])).toEqual({
+      id: "offer-1",
+      title: "RedTeam · New message",
+      detail: "Bridge test, please ignore.",
+      approveLabel: "Send",
+      declineLabel: "Not now",
+    });
+  });
+
+  test("declined or sent offers are not offered again", () => {
+    expect(openOffers(parseMessages([card("declined")]))).toEqual([]);
+    expect(openOffers(parseMessages([card("sent")]))).toEqual([]);
   });
 });
