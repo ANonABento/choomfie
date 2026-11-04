@@ -11,7 +11,8 @@ import {
   rememberBrainRelay,
 } from "../lib/ask-relay.ts";
 import { postBrainReply } from "../lib/brain-router.ts";
-import { menuPrompt } from "../lib/handlers/ask-command.ts";
+import { menuPrompt, replyExcerpt, replyPrompt } from "../lib/handlers/ask-command.ts";
+import { REPLY_BUTTON_ID, questionHeader } from "../lib/ask-relay.ts";
 import { discordTools } from "../lib/tools/discord-tools.ts";
 
 function fakeInteraction() {
@@ -130,7 +131,68 @@ describe("tools on an ask chat", () => {
   });
 });
 
-test("menu prompt names who said it", () => {
-  expect(menuPrompt("alice", "is this right?", 0)).toBe("alice said:\nis this right?");
-  expect(menuPrompt("bob", "  ", 2)).toBe("bob said:\n(attachments only)");
+describe("keeping a group-DM conversation going", () => {
+  const ids = (body: Record<string, unknown>) =>
+    ((body.components as { toJSON(): { components: { custom_id: string }[] } }[]) ?? []).flatMap((r) =>
+      r.toJSON().components.map((c) => c.custom_id)
+    );
+
+  test("the question is quoted above the first message only, and can't ping", async () => {
+    const i = fakeInteraction();
+    const ch = interactionChannel(i, { header: questionHeader("alice", "what's @everyone up to") });
+    await ch.send({ content: "answer" });
+    await ch.send({ content: "more" });
+    expect(i.calls[0].body.content).toBe("> **alice:** what's @everyone up to\nanswer");
+    expect(i.calls[0].body.allowedMentions).toEqual({ parse: [] });
+    expect(i.calls[1].body.content).toBe("more");
+  });
+
+  test("a header that won't fit goes in its own message", async () => {
+    const i = fakeInteraction();
+    await interactionChannel(i, { header: questionHeader("a", "q") }).send({ content: "x".repeat(1999) });
+    expect(i.calls.map((c) => c.body.content)).toEqual(["> **a:** q", "x".repeat(1999)]);
+  });
+
+  test("long questions are shortened in the header", () => {
+    const h = questionHeader("a", "word ".repeat(100));
+    expect(h.length).toBeLessThan(220);
+    expect(h.endsWith("…")).toBe(true);
+  });
+
+  test("💬 Reply goes on every message without buttons of its own, not on quick replies", async () => {
+    const i = fakeInteraction();
+    await postBrainReply(interactionChannel(i, { replyButton: true }), "tb", "gdm", { text: "pick", choices: ["a"] });
+    await interactionChannel(i, { replyButton: true }).send({ content: "plain" });
+    expect(ids(i.calls[0].body)).toEqual(["brain:choice:0"]);
+    expect(ids(i.calls[1].body)).toEqual([REPLY_BUTTON_ID]);
+  });
+
+  test("progress fills the placeholder, and never overwrites the answer", async () => {
+    const i = fakeInteraction();
+    const ch = interactionChannel(i);
+    await ch.progress("⏳ working");
+    const late = ch.progress("⏳ still working"); // queued...
+    await ch.send({ content: "answer" });
+    await late;
+    await ch.progress("⏳ too late");
+    expect(i.calls.map((c) => [c.kind, c.body.content])).toEqual([
+      ["edit", "⏳ working"],
+      ["edit", "⏳ still working"],
+      ["edit", "answer"],
+    ]);
+  });
+
+  test("a reply quotes the answer it replies to, without our header", () => {
+    const ex = replyExcerpt("> **alice:** what's 2+2\nIt's 4.");
+    expect(ex).toBe("It's 4.");
+    expect(replyPrompt(ex, " and 3+3? ")).toBe('[Replying to your earlier answer: "It\'s 4."]\nand 3+3?');
+    expect(replyPrompt("", "hi")).toBe("hi");
+    expect(replyExcerpt("y".repeat(900)).length).toBe(500);
+  });
+
+  test("menu prompt names who said it, with the optional instruction first", () => {
+    expect(menuPrompt("alice", "is this right?", 0)).toBe("alice said:\nis this right?");
+    expect(menuPrompt("bob", "  ", 2)).toBe("bob said:\n(attachments only)");
+    expect(menuPrompt("alice", "the sky is green", 0, "fact check")).toBe("fact check\n\nalice said:\nthe sky is green");
+  });
 });

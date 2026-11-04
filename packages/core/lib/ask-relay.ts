@@ -14,7 +14,10 @@
  */
 
 import {
+  ActionRowBuilder,
   ApplicationIntegrationType,
+  ButtonBuilder,
+  ButtonStyle,
   InteractionContextType,
   MessageFlags,
 } from "discord.js";
@@ -32,6 +35,8 @@ export interface WebhookInteraction {
 
 export interface RelayChannel extends SendableChannel {
   alive(): boolean;
+  /** Replace the "thinking…" placeholder with a status line; no-op once answered. */
+  progress(line: string): Promise<void>;
 }
 
 /**
@@ -48,33 +53,98 @@ export function botIsAbsent(interaction: {
   return interaction.context !== InteractionContextType.BotDM;
 }
 
+/** Custom id of the 💬 Reply button; stateless, so it outlives restarts. */
+export const REPLY_BUTTON_ID = "ask:reply";
+
+export function replyRow() {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(REPLY_BUTTON_ID).setLabel("Reply").setEmoji("💬").setStyle(ButtonStyle.Secondary)
+  );
+}
+
+const DISCORD_LIMIT = 2000;
+
+/** `> **alice:** what's 2+2` — the question, which nobody else in the chat can see. */
+export function questionHeader(user: string, question: string): string {
+  const oneLine = question.replace(/\s+/g, " ").trim();
+  const short = oneLine.length > 200 ? `${oneLine.slice(0, 197)}…` : oneLine;
+  return `> **${user}:** ${short || "…"}`;
+}
+
 /**
  * A channel that posts through `interaction`. The first send replaces the
  * deferred "thinking…" reply (`first: "edit"`), unless the interaction's one
  * response is already spent (a button `update`), in which case every send is
  * a follow-up. Message references aren't possible on a webhook, so `reply` is
  * dropped.
+ *
+ * `header` is put above the first message (the question, since a modal's text
+ * and a menu's target aren't visible to the chat). `replyButton` adds 💬 Reply
+ * to every message that has no buttons of its own. `progress` shows a status
+ * line in the "thinking…" reply until the answer replaces it. Sends and
+ * progress run in order, so a late status line can never overwrite an answer.
  */
 export function interactionChannel(
   interaction: WebhookInteraction,
-  opts: { first?: "edit" | "followUp"; ephemeral?: boolean; now?: () => number } = {}
+  opts: {
+    first?: "edit" | "followUp";
+    ephemeral?: boolean;
+    header?: string;
+    replyButton?: boolean;
+    now?: () => number;
+  } = {}
 ): RelayChannel {
   const now = opts.now ?? Date.now;
   const started = now();
   let edited = opts.first === "followUp";
+  let header = opts.header;
+  let chain: Promise<unknown> = Promise.resolve();
   const alive = () => now() - started < RELAY_WINDOW_MS;
+  const inOrder = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = chain.then(fn);
+    chain = run.catch(() => {});
+    return run;
+  };
+
+  const post = async (body: Record<string, unknown>) => {
+    if (opts.replyButton && !(body.components as unknown[] | undefined)?.length) {
+      body = { ...body, components: [replyRow()] };
+    }
+    if (!edited) {
+      edited = true;
+      return interaction.editReply(body as never);
+    }
+    return interaction.followUp(
+      (opts.ephemeral ? { ...body, flags: MessageFlags.Ephemeral } : body) as never
+    );
+  };
+
   return {
     alive,
-    async send(options) {
-      if (!alive()) throw new Error("Discord's 15-minute window to answer this has closed");
-      const { reply: _reference, ...body } = options;
-      if (!edited) {
-        edited = true;
-        return interaction.editReply(body as never);
-      }
-      return interaction.followUp(
-        (opts.ephemeral ? { ...body, flags: MessageFlags.Ephemeral } : body) as never
-      );
+    send(options) {
+      return inOrder(async () => {
+        if (!alive()) throw new Error("Discord's 15-minute window to answer this has closed");
+        const { reply: _reference, ...body } = options as Record<string, unknown>;
+        if (header) {
+          const top = header;
+          header = undefined;
+          // The header quotes the asker's own words: never let it ping anyone.
+          const quiet = { parse: [] as never[] };
+          const content = typeof body.content === "string" ? body.content : "";
+          if (top.length + 1 + content.length <= DISCORD_LIMIT) {
+            return post({ ...body, content: content ? `${top}\n${content}` : top, allowedMentions: quiet });
+          }
+          await post({ content: top, allowedMentions: quiet, components: [] });
+        }
+        return post(body);
+      });
+    },
+    progress(line) {
+      return inOrder(async () => {
+        // Only while the "thinking…" reply is still a placeholder.
+        if (edited || !alive()) return;
+        await interaction.editReply({ content: line, allowedMentions: { parse: [] } } as never);
+      });
     },
   };
 }

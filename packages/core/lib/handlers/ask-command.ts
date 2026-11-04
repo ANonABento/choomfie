@@ -1,6 +1,6 @@
 /**
- * `/choomfie <prompt>` and the "Ask Choomfie" message menu — Choomfie in chats the
- * bot isn't in.
+ * `/choomfie <prompt>` and the "Ask Choomfie" message menu — Choomfie in chats
+ * the bot isn't in.
  *
  * Both are user-installable (Developer Portal → Installation → User Install),
  * so the owner can use them in group DMs and other people's DMs, where a bot
@@ -8,17 +8,29 @@
  * right-clicked — never the chat — and can only answer through the
  * interaction, for 15 minutes (see ask-relay.ts).
  *
+ * Keeping a conversation going there:
+ * - every answer carries a stateless 💬 Reply button → a text box → a new ask
+ *   that quotes the answer it replies to (so context survives a session cycle);
+ * - the menu opens a text box for an optional instruction ("summarize this");
+ * - the question is quoted above the answer, since nobody else sees a modal's
+ *   text or which message was right-clicked.
+ *
  * Same gates as a typed message: allowlist, rate limit, then the chat's brain
  * (`/brain` works in a group DM too) under brainAccess.
  */
 
 import {
+  ActionRowBuilder,
   ApplicationCommandType,
   ContextMenuCommandBuilder,
   MessageFlags,
+  ModalBuilder,
   SlashCommandBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   type ChatInputCommandInteraction,
   type MessageContextMenuCommandInteraction,
+  type ModalSubmitInteraction,
 } from "discord.js";
 import { ANYWHERE } from "@choomfie/shared";
 import { isAllowed, isOwner } from "../access.ts";
@@ -27,24 +39,32 @@ import { isRateLimited } from "../conversation.ts";
 import { downloadAttachments, forwardToClaude, type AttachmentLike } from "../inbound.ts";
 import {
   ASK_NOTE,
+  RELAY_WINDOW_MS,
+  botIsAbsent,
   interactionChannel,
   openAskRelay,
+  questionHeader,
   rememberBrainRelay,
 } from "../ask-relay.ts";
-import { registerCommand, registerMessageMenu } from "../register.ts";
+import { registerButtonHandler, registerCommand, registerMessageMenu, registerModalHandler } from "../register.ts";
 import type { AppContext } from "../types.ts";
 
 export const ASK_MENU_NAME = "Ask Choomfie";
 
-type AskInteraction = ChatInputCommandInteraction | MessageContextMenuCommandInteraction;
+type AskInteraction =
+  | ChatInputCommandInteraction
+  | MessageContextMenuCommandInteraction
+  | ModalSubmitInteraction;
 
-export async function runAsk(
-  interaction: AskInteraction,
-  ctx: AppContext,
-  prompt: string,
-  attachments: AttachmentLike[],
-  ephemeral: boolean
-): Promise<void> {
+export interface AskInput {
+  prompt: string;
+  attachments?: AttachmentLike[];
+  ephemeral?: boolean;
+  /** Quoted above the answer (the question as the chat should see it). */
+  header?: string;
+}
+
+export async function runAsk(interaction: AskInteraction, ctx: AppContext, input: AskInput): Promise<void> {
   const userId = interaction.user.id;
   const refuse = (content: string) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
   if (!isAllowed(ctx, userId)) {
@@ -57,7 +77,7 @@ export async function runAsk(
   }
 
   const owner = isOwner(ctx, userId) || (!ctx.ownerUserId && ctx.allowedUsers.size === 0);
-  const chatKey = interaction.channelId;
+  const chatKey = interaction.channelId!;
   const route = decideRoute({
     channelId: chatKey,
     parentId: parentChannelId(interaction.channel),
@@ -71,9 +91,15 @@ export async function runAsk(
     return;
   }
 
+  const ephemeral = input.ephemeral ?? false;
   // Shows "Choomfie is thinking…"; the answer replaces it.
   await interaction.deferReply(ephemeral ? { flags: MessageFlags.Ephemeral } : {});
-  const relay = interactionChannel(interaction, { ephemeral });
+  const relay = interactionChannel(interaction, {
+    ephemeral,
+    header: input.header,
+    // Where a normal reply can't reach Choomfie, give the chat a way to answer back.
+    replyButton: botIsAbsent(interaction),
+  });
 
   const meta: Record<string, string> = {
     message_id: interaction.id,
@@ -84,14 +110,21 @@ export async function runAsk(
     role: owner ? "owner" : "user",
     via: "ask",
   };
-  const filePaths = await downloadAttachments(ctx, attachments, meta);
-  const content = prompt.trim() || "(empty prompt)";
+  const filePaths = await downloadAttachments(ctx, input.attachments ?? [], meta);
+  const content = input.prompt.trim() || "(empty prompt)";
 
   if (route.kind === "brain") {
     meta.chat_id = chatKey;
     // Late results (background jobs) can still land here while the window is open.
     rememberBrainRelay(chatKey, relay);
-    void dispatchToBrain(ctx, route.brain, relay, { chatKey, messageId: interaction.id, content, meta, filePaths });
+    void dispatchToBrain(ctx, route.brain, relay, {
+      chatKey,
+      messageId: interaction.id,
+      content,
+      meta,
+      filePaths,
+      progress: (line) => relay.progress(line),
+    });
     return;
   }
 
@@ -99,11 +132,44 @@ export async function runAsk(
   await forwardToClaude(ctx, `${ASK_NOTE}\n${content}`, meta);
 }
 
-/** The prompt for a right-clicked message: who said it, and what. */
-export function menuPrompt(author: string, text: string, attachmentCount: number): string {
+/** The prompt for a right-clicked message: who said it, what, and what to do with it. */
+export function menuPrompt(author: string, text: string, attachmentCount: number, instruction = ""): string {
   const body = text.trim() || (attachmentCount ? "(attachments only)" : "(empty message)");
-  return `${author} said:\n${body}`;
+  const ask = instruction.trim();
+  return `${ask ? `${ask}\n\n` : ""}${author} said:\n${body}`;
 }
+
+/**
+ * The answer being replied to, minus our own question header, cut to a size
+ * worth resending. It rides along so a follow-up makes sense even if the
+ * Claude session cycled, or the reply is to an older answer.
+ */
+export function replyExcerpt(answer: string, limit = 500): string {
+  const body = answer
+    .split("\n")
+    .filter((l) => !/^> \*\*[^*]+:\*\* /.test(l))
+    .join("\n")
+    .trim();
+  return body.length > limit ? `${body.slice(0, limit - 1)}…` : body;
+}
+
+export function replyPrompt(excerpt: string, text: string): string {
+  return excerpt ? `[Replying to your earlier answer: "${excerpt}"]\n${text.trim()}` : text.trim();
+}
+
+function textBox(id: string, label: string, required: boolean, placeholder: string) {
+  return new ActionRowBuilder<TextInputBuilder>().addComponents(
+    new TextInputBuilder()
+      .setCustomId(id)
+      .setLabel(label)
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(required)
+      .setMaxLength(4000)
+      .setPlaceholder(placeholder)
+  );
+}
+
+// --- /choomfie ---
 
 registerCommand("choomfie", {
   data: {
@@ -121,33 +187,94 @@ registerCommand("choomfie", {
     ...ANYWHERE,
   },
   handler: async (interaction, ctx) => {
+    const prompt = interaction.options.getString("prompt", true);
     const file = interaction.options.getAttachment("file");
-    await runAsk(
-      interaction,
-      ctx,
-      interaction.options.getString("prompt", true),
-      file ? [file] : [],
-      interaction.options.getBoolean("private") ?? false
+    await runAsk(interaction, ctx, {
+      prompt,
+      attachments: file ? [file] : [],
+      ephemeral: interaction.options.getBoolean("private") ?? false,
+      header: questionHeader(interaction.user.username, prompt),
+    });
+  },
+});
+
+// --- Ask Choomfie (message menu) ---
+
+/** Right-clicked message, held for the few seconds the instruction box is open. */
+const menuTargets = new Map<string, { author: string; content: string; attachments: AttachmentLike[]; at: number }>();
+
+registerMessageMenu(ASK_MENU_NAME, {
+  data: {
+    ...new ContextMenuCommandBuilder().setName(ASK_MENU_NAME).setType(ApplicationCommandType.Message).toJSON(),
+    ...ANYWHERE,
+  },
+  handler: async (interaction, ctx) => {
+    if (!isAllowed(ctx, interaction.user.id)) {
+      await interaction.reply({ content: "You're not on Choomfie's allowlist.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const now = Date.now();
+    for (const [k, v] of menuTargets) if (now - v.at > RELAY_WINDOW_MS) menuTargets.delete(k);
+    const m = interaction.targetMessage;
+    menuTargets.set(interaction.id, {
+      author: m.author.username,
+      content: m.content,
+      attachments: [...m.attachments.values()],
+      at: now,
+    });
+    await interaction.showModal(
+      new ModalBuilder()
+        .setCustomId(`ask:menu:${interaction.id}`)
+        .setTitle(`Ask Choomfie about ${m.author.username}'s message`.slice(0, 45))
+        .addComponents(textBox("text", "What should Choomfie do? (optional)", false, "e.g. summarize this, is this true?"))
     );
   },
 });
 
-registerMessageMenu(ASK_MENU_NAME, {
-  data: {
-    ...new ContextMenuCommandBuilder()
-      .setName(ASK_MENU_NAME)
-      .setType(ApplicationCommandType.Message)
-      .toJSON(),
-    ...ANYWHERE,
-  },
-  handler: async (interaction, ctx) => {
-    const m = interaction.targetMessage;
-    await runAsk(
-      interaction,
-      ctx,
-      menuPrompt(m.author.username, m.content, m.attachments.size),
-      [...m.attachments.values()],
-      false
-    );
-  },
+// --- 💬 Reply button → text box ---
+
+registerButtonHandler("ask", async (interaction, parts, ctx) => {
+  if (parts[1] !== "reply") return;
+  if (!isAllowed(ctx, interaction.user.id)) {
+    await interaction.reply({ content: "You're not on Choomfie's allowlist.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  await interaction.showModal(
+    new ModalBuilder()
+      .setCustomId("ask:reply")
+      .setTitle("Reply to Choomfie")
+      .addComponents(textBox("text", "Your reply", true, "Keep the conversation going…"))
+  );
+});
+
+registerModalHandler("ask", async (interaction, parts, ctx) => {
+  const text = interaction.fields.getTextInputValue("text") ?? "";
+
+  if (parts[1] === "reply") {
+    const answer = interaction.isFromMessage() ? interaction.message : null;
+    await runAsk(interaction, ctx, {
+      prompt: replyPrompt(replyExcerpt(answer?.content ?? ""), text),
+      ephemeral: answer?.flags.has(MessageFlags.Ephemeral) ?? false,
+      header: questionHeader(interaction.user.username, text),
+    });
+    return;
+  }
+
+  if (parts[1] === "menu") {
+    const target = menuTargets.get(parts[2]);
+    menuTargets.delete(parts[2]);
+    if (!target) {
+      await interaction.reply({
+        content: "Lost track of that message (Choomfie restarted) — right-click it again.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    const about = `about ${target.author}'s message`;
+    await runAsk(interaction, ctx, {
+      prompt: menuPrompt(target.author, target.content, target.attachments.length, text),
+      attachments: target.attachments,
+      header: questionHeader(interaction.user.username, text.trim() ? `${text.trim()} (${about})` : `asked ${about}`),
+    });
+  }
 });

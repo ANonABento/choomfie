@@ -196,6 +196,7 @@ registerButtonHandler("brain", async (interaction, parts, ctx) => {
     const relay = interactionChannel(interaction, {
       first: "followUp",
       ephemeral: interaction.message.flags.has(MessageFlags.Ephemeral),
+      replyButton: true,
     });
     rememberBrainRelay(pending.chatKey, relay);
     channel = relay;
