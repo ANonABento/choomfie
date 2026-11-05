@@ -7,6 +7,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { DaemonControlCommand } from "@choomfie/shared";
 import type { RateLimitSnapshot } from "./rate-limit.ts";
+import type { HeldChat } from "./chat-state.ts";
 
 export type SessionState = "STARTING" | "ACTIVE" | "DRAINING" | "CYCLING";
 
@@ -70,12 +71,26 @@ export type CycleOptions = {
   announceTo?: string;
   /** Which command asked, so the confirmation can say what actually happened. */
   requestedCommand?: DaemonControlCommand;
+  /** Hold this chat in the next session instead of continuing the current one. */
+  nextChat?: HeldChat;
+  /** SDK session id to resume in the next session (`/chat resume`). */
+  resume?: string;
+  /** The next chat's title, for the "I'm back" line. */
+  chatTitle?: string;
 };
 
 export type StartSessionOptions = Pick<
   CycleOptions,
-  "announceTo" | "requestedCommand"
+  "announceTo" | "requestedCommand" | "resume" | "chatTitle"
 >;
+
+/** The chat this daemon's session holds (see chat-state.ts). */
+export type ChatHold = HeldChat & {
+  /** The live SDK session's id, from its `system/init`. Null until the first prompt. */
+  sdkSessionId: string | null;
+  /** chat id → handoff summary its latest session started with. */
+  seeds: Record<string, string>;
+};
 
 export type MetaState = {
   state: SessionState;
@@ -133,4 +148,6 @@ export type MetaState = {
    * is the only place the real model shows up. Null until init arrives.
    */
   resolved: { model: string | null; claudeCodeVersion: string | null };
+  /** Which Choomfie chat the session holds. Persisted in meta/claude-chat.json. */
+  chat: ChatHold;
 };

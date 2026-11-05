@@ -6,22 +6,23 @@
  * the Claude session nothing.
  */
 
-import { copyFileSync, mkdirSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
   errorMessage,
   pushBrainReply,
   registerBrain,
+  titleFrom,
   unregisterBrain,
   type Brain,
+  type ChatsApi,
   type BrainApproval,
   type Plugin,
   type PluginContext,
 } from "@choomfie/shared";
 import { chatUrl, lateMessages, openOffers, type Offer, type TurnState } from "./api.ts";
 import { WaymondDriver } from "./driver.ts";
-import { chatMapPath, profileDir, waymondDir } from "./paths.ts";
-import { ChatMap } from "./store.ts";
+import { legacyChatMapPath, profileDir, waymondDir } from "./paths.ts";
 
 const BRAIN_ID = "waymond";
 const WATCH_EVERY_MS = 60_000;
@@ -136,8 +137,37 @@ class Watchers {
 
 let watchers: Watchers | null = null;
 
+/**
+ * Before chats lived in core, Waymond kept its own `chats.json` (channel →
+ * conversation id). Import it once so existing conversations carry on, then
+ * set the file aside — never deleted, in case the import needs redoing.
+ */
+export function importLegacyChatMap(path: string, chats: ChatsApi): number {
+  if (!existsSync(path)) return 0;
+  let map: Record<string, unknown> = {};
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf-8"));
+    if (raw && typeof raw === "object") map = raw;
+  } catch {
+    // Unreadable: nothing to carry over.
+  }
+  let imported = 0;
+  for (const [chatKey, convId] of Object.entries(map)) {
+    if (typeof convId !== "string" || chats.bound(chatKey, BRAIN_ID)) continue;
+    const chat = chats.start(chatKey, BRAIN_ID, "Waymond chat");
+    chats.setBackendRef(chat.id, convId);
+    imported++;
+  }
+  renameSync(path, `${path}.migrated`);
+  return imported;
+}
+
 function createBrain(ctx: PluginContext): Brain {
-  const chats = new ChatMap(chatMapPath(ctx.DATA_DIR));
+  const chats = ctx.chats;
+  if (!chats) throw new Error("Waymond needs Choomfie's chat store (ctx.chats)");
+  const imported = importLegacyChatMap(legacyChatMapPath(ctx.DATA_DIR), chats);
+  if (imported) console.error(`[waymond] imported ${imported} conversation(s) from chats.json`);
+  const conversationAt = (chatKey: string) => chats.bound(chatKey, BRAIN_ID)?.backendRef ?? undefined;
   const outbox = join(waymondDir(ctx.DATA_DIR), "outbox");
   driver = new WaymondDriver({
     profileDir: profileDir(ctx.DATA_DIR),
@@ -148,17 +178,17 @@ function createBrain(ctx: PluginContext): Brain {
   return {
     id: BRAIN_ID,
     label: "Waymond",
+    // Core has already bound a fresh chat here; only the background watch is ours to drop.
     async reset(chatKey) {
       watchers?.stop(chatKey);
-      chats.delete(chatKey);
     },
     async resolveApproval(chatKey, approvalId, approve) {
-      const convId = chats.get(chatKey);
+      const convId = conversationAt(chatKey);
       if (!convId || !driver) throw new Error("no Waymond conversation for this channel");
       return driver.resolveOffer(convId, approvalId, approve ? "send" : "decline");
     },
     async stop(chatKey) {
-      const convId = chats.get(chatKey);
+      const convId = conversationAt(chatKey);
       return convId && driver ? driver.stop(convId) : false;
     },
     async send(message) {
@@ -179,10 +209,11 @@ function createBrain(ctx: PluginContext): Brain {
         return dest;
       });
 
+      const chat = chats.current(message.chatKey, BRAIN_ID, titleFrom(message.content));
       try {
         const result = await driver!.send(
           framePrompt(message.content, message.meta),
-          chats.get(message.chatKey),
+          chat.backendRef ?? undefined,
           {
             onProgress(turn, elapsed) {
               const now = Date.now();
@@ -216,7 +247,7 @@ function createBrain(ctx: PluginContext): Brain {
           },
           files
         );
-        chats.set(message.chatKey, result.conversationId);
+        chats.setBackendRef(chat.id, result.conversationId);
         watchers!.delivered(message.chatKey, result.messageIds);
         if (result.background && result.lastMessageId) {
           watchers!.start(message.chatKey, result.conversationId, result.lastMessageId);

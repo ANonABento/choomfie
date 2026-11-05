@@ -209,9 +209,14 @@ describe("/clear and /compact follow the channel's brain", () => {
       user: { id: "owner" },
       reply: async (o: (typeof replies)[number]) => void replies.push(o),
     };
+    const { Database } = await import("bun:sqlite");
+    const { ChatStore } = await import("../lib/chats/store.ts");
+    const chats = new ChatStore(new Database(":memory:"));
+    const before = chats.current("chan1", "testbrain", "old chat");
     const ctx = {
       ownerUserId: "owner",
       DATA_DIR: "/nonexistent-choomfie-test",
+      chats,
       config: { getChannelBrain: (id: string) => (id === "chan1" ? channelBrain : undefined) },
     };
     try {
@@ -219,13 +224,22 @@ describe("/clear and /compact follow the channel's brain", () => {
     } finally {
       unregisterBrain("testbrain");
     }
-    return { replies, resets };
+    return { replies, resets, chats, before };
   }
 
-  test("/clear in a brain channel resets that brain's conversation for this channel only", async () => {
-    const { replies, resets } = await run("clear", "testbrain");
+  test("/clear in a brain channel starts a new chat for this channel only, keeping the old one", async () => {
+    const { replies, resets, chats, before } = await run("clear", "testbrain");
     expect(resets).toEqual(["chan1"]);
     expect(JSON.stringify(replies[0].embeds)).toContain("Fresh TestBrain conversation");
+    const now = chats.bound("chan1", "testbrain");
+    expect(now?.id).not.toBe(before.id);
+    expect(chats.get(before.id)).not.toBeNull();
+  });
+
+  test("/clear works for a brain without a reset hook", async () => {
+    const { replies, chats, before } = await run("clear", "testbrain", false);
+    expect(JSON.stringify(replies[0].embeds)).toContain("Fresh TestBrain conversation");
+    expect(chats.bound("chan1", "testbrain")?.id).not.toBe(before.id);
   });
 
   test("/compact in a brain channel explains instead of touching Claude", async () => {

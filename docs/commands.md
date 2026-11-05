@@ -36,7 +36,8 @@ Defined in `packages/core/lib/commands.ts`, deployed via `packages/core/scripts/
 - `/brain [name]` — who answers in this channel/thread (owner only). No name: what answers here, for whom, and which brains are loaded. A name (`claude`, `waymond`, …) switches; `claude` clears the override. Brain output is posted with mentions disabled, so it can never ping `@everyone`, a role or a user. A brain's quick replies arrive as `brain:choice:<n>` buttons (in-memory, so a restart expires them); clicking one sends that option, gated like typing to the brain. Approval requests arrive as `brain:approval:yes|no` buttons and are **owner-only** whatever `brainAccess` says, since approving acts as the owner's account. Routing lives in `lib/brain-router.ts`; brains register via `registerBrain` and post late results via `pushBrainReply`, both from `@choomfie/shared`
 - `/stop` — interrupt the reply in progress in this channel (owner only). Other brains stop through `Brain.stop`. Claude stops only in daemon mode: the worker writes a `stop` control request, and the daemon calls the Agent SDK's `interrupt()` on the turn in flight, keeping the session (like Esc). Stop requests go stale after 20s, so a leftover one can't cut off a later turn. It also closes that chat's unanswered `/choomfie` placeholders with "⏹️ Stopped." In foreground it says to press Esc in the terminal
 - `/compact` — free up daemon context, keeping a handoff summary (owner only, daemon mode). In a channel answered by another brain it explains that the brain manages its own context
-- `/clear` — replace the daemon session with nothing carried over (owner only, daemon mode, confirm button). In a channel answered by another brain it instead starts a fresh conversation with that brain for this channel only — any mode, no confirm, Claude untouched
+- `/clear` — replace the daemon session with nothing carried over (owner only, daemon mode, confirm button); the cleared session becomes a new Claude chat. In a channel answered by another brain it instead binds a fresh chat with that brain for this channel only — any mode, no confirm, Claude untouched; the old chat stays in `/chat list`
+- `/chat list|new|resume|rename` — the conversations behind a location (owner only; works in group DMs). See **Chats** below
 - `/plugins [action] [name]` — list, enable, or disable plugins (owner only, restart needed)
 - `/config [setting] [value]` — list settings with current values, or change one (owner only, ephemeral). `value` autocompletes from the selected setting's suggestions
 - `/model [model]` — view or change the model Choomfie runs on, in every mode (owner only, autocompletes)
@@ -46,11 +47,24 @@ Defined in `packages/core/lib/commands.ts`, deployed via `packages/core/scripts/
 - `/help` — show all commands and capabilities
 - `/choomfie <prompt> [file] [private]` and the **Ask Choomfie** message menu (right-click → Apps) — see below
 
+### Chats (`/chat`)
+
+A **location** is a thread, channel, DM or group DM (its `channelId`). A **chat** is one conversation with one brain, with that backend's own id (`backendRef`: a Waymond conversation, a Claude SDK session). `chat_bindings` says which chat is live at each (location, brain) — keyed by brain too, so `/brain` away and back finds the old chat. A chat is live in at most one location; resuming it elsewhere moves it. Tables and queries in `lib/chats/store.ts` (same SQLite DB, own tables); plugins get it as `ctx.chats` (`ChatsApi` in `@choomfie/shared`). Routing only — never consulted for access.
+
+- `list [brain]` — the brain answering here, most recent first, with up to 5 `chat:resume:<id>` buttons
+- `new [title] [cwd]` — in a server text channel, a web brain's new chat gets its own thread (thread name = title); elsewhere it swaps in place. Claude: a new chat for the daemon session, optionally in `cwd`
+- `resume <chat>` — autocomplete searches titles across all brains; resuming a chat of another brain also points this channel at that brain
+- `rename <title>` — renames the live chat, and its thread for web brains
+
+**Claude chats are global until sessions can run side by side.** There is one daemon session, so Claude chats are bound to `claude:global` (`lib/chats/claude.ts`) and resuming one swaps the session for every channel. The daemon decides what it holds (`meta/claude-chat.json`, see docs/daemon.md); the worker keeps the record in sync from `daemon-state.json` on each inbound message and on `/chat` / `/status`. Titles default to the first message. Foreground mode can't swap the terminal's session: `/chat` says so and shows the session id for `claude --resume`.
+
+`cwd` must resolve (symlinks included) to `chatRoots` from config.json or below — a bypassPermissions session can reach whatever its cwd is, so the list is edited by hand, not from Discord. A cwd outside the plugin dir loads that project's CLAUDE.md instead of this one; the persona and tools still come from the plugin.
+
 ### Group DMs and other chats the bot isn't in (`/choomfie`)
 
 A bot can't join a group DM, but a **user-installed** app can be used there. Setup, once, in the Developer Portal: your app → **Installation** → tick **User Install**, add the `applications.commands` scope under its default install settings, then open the install link and choose **Add to My Apps**.
 
-Only `/choomfie`, the **Ask Choomfie** menu, `/access`, `/brain`, `/stop` and `/clear` are user-installable (`ANYWHERE` in `@choomfie/shared`). Every other command is deployed with explicit `integration_types: [GuildInstall]` / `contexts: [Guild, BotDM]` (`GUILD_INSTALL_ONLY`, applied in `getCommandDefs`) — left unset, Discord would fall back to the app's install types and enabling User Install would make every owner command usable from any chat.
+Only `/choomfie`, the **Ask Choomfie** menu, `/access`, `/brain`, `/chat`, `/stop` and `/clear` are user-installable (`ANYWHERE` in `@choomfie/shared`). Every other command is deployed with explicit `integration_types: [GuildInstall]` / `contexts: [Guild, BotDM]` (`GUILD_INSTALL_ONLY`, applied in `getCommandDefs`) — left unset, Discord would fall back to the app's install types and enabling User Install would make every owner command usable from any chat.
 
 There, Choomfie sees only the command text or the one right-clicked message (plus its attachments) — never the chat — and can only answer through the interaction, which Discord keeps open for **15 minutes**. `lib/ask-relay.ts` wraps the interaction as a `SendableChannel` (first send replaces the "thinking…" reply, the rest are follow-ups), so brain replies, quick-reply buttons and approval cards work unchanged. Claude gets a synthetic `ask:<interaction id>` chat id: `reply` answers through the relay, every other Discord tool returns a clear "only `reply` works here". Same gates as a typed message — allowlist, rate limit, then the chat's brain under `brainAccess` — and `/brain` works per group DM. A brain's late background results post there only while the 15 minutes last; after that they stay in the brain's own app.
 

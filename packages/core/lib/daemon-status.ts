@@ -46,6 +46,8 @@ export interface DaemonSnapshot {
   totalCycles?: number;
   lastCycleReason?: string | null;
   workerHealth?: { processAlive?: boolean };
+  /** The Choomfie chat the session holds. */
+  chat?: { id?: string; cwd?: string; sdkSessionId?: string | null };
   updatedAt?: string;
 }
 
@@ -160,7 +162,14 @@ export async function readDaemonStatus(
   dataDir: string,
 ): Promise<DaemonSnapshot | null> {
   if ((await readLiveDaemonPid(daemonPidPath(dataDir))) === null) return null;
+  return readDaemonStateFile(dataDir);
+}
 
+/**
+ * The state file without the liveness check — which spawns `ps`. Only for a
+ * caller that already knows the daemon is up: a worker the daemon launched.
+ */
+export async function readDaemonStateFile(dataDir: string): Promise<DaemonSnapshot | null> {
   try {
     const snapshot = JSON.parse(
       await readFile(`${dataDir}/meta/daemon-state.json`, "utf-8"),
@@ -187,13 +196,12 @@ export async function isDaemonMode(dataDir: string): Promise<boolean> {
 export async function requestDaemonControl(
   dataDir: string,
   command: DaemonControlCommand,
-  opts: { requestedBy?: string; chatId?: string } = {},
+  opts: Omit<DaemonControlRequest, "command" | "requestedAt"> = {},
 ): Promise<void> {
   const request: DaemonControlRequest = {
+    ...opts,
     command,
     requestedAt: Date.now(),
-    requestedBy: opts.requestedBy,
-    chatId: opts.chatId,
   };
   await writeJsonAtomic(daemonControlPath(dataDir), request);
 }

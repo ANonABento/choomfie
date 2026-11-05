@@ -62,14 +62,9 @@ async function handledByOtherBrain(
     });
     return true;
   }
-  if (!brain?.reset) {
-    await interaction.reply({
-      content: brain ? `**${name}** can't start over from here.` : `The \`${brainId}\` brain isn't loaded right now.`,
-      flags: MessageFlags.Ephemeral,
-    });
-    return true;
-  }
-  await brain.reset(interaction.channelId);
+  // A new chat bound here; the old one stays in `/chat list` to come back to.
+  ctx.chats.start(interaction.channelId, brainId);
+  await brain?.reset?.(interaction.channelId);
   await interaction.reply({
     embeds: [
       new EmbedBuilder()
@@ -77,7 +72,7 @@ async function handledByOtherBrain(
         .setTitle(`Fresh ${name} conversation`)
         .setDescription(
           `My next message to ${name} from this channel starts a new chat. ` +
-            "The old one is still in its app if you need it. Claude's session and other channels are untouched.",
+            "The old one is in `/chat list` if you want it back. Claude's session and other channels are untouched.",
         ),
     ],
   });

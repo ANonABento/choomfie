@@ -138,3 +138,6 @@ export {
   type BrainReply,
   type BrainApproval,
 } from "./brains.ts";
+
+// Chats (location → conversation bindings)
+export { CHAT_TITLE_MAX, UNTITLED_CHAT, titleFrom, type ChatRecord, type ChatsApi } from "./chat.ts";
