@@ -1,0 +1,43 @@
+# Web brains (`@choomfie/webbrain`)
+
+A web brain answers Discord messages by driving a chat website in a headless browser, logged in as the owner. Waymond (Ambition) is the first. The kit in `packages/webbrain/` owns everything that isn't the site, so adding one is a single adapter file.
+
+## Writing one
+
+```ts
+// plugins/<id>/index.ts
+import { defineWebBrain } from "@choomfie/webbrain";
+import { myAdapter } from "./adapter.ts";
+export { myAdapter as adapter };          // `webbrain login <id>` finds it here
+export default defineWebBrain(myAdapter);
+```
+
+`SiteAdapter` (`packages/webbrain/adapter.ts`) has one required method:
+
+- **`turn(page, { text, files }, t)`** — send one message in conversation `t.ref` (undefined → start a new one) and return `{ text, ref, choices?, approvals?, stopped?, background?, lastMessageId?, messageIds? }`. Call `t.started(ref)` as soon as the conversation id is known. Use `t.human.type()` / `t.human.submit()` for input, `t.progress(line)` for long turns, `t.notice(line)` for something the owner must act on, and check `t.stopRequested()` while waiting. Throw `LoginRequiredError` when the site wants a login, `LayoutChangedError` when a control is missing.
+
+Optional: `stop(page, ref)` (called on the same tab while `turn` runs), `readLate(page, ref, afterId, posted)` for background results, `resolveApproval(page, ref, id, approve)`, `framePrompt(content, meta)`.
+
+Prefer the site's own JSON endpoints for reading answers (`pageFetch(page, url)` fetches from inside the logged-in page) over scraping rendered text. Then add the package to `PLUGIN_PACKAGES` in `packages/core/lib/plugins.ts` and the root `package.json` dependencies, run `bun install`, `bun run webbrain login <id>`, enable it with `/plugins`, and `/brain <id>` in a channel.
+
+## What the kit does
+
+| | |
+|---|---|
+| **Tabs** (`tabs.ts`) | One persistent browser per site; one tab per chat. The same chat runs one turn at a time; different chats run side by side. Max 3 tabs (an idle chat's tab is reused, least recently used first; if all are busy, the next waits). The browser closes after 10 min idle. |
+| **Launch** (`engine/launch.ts`) | Patchright on installed Chrome (bundled Chromium as fallback), the site's own profile in `<data>/webbrain/<id>/profile`, real window size, the machine's locale and timezone — the same every launch. No fingerprint rotation: consistency matters more than randomness for a logged-in account. |
+| **Pacing** (`engine/human.ts`) | Short messages typed with jittered key timing; long or multi-line ones pasted (Enter sends in most composers). Submits to one site are spaced ≥1.5s plus jitter across all its tabs. |
+| **Discord** (`define.ts`) | Typing indicator; one self-updating status line after 45s; attachments copied under their original names; prompts from non-owners say who is talking; stopped / background answers say so. |
+| **Chats** | The conversation id is stored on the chat record (`ctx.chats`), so `/chat list|resume` and `/clear` work for every web brain. |
+| **Late results** (`watch.ts`) | After a `background` answer, polls `readLate` every minute for up to 3h and posts what lands. In memory: a restart drops the watch. |
+
+## Owner commands
+
+- `bun run webbrain login <id>` — opens the site headed on its profile; sign in, close the window. Refuses while the profile is open elsewhere (Chrome's `SingletonLock`).
+- `CHOOMFIE_<ID>_HEADED=1` — run that site's browser visibly, for debugging.
+
+A site that kept state in `<data>/<id>/` before the kit (Waymond) has it moved to `<data>/webbrain/<id>/` on first start.
+
+## Caveat
+
+Automating a site's web UI is usually against its terms, and an account can be flagged whatever the tooling. Patchright lowers detection, it doesn't remove it. Where a site has an official API, use that instead.

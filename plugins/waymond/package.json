@@ -1,14 +1,14 @@
 {
   "name": "@choomfie/waymond",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "main": "index.ts",
   "license": "MIT",
   "scripts": {
-    "login": "bun login.ts"
+    "login": "bun ../../packages/webbrain/cli.ts login waymond"
   },
   "dependencies": {
     "@choomfie/shared": "workspace:*",
-    "patchright": "1.64.1"
+    "@choomfie/webbrain": "workspace:*"
   }
 }

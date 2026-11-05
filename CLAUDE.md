@@ -19,6 +19,7 @@ This file holds the architecture and the rules that constrain changes. Inventori
 | [docs/architecture.md](docs/architecture.md), [docs/supervisor-architecture.md](docs/supervisor-architecture.md) | Full supervisor/worker design |
 | [docs/voice-plugin.md](docs/voice-plugin.md) | Voice providers, audio pipeline, setup |
 | [docs/plugin-api.md](docs/plugin-api.md), [docs/plugins.md](docs/plugins.md) | Writing plugins |
+| [docs/webbrain.md](docs/webbrain.md) | Web brains: site adapters, the tab pool, stealth launch, login |
 | [docs/testing.md](docs/testing.md), [docs/roadmap.md](docs/roadmap.md) | Test strategy, what's done and what isn't |
 
 ## Project Structure
@@ -33,6 +34,8 @@ packages/
                #   interactions.ts (dispatch), register.ts (typed wrappers),
                #   plugins.ts (explicit workspace package map), tools/, handlers/
     test/, scripts/, skills/, bin/
+  webbrain/    # @choomfie/webbrain — kit that turns a chat website into a brain
+               #   (adapter contract, tab pool, Patchright launch); see docs/webbrain.md
 plugins/       # voice, browser, tutor, socials, waymond — workspace packages, each an
                #   index.ts exporting a Plugin
 docs/, .claude-plugin/, .mcp.json
