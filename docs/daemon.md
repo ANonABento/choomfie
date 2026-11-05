@@ -40,6 +40,15 @@ The context monitor checks every 60s, on a timer that knows nothing about turns.
 - **Hard ceiling:** at `hardCeiling()` the cycle is forced even mid-task (`token_ceiling`). That is 1.5× `tokenThreshold` (180k by default), capped at 90% of the model's reported window and never below the threshold
 - Not deferred: worker-unhealthy cycles and `/compact` / `/clear`. They still wait for an in-flight turn before taking the summary
 
+### Which Model a Session Actually Runs
+
+Daemon sessions run the Claude Code build **bundled inside the Agent SDK**, not the `claude` on PATH that foreground mode uses. That bundled build resolves model aliases, so with `"model": "opus"` a stale SDK in `bun.lock` quietly pins the daemon to an older Opus while foreground gets the current one. This happened: the SDK was declared in both the root and `packages/core` manifests, only the root was bumped, and the daemon ran Opus 4.7.
+
+- The SDK is declared **only** in `packages/core/package.json`; `test/regression/agent-sdk-single-copy.test.ts` fails on a second declaration or a second resolved version
+- Each session's `system/init` message gives the resolved model and bundled Claude Code version. They are logged, written to `daemon-state.json` as `resolvedModel` / `claudeCodeVersion`, and shown by `/usage` and `--status` as `opus → claude-…`
+- If the bundled Claude Code is older than `claude --version`, the daemon logs a WARNING. Fix: `bun update @anthropic-ai/claude-agent-sdk` in `packages/core`, then restart the daemon
+- To pin a model regardless of SDK version, set `model` to a full ID instead of an alias
+
 ### Usage Reporting (`/usage`)
 
 Plan limits come from the SDK's `rate_limit_event`, normalised in `packages/core/daemon/rate-limit.ts` and persisted to `meta/daemon-state.json` as `rateLimit`.
@@ -47,7 +56,7 @@ Plan limits come from the SDK's `rate_limit_event`, normalised in `packages/core
 - **The payload does not match the SDK's own types.** `SDKRateLimitInfo` declares a single flat window (`utilization`, `resetsAt`, `rateLimitType`); some builds instead send an undeclared `unifiedWindows` object holding *every* window at once, with the flat fields describing only the tightest. Observed both shapes from the same CLI build — a bare `query()` sent `unifiedWindows`, the daemon's session sent only the flat fields. `parseRateLimitInfo` prefers `unifiedWindows` and falls back, and `/usage` labels the result "binding window only" when just one arrived, so a single bar is never passed off as the whole picture
 - A payload with a utilization but no `rateLimitType` and no `unifiedWindows` is **dropped**: an unlabelled percentage can't be attributed to a limit
 - `state.rateLimit` is account-level and deliberately **not** reset by `startSession` — `/usage` still answers right after a cycle. `state.modelUsage` is per-session and is reset
-- `modelUsage` and `total_cost_usd` on a result are **session-cumulative** (verified: a model's `inputTokens` climbs across results), so they are assigned, not accumulated. `usage.input_tokens` is per-turn and *is* accumulated. Getting these backwards silently double-counts
+- `modelUsage` and `total_cost_usd` on a result are **session-cumulative** (verified: a model's `inputTokens` climbs across results), so they are assigned, not accumulated. `usage` (input + cache read + cache write — `input_tokens` alone is ~2 per call once cached) and the turn count (one per result; `num_turns` is round-trips within one prompt) are per-turn and *are* accumulated. Getting these backwards silently double-counts
 - Set `--verbose` to dump each raw `rate_limit_event`; it is the only way to see which fields a given CLI build actually sends
 
 ### Daemon Control Channel

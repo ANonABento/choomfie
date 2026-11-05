@@ -1,6 +1,7 @@
 import type {
   ModelUsage,
   Query,
+  SDKResultMessage,
   SDKResultSuccess,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -90,7 +91,7 @@ export type MetaState = {
   restartBackoff: number;
   pushMessage: ((msg: SDKUserMessage) => void) | null;
   closeGenerator: (() => void) | null;
-  resultWaiters: Array<(result: SDKResultSuccess) => void>;
+  resultWaiters: Array<(result: SDKResultMessage) => void>;
   lastAssistantText: string | null;
   workerHealth: WorkerHealthStatus;
   workerHealthTimer: ReturnType<typeof setInterval> | null;
@@ -126,4 +127,10 @@ export type MetaState = {
   thresholds: DaemonThresholds;
   /** Model settings for this run, from config.json. Applied to every session. */
   models: ModelSettings;
+  /**
+   * What the session actually runs, from its `system/init` message. `models.model`
+   * may be an alias ("opus") resolved by the SDK's bundled Claude Code, so this
+   * is the only place the real model shows up. Null until init arrives.
+   */
+  resolved: { model: string | null; claudeCodeVersion: string | null };
 };

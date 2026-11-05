@@ -42,7 +42,7 @@ export async function getTokenUsageToday(ctx: Pick<AppContext, "DATA_DIR">): Pro
       await readFile(join(ctx.DATA_DIR, "meta", "daemon-state.json"), "utf-8")
     ) as DaemonState;
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Date().toLocaleDateString("en-CA"); // local date, as the daemon writes it
     if (daemonState.tokenUsageToday?.date === today) {
       const inputTokens = Number(daemonState.tokenUsageToday.inputTokens ?? 0);
       if (!Number.isFinite(inputTokens) || inputTokens < 0) return 0;
@@ -93,7 +93,7 @@ export async function buildStatsEmbed(ctx: AppContext): Promise<EmbedBuilder> {
       { name: "Uptime", value: uptime, inline: true },
       { name: "Messages Handled", value: `${messagesHandled} total (${ctx.messageStats.received} in / ${ctx.messageStats.sent} out)`, inline: true },
       { name: "Current Persona", value: `**${persona.name}** (\`${personaKey}\`)`, inline: true },
-      { name: "Token Usage Today", value: `${tokenUsageToday.toLocaleString()} input tokens`, inline: true },
+      { name: "Token Usage Today", value: `${tokenUsageToday.toLocaleString()} input tokens (incl. cached)`, inline: true },
       { name: "Active Plugins", value: activePlugins.slice(0, 1024), inline: false },
       { name: "Top Tools", value: topToolsText.slice(0, 1024), inline: false },
     )

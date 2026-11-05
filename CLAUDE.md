@@ -148,7 +148,7 @@ Shapes and constraints that don't announce themselves. Getting one wrong compile
 **Rate limits and usage**
 - The SDK's `rate_limit_event` payload **does not match the SDK's own types.** `SDKRateLimitInfo` declares one flat window; some builds instead send an undeclared `unifiedWindows` object holding every window, with the flat fields describing only the tightest. `parseRateLimitInfo` prefers `unifiedWindows` and falls back; `/usage` labels a lone window "binding window only".
 - **The snapshot only updates on a turn.** An idle session's figures stop moving and go stale — observed 10.9h old, still rendering a window that had reset hours earlier. `isRateLimitStale` / `viewRateLimitWindows` in `lib/daemon-status.ts` are the single source of truth for "is this still true"; both `/usage` and the alerter go through them.
-- `modelUsage` and `total_cost_usd` on a result are **session-cumulative** (verified: a model's `inputTokens` climbs across results), so they are assigned, not accumulated. `usage.input_tokens` is per-turn and *is* accumulated. Getting these backwards silently double-counts.
+- `modelUsage` and `total_cost_usd` on a result are **session-cumulative** (verified: a model's `inputTokens` climbs across results), so they are assigned, not accumulated. `usage` (input + cache read + cache write — `input_tokens` alone is ~2 per call once cached) and the turn count (one per result; `num_turns` is round-trips within one prompt) are per-turn and *are* accumulated. Getting these backwards silently double-counts.
 - `state.rateLimit` is account-level and deliberately **not** reset by `startSession`. `state.modelUsage` is per-session and is reset.
 
 ## Key Details

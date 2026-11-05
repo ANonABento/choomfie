@@ -21,6 +21,10 @@ export async function writeDaemonState(state: MetaState): Promise<void> {
     // null rather than omitted, so readers can tell "default" from "not reported".
     model: state.models.model ?? null,
     fallbackModel: state.models.fallbackModel ?? null,
+    // What `model` actually resolved to — an alias like "opus" is resolved by
+    // the SDK's bundled Claude Code, which can lag the installed CLI.
+    resolvedModel: state.resolved.model,
+    claudeCodeVersion: state.resolved.claudeCodeVersion,
     turns: { current: state.turnCount, threshold: state.thresholds.turnThreshold },
     // Live context size, which is what `shouldCycle` compares against the
     // threshold. Null until the first check lands. Replaces a `tokens.current`
@@ -33,7 +37,7 @@ export async function writeDaemonState(state: MetaState): Promise<void> {
       checkedAt: state.context.checkedAt,
       threshold: state.thresholds.tokenThreshold,
     },
-    /** Everything the session has ever read in. Only grows; never cycles. */
+    /** Input tokens (cache included) this session has read in. Resets each cycle. */
     cumulativeInputTokens: state.totalInputTokens,
     tokenUsageToday: state.tokenUsageToday,
     /** Per-model token and cost breakdown for this session. */

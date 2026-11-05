@@ -191,6 +191,11 @@ export function createSession(
       env: {
         ...process.env,
         CHOOMFIE_DAEMON_PID: String(process.pid),
+        // claude.ai connectors (Notion, Drive, Docs, ...) put their server
+        // instructions and tool names into every session's context. The
+        // persona never uses them, and that context is re-read on every turn.
+        // bin/choomfie sets the same default for foreground sessions.
+        ENABLE_CLAUDEAI_MCP_SERVERS: process.env.ENABLE_CLAUDEAI_MCP_SERVERS ?? "false",
       },
     },
   });

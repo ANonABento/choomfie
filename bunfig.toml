@@ -1,0 +1,5 @@
+[test]
+# Point every test at a throwaway data dir. Daemon code writes state files at
+# import-time paths, so without this a test could overwrite a live daemon's
+# meta/daemon-state.json (it did).
+preload = ["./test/isolate-data-dir.ts"]

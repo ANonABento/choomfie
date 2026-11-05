@@ -27,7 +27,6 @@
     "*.ts": "eslint --fix"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.87",
     "@choomfie/browser": "workspace:*",
     "@choomfie/core": "workspace:*",
     "@choomfie/shared": "workspace:*",
