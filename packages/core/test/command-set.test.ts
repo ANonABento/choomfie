@@ -139,6 +139,10 @@ describe("/stop and /brain", () => {
       const set = fakeInteraction({ opts: { name: "tb" } });
       await commands.get("brain")!.handler(set.interaction as never, ctx as never);
       expect(map.chan1).toBe("tb");
+      expect(set.replies[0].content).toBe(
+        "**TB** answers you in this channel. Others on your allowlist get Claude. " +
+          "To let them use TB too: `/config setting:brainAccess value:allowlist`"
+      );
 
       const back = fakeInteraction({ opts: { name: "claude" } });
       await commands.get("brain")!.handler(back.interaction as never, ctx as never);

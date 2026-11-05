@@ -89,7 +89,9 @@ registerCommand("brain", {
         `**${label(current)}** answers here (${source}).`,
         current === CLAUDE_BRAIN
           ? ""
-          : `Answers: ${ctx.config.getBrainAccess() === "owner" ? "owner only" : "everyone on the allowlist"}; others get Claude.`,
+          : ctx.config.getBrainAccess() === "owner"
+            ? `It answers you; others on your allowlist get Claude. To let them use ${label(current)} too: \`/config setting:brainAccess value:allowlist\``
+            : `It answers everyone on your allowlist. To keep it to yourself: \`/config setting:brainAccess value:owner\``,
         `Loaded brains: ${listBrainIds().map((b) => `\`${b}\``).join(", ")} · \`/brain <name>\` to switch`,
       ].filter(Boolean);
       await reply(lines.join("\n"));
@@ -104,12 +106,15 @@ registerCommand("brain", {
     // `claude` clears the override, so a thread falls back to its parent again.
     ctx.config.setChannelBrain(channelId, wanted === CLAUDE_BRAIN ? undefined : wanted);
     const now = resolveBrainId(channelId, parentId, (id) => ctx.config.getChannelBrain(id));
-    const who = ctx.config.getBrainAccess() === "owner" ? "only you" : "everyone on the allowlist";
+    const name = label(now);
     await interaction.reply(
       now === CLAUDE_BRAIN
         ? "This channel is answered by **Claude**."
-        : `This channel is now answered by **${label(now)}** — for ${who}. Others still get Claude. ` +
-            "Change who with `/config setting:brainAccess`."
+        : ctx.config.getBrainAccess() === "owner"
+          ? `**${name}** answers you in this channel. Others on your allowlist get Claude. ` +
+            `To let them use ${name} too: \`/config setting:brainAccess value:allowlist\``
+          : `**${name}** answers everyone on your allowlist in this channel. ` +
+            "To keep it to yourself: `/config setting:brainAccess value:owner`"
     );
   },
 });
