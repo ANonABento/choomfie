@@ -690,7 +690,7 @@ export async function cycleSession(
     state.chat.cwd = options.nextChat.cwd;
     nextSummary = options.resume ? state.chat.seeds[options.nextChat.id] : undefined;
   }
-  const switched = options.requestedCommand === "new" || options.requestedCommand === "resume";
+  const switched = options.requestedCommand === "resume";
 
   // Recorded either way: handoffs.json is the log of what happened to sessions,
   // and a cleared one is exactly the entry you want when the next session turns
@@ -743,19 +743,14 @@ export function announcementFor(
   switch (options.requestedCommand) {
     case "resume":
       return (
-        `An earlier conversation${title} was just resumed from Discord with /chat resume — ` +
+        `An earlier conversation${title} was just resumed from Discord with /resume — ` +
         `the history above is that conversation, picked up where it left off. ${where}`
-      );
-    case "new":
-      return (
-        `A new conversation${title} was just started from Discord with /chat new — you have no ` +
-        `memory of the previous one, though saved memories and reminders are untouched. ${where}`
       );
     case "clear":
       return (
         "A /clear was just requested from Discord and your session has been replaced.\n" +
         "Context was cleared — you have no memory of the previous conversation, " +
-        "though saved memories and reminders are untouched. "
+        `though saved memories and reminders are untouched. ${where}`
       );
     default:
       return (
@@ -811,15 +806,15 @@ export function startControlMonitor(state: MetaState): void {
       }
 
       state.lastCycleReason = `requested_${request.command}`;
-      if (request.command === "new" || request.command === "resume") {
+      if (request.command === "resume") {
         // The outgoing session needs no summary: its transcript is kept, and
         // resuming it later loads that directly.
         await cycleSession(state, state.context.tokens ?? undefined, {
           skipHandoff: true,
           announceTo: request.chatId,
-          requestedCommand: request.command,
+          requestedCommand: "resume",
           nextChat: { id: request.targetChat!, cwd: usableCwd(request.cwd) },
-          resume: request.command === "resume" ? request.sdkSessionId : undefined,
+          resume: request.sdkSessionId,
           chatTitle: request.title,
         });
         return;
@@ -828,8 +823,10 @@ export function startControlMonitor(state: MetaState): void {
         skipHandoff: request.command === "clear",
         announceTo: request.chatId,
         requestedCommand: request.command,
-        // A cleared session is a new chat (same cwd); a compacted one carries on.
-        ...(request.command === "clear" ? { nextChat: freshChat(state.chat.cwd) } : {}),
+        // A cleared session is a new chat (same cwd unless asked); a compacted one carries on.
+        ...(request.command === "clear"
+          ? { nextChat: freshChat(request.cwd ? usableCwd(request.cwd) : state.chat.cwd) }
+          : {}),
       });
     } catch (error: unknown) {
       log(`Control request failed: ${getErrorMessage(error)}`);

@@ -3,7 +3,7 @@
  *
  * Until sessions can run side by side (one per chat), every Claude location
  * shares the daemon's one session — so Claude chats are bound to a single
- * global location rather than to the channel you're in. `/chat resume` on a
+ * global location rather than to the channel you're in. `/resume` on a
  * Claude chat swaps the session for everyone, which is why it is owner-only.
  *
  * The daemon decides which chat its session holds (its id, cwd and live SDK

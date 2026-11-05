@@ -4,15 +4,13 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CLAUDE_BRAIN, parseDaemonControlRequest, titleFrom, UNTITLED_CHAT } from "@choomfie/shared";
 import { ChatStore } from "../lib/chats/store.ts";
 import { applyClaudeHold, CLAUDE_GLOBAL } from "../lib/chats/claude.ts";
-import { shortPath } from "../lib/chats/here.ts";
-import { resolveChatCwd } from "../lib/handlers/chat-command.ts";
-import { importLegacyChatMap } from "../../../plugins/waymond/index.ts";
+import { resolveChatCwd, shortPath } from "../lib/chats/here.ts";
 import { parseChatState, withSeed } from "../daemon/chat-state.ts";
 import { announcementFor } from "../daemon/runtime.ts";
 import { PLUGIN_DIR } from "../daemon/constants.ts";
@@ -121,31 +119,6 @@ describe("Claude chat from the daemon's snapshot", () => {
   });
 });
 
-describe("Waymond's legacy chats.json", () => {
-  test("is imported once and set aside", () => {
-    const chats = store();
-    const dir = tmp();
-    const path = join(dir, "chats.json");
-    writeFileSync(path, JSON.stringify({ chan1: "conv-a", chan2: "conv-b", bad: 4 }));
-    expect(importLegacyChatMap(path, chats)).toBe(2);
-    expect(chats.bound("chan1", "waymond")?.backendRef).toBe("conv-a");
-    expect(existsSync(path)).toBe(false);
-    expect(existsSync(`${path}.migrated`)).toBe(true);
-    expect(importLegacyChatMap(path, chats)).toBe(0);
-  });
-
-  test("never overwrites a chat that already exists", () => {
-    const chats = store();
-    const dir = tmp();
-    const path = join(dir, "chats.json");
-    const existing = chats.current("chan1", "waymond");
-    chats.setBackendRef(existing.id, "newer");
-    writeFileSync(path, JSON.stringify({ chan1: "older" }));
-    importLegacyChatMap(path, chats);
-    expect(chats.bound("chan1", "waymond")?.backendRef).toBe("newer");
-  });
-});
-
 describe("cwd allowlist", () => {
   test("allows a root and anything under it, refuses siblings and missing paths", () => {
     const root = tmp();
@@ -178,16 +151,16 @@ describe("cwd allowlist", () => {
   });
 });
 
-describe("daemon control: new and resume", () => {
+describe("daemon control: clear and resume", () => {
   const base = { requestedAt: Date.now() };
-  test("carry the chat, session and cwd", () => {
+  test("resume carries the chat, session and cwd; clear can carry a cwd", () => {
     const r = parseDaemonControlRequest({ ...base, command: "resume", targetChat: "c1", sdkSessionId: "s1", cwd: "/p", title: "t" });
     expect(r).toMatchObject({ command: "resume", targetChat: "c1", sdkSessionId: "s1", cwd: "/p", title: "t" });
-    expect(parseDaemonControlRequest({ ...base, command: "new", targetChat: "c2" })?.command).toBe("new");
+    expect(parseDaemonControlRequest({ ...base, command: "clear", cwd: "/q" })?.cwd).toBe("/q");
+    expect(parseDaemonControlRequest({ ...base, command: "new", targetChat: "c2" })).toBeNull();
   });
 
-  test("are refused without what the daemon needs to act", () => {
-    expect(parseDaemonControlRequest({ ...base, command: "new" })).toBeNull();
+  test("resume is refused without what the daemon needs to act", () => {
     expect(parseDaemonControlRequest({ ...base, command: "resume", targetChat: "c1" })).toBeNull();
   });
 });
@@ -212,7 +185,7 @@ describe("daemon chat state", () => {
 
   test("the replacement session is told what happened", () => {
     expect(announcementFor({ requestedCommand: "resume", chatTitle: "arm" }, undefined, PLUGIN_DIR)).toContain('"arm" was just resumed');
-    expect(announcementFor({ requestedCommand: "new" }, undefined, "/tmp/x")).toContain("working in /tmp/x");
+    expect(announcementFor({ requestedCommand: "clear" }, undefined, "/tmp/x")).toContain("working in /tmp/x");
     expect(announcementFor({ requestedCommand: "clear" }, undefined, PLUGIN_DIR)).toContain("/clear");
     expect(announcementFor({ requestedCommand: "compact" }, "sum", PLUGIN_DIR)).toContain("compacted");
   });

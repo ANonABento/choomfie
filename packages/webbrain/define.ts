@@ -17,7 +17,6 @@ import {
   titleFrom,
   unregisterBrain,
   type Brain,
-  type ChatsApi,
   type Plugin,
   type PluginContext,
 } from "@choomfie/shared";
@@ -25,7 +24,7 @@ import type { Page } from "patchright";
 import { LoginRequiredError, type SiteAdapter, type TurnContext, type TurnResult } from "./adapter.ts";
 import { launchContext } from "./engine/launch.ts";
 import { createHuman, Pacer } from "./engine/human.ts";
-import { adoptLegacyDir, outboxDir, profileDir } from "./paths.ts";
+import { outboxDir, profileDir } from "./paths.ts";
 import { TabPool, type ContextLike } from "./tabs.ts";
 import { LateWatch } from "./watch.ts";
 
@@ -36,8 +35,6 @@ export interface WebBrainOptions {
   idleCloseMs?: number;
   /** Whole-turn timeout. Default 15 min. */
   turnTimeoutMs?: number;
-  /** Extra setup once the chat store is available (e.g. importing old state). */
-  onInit?(ctx: PluginContext, chats: ChatsApi): void;
   /** Replace the browser launch (tests, or another engine). Gets the site's profile dir. */
   launch?(profileDir: string): Promise<ContextLike<Page>>;
 }
@@ -93,8 +90,6 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
   function createBrain(ctx: PluginContext): Brain {
     const chats = ctx.chats;
     if (!chats) throw new Error(`${adapter.label} needs Choomfie's chat store (ctx.chats)`);
-    if (adoptLegacyDir(ctx.DATA_DIR, adapter.id)) console.error(`[${adapter.id}] moved its state to webbrain/${adapter.id}`);
-    opts.onInit?.(ctx, chats);
 
     const profile = profileDir(ctx.DATA_DIR, adapter.id);
     const outbox = outboxDir(ctx.DATA_DIR, adapter.id);

@@ -17,7 +17,7 @@ import { resolveDataDir } from "@choomfie/shared";
 import type { SiteAdapter } from "./adapter.ts";
 import { doctor, PONG_PROMPT } from "./doctor.ts";
 import { launchContext } from "./engine/launch.ts";
-import { adoptLegacyDir, profileDir, profileInUse } from "./paths.ts";
+import { profileDir, profileInUse } from "./paths.ts";
 import { record } from "./record.ts";
 
 const USAGE = [
@@ -41,7 +41,6 @@ async function loadAdapter(id: string): Promise<SiteAdapter> {
 }
 
 async function login(dataDir: string, adapter: SiteAdapter) {
-  adoptLegacyDir(dataDir, adapter.id);
   const dir = profileDir(dataDir, adapter.id);
   if (profileInUse(dir)) {
     throw new Error(

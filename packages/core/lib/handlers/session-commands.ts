@@ -15,8 +15,12 @@
  * Both follow the channel's brain (`/brain`). In a channel answered by another
  * brain, Claude's shared session isn't what's talking, so `/clear` starts a
  * fresh conversation with *that* brain for this channel only — no daemon
- * needed, no confirm (the old conversation still exists on the brain's side) —
- * and `/compact` explains that the brain manages its own context.
+ * needed, no confirm — and `/compact` explains that the brain manages its own
+ * context.
+ *
+ * `/clear` is also how a new chat starts: the old one is kept and `/resume`
+ * brings it back. For Claude, `cwd:` starts the new chat in another project
+ * (one of config `chatRoots`).
  */
 
 import {
@@ -32,7 +36,9 @@ import {
 import type { DaemonControlCommand } from "@choomfie/shared";
 import { registerCommand, registerButtonHandler } from "../register.ts";
 import { isDaemonMode, requestDaemonControl } from "../daemon-status.ts";
-import { ANYWHERE, CLAUDE_BRAIN, getBrain } from "@choomfie/shared";
+import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain } from "@choomfie/shared";
+import { randomUUID } from "node:crypto";
+import { resolveChatCwd, shortPath } from "../chats/here.ts";
 import { botIsAbsent } from "../ask-relay.ts";
 import { requireOwner } from "./shared.ts";
 import { parentChannelId, resolveBrainId } from "../brain-router.ts";
@@ -54,6 +60,13 @@ async function handledByOtherBrain(
 
   const brain = getBrain(brainId);
   const name = brain?.label ?? brainId;
+  if (command === "clear" && interaction.options.getString("cwd")) {
+    await interaction.reply({
+      content: `\`cwd\` only applies to Claude chats; **${name}** runs in its own app.`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
   if (command === "compact") {
     await interaction.reply({
       content: `This channel is answered by **${name}**, which manages its own context — nothing to compact. ` +
@@ -62,7 +75,7 @@ async function handledByOtherBrain(
     });
     return true;
   }
-  // A new chat bound here; the old one stays in `/chat list` to come back to.
+  // A new chat bound here; `/resume` brings the old one back.
   ctx.chats.start(interaction.channelId, brainId);
   await brain?.reset?.(interaction.channelId);
   await interaction.reply({
@@ -72,7 +85,7 @@ async function handledByOtherBrain(
         .setTitle(`Fresh ${name} conversation`)
         .setDescription(
           `My next message to ${name} from this channel starts a new chat. ` +
-            "The old one is in `/chat list` if you want it back. Claude's session and other channels are untouched.",
+            "`/resume` brings the old one back. Claude's session and other channels are untouched.",
         ),
     ],
   });
@@ -96,20 +109,23 @@ async function submit(
   interaction: ChatInputCommandInteraction | ButtonInteraction,
   ctx: AppContext,
   command: DaemonControlCommand,
+  cwd?: string,
 ): Promise<void> {
   await requestDaemonControl(ctx.DATA_DIR, command, {
     requestedBy: interaction.user.id,
     // The fresh session says hello here, unless this is a chat the bot can't post in.
     chatId: botIsAbsent(interaction) ? undefined : (interaction.channelId ?? undefined),
+    cwd,
   });
 
   const embed = new EmbedBuilder()
     .setColor(command === "clear" ? 0xed4245 : 0x57f287)
-    .setTitle(command === "clear" ? "Clearing context" : "Compacting context")
+    .setTitle(command === "clear" ? "Starting a new chat" : "Compacting context")
     .setDescription(
       command === "clear"
-        ? "Starting a fresh session with nothing carried over. Saved memories, " +
-          "reminders and personas are untouched."
+        ? "Starting a new chat with nothing carried over" +
+          (cwd ? `, working in \`${shortPath(cwd)}\`` : "") +
+          ". `/resume` brings the old one back. Saved memories, reminders and personas are untouched."
         : "Summarising the conversation and starting a fresh session with it. " +
           "Who you were talking to and what about carries over.",
     )
@@ -149,14 +165,35 @@ registerCommand("compact", {
 // Behind a confirm button, which /compact is not. The session is shared: if
 // someone else is mid-conversation with Choomfie, this wipes it for them too,
 // and unlike /compact there is no summary to fall back on.
+/**
+ * cwd chosen for a /clear awaiting its confirm click. Button ids are capped at
+ * 100 chars, too short for a path, so the button carries a token. In memory: a
+ * restart expires it, and the click then says so instead of clearing elsewhere.
+ */
+const pendingCwds = new Map<string, string>();
+
 registerCommand("clear", {
   data: {
     ...new SlashCommandBuilder()
       .setName("clear")
-      .setDescription("Clear conversation history and start fresh (owner only)")
+      .setDescription("Start a new chat here; /resume brings the old one back (owner only)")
+      .addStringOption((o) =>
+        o.setName("cwd").setDescription("Claude only: work in this directory (one of chatRoots)").setAutocomplete(true),
+      )
       .toJSON(),
     // In a group DM answered by another brain, this is the only way to start it fresh.
     ...ANYWHERE,
+  },
+  // Config only — well inside Discord's 3s.
+  autocomplete: async (interaction, ctx) => {
+    const typed = interaction.options.getFocused().toLowerCase();
+    await interaction.respond(
+      ctx.config
+        .getChatRoots()
+        .filter((r) => r.toLowerCase().includes(typed))
+        .slice(0, AUTOCOMPLETE_LIMIT)
+        .map((r) => ({ name: shortPath(r).slice(0, 100), value: r.slice(0, 100) })),
+    );
   },
   handler: async (interaction, ctx) => {
     if (await requireOwner(interaction, ctx)) return;
@@ -170,19 +207,34 @@ registerCommand("clear", {
       return;
     }
 
+    let token = "";
+    let cwd: string | undefined;
+    const requested = interaction.options.getString("cwd")?.trim();
+    if (requested) {
+      const resolved = resolveChatCwd(requested, ctx.config.getChatRoots());
+      if ("error" in resolved) {
+        await interaction.reply({ content: resolved.error, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      cwd = resolved.cwd;
+      token = randomUUID().slice(0, 8);
+      pendingCwds.set(token, cwd);
+    }
+
     const embed = new EmbedBuilder()
       .setColor(0xfee75c)
-      .setTitle("Clear conversation history?")
+      .setTitle("Start a new chat?")
       .setDescription(
         "The next session starts with **no memory of this conversation** — " +
           "including anyone else mid-conversation with me right now.\n\n" +
-          "Saved memories, reminders and personas are untouched.\n" +
+          (cwd ? `It will work in \`${shortPath(cwd)}\`.\n` : "") +
+          "This chat is kept: `/resume` brings it back. Saved memories, reminders and personas are untouched.\n" +
           "Want the context freed but the gist kept? Use `/compact` instead.",
       );
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
-        .setCustomId("session:clear")
+        .setCustomId(token ? `session:clear:${token}` : "session:clear")
         .setLabel("Clear it")
         .setStyle(ButtonStyle.Danger),
       new ButtonBuilder()
@@ -219,6 +271,16 @@ registerButtonHandler("session", async (interaction, parts, ctx) => {
   }
 
   if (parts[1] === "clear") {
-    await submit(interaction, ctx, "clear");
+    const token = parts[2];
+    const cwd = token ? pendingCwds.get(token) : undefined;
+    if (token && !cwd) {
+      await interaction.update({
+        embeds: [new EmbedBuilder().setColor(0x99aab5).setDescription("That expired (I restarted) — run `/clear` again.")],
+        components: [],
+      });
+      return;
+    }
+    if (token) pendingCwds.delete(token);
+    await submit(interaction, ctx, "clear", cwd);
   }
 });

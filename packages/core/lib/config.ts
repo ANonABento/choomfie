@@ -91,7 +91,7 @@ export interface Config {
   /** Who a non-Claude brain answers: the owner only, or everyone on the allowlist. */
   brainAccess?: BrainAccess;
   /**
-   * Directories a Claude chat may be started in (`/chat new cwd:`), and
+   * Directories a Claude chat may be started in (`/clear cwd:`), and
    * everything under them. `~` expands. Empty = only the default (the plugin dir).
    * Edited in config.json: it widens what a bypassPermissions session can reach.
    */

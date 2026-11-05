@@ -28,7 +28,7 @@ Prefer the site's own JSON endpoints for reading answers (`pageFetch(page, url)`
 | **Launch** (`engine/launch.ts`) | Patchright on installed Chrome (bundled Chromium as fallback), the site's own profile in `<data>/webbrain/<id>/profile`, real window size, the machine's locale and timezone — the same every launch. No fingerprint rotation: consistency matters more than randomness for a logged-in account. |
 | **Pacing** (`engine/human.ts`) | Short messages typed with jittered key timing; long or multi-line ones pasted (Enter sends in most composers). Submits to one site are spaced ≥1.5s plus jitter across all its tabs. |
 | **Discord** (`define.ts`) | Typing indicator; one self-updating status line after 45s; attachments copied under their original names; prompts from non-owners say who is talking; stopped / background answers say so. |
-| **Chats** | The conversation id is stored on the chat record (`ctx.chats`), so `/chat list|resume` and `/clear` work for every web brain. |
+| **Chats** | The conversation id is stored on the chat record (`ctx.chats`), so `/resume` and `/clear` work for every web brain. |
 | **Late results** (`watch.ts`) | After a `background` answer, polls `readLate` every minute for up to 3h and posts what lands. In memory: a restart drops the watch. |
 
 ## Adding a site from a recording
