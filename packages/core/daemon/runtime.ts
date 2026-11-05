@@ -665,7 +665,7 @@ export async function cycleSession(
 }
 
 /**
- * Poll for `/compact` and `/clear` requests written by the worker.
+ * Poll for `/compact`, `/clear` and `/stop` requests written by the worker.
  *
  * A separate, faster timer than the health monitor: someone typed a command and
  * is watching Discord for a response, so 30s is far too long to wait.
@@ -686,6 +686,19 @@ export function startControlMonitor(state: MetaState): void {
         `Control request: ${request.command}` +
           (request.requestedBy ? ` from ${request.requestedBy}` : "")
       );
+      if (request.command === "stop") {
+        // Keep the session; interrupt only the turn in flight, like Esc in
+        // Claude Code. The interrupted turn still ends in a result, which
+        // clears turnInFlight as usual.
+        if (!state.turnInFlight) {
+          log("Nothing to stop: no turn in flight");
+          return;
+        }
+        await state.session.interrupt();
+        log("Interrupted the turn in flight");
+        return;
+      }
+
       state.lastCycleReason = `requested_${request.command}`;
       await cycleSession(state, state.context.tokens ?? undefined, {
         skipHandoff: request.command === "clear",

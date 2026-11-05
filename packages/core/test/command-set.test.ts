@@ -120,10 +120,11 @@ describe("/stop and /brain", () => {
     }
   });
 
-  test("/stop in a Claude channel says it can't, instead of pretending", async () => {
+  test("/stop in a Claude channel outside daemon mode says where it works, instead of pretending", async () => {
     const { interaction, replies } = fakeInteraction();
     await commands.get("stop")!.handler(interaction as never, baseCtx() as never);
-    expect(replies[0].content).toContain("Claude can't be interrupted");
+    expect(replies[0].content).toContain("daemon mode");
+    expect(replies[0].content).toContain("Esc");
   });
 
   test("/brain with no name reports; /brain <name> switches; /brain claude clears", async () => {

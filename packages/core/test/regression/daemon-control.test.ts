@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   CONTROL_REQUEST_STALE_MS,
+  STOP_REQUEST_STALE_MS,
   daemonControlPath,
   isControlRequestStale,
   parseDaemonControlRequest,
@@ -158,5 +159,22 @@ describe("daemon side", () => {
 
     expect(await consumeControlRequest(path)).toBeNull();
     expect(existsSync(path)).toBe(false);
+  });
+});
+
+describe("stop", () => {
+  test("parses, and goes stale in seconds, not minutes", async () => {
+    const now = Date.now();
+    expect(parseDaemonControlRequest({ command: "stop", requestedAt: now })?.command).toBe("stop");
+    // A leftover stop must never cut off some later, unrelated turn.
+    expect(isControlRequestStale({ command: "stop", requestedAt: now - STOP_REQUEST_STALE_MS - 1 }, now)).toBe(true);
+    expect(isControlRequestStale({ command: "stop", requestedAt: now - 5_000 }, now)).toBe(false);
+    expect(STOP_REQUEST_STALE_MS).toBeLessThan(CONTROL_REQUEST_STALE_MS);
+  });
+
+  test("the worker writes one the daemon accepts", async () => {
+    const dir = newDataDir();
+    await requestDaemonControl(dir, "stop", { requestedBy: "owner" });
+    expect((await consumeControlRequest(daemonControlPath(dir)))?.command).toBe("stop");
   });
 });

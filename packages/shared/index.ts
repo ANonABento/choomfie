@@ -65,6 +65,7 @@ export {
 export {
   CONTROL_POLL_INTERVAL_MS,
   CONTROL_REQUEST_STALE_MS,
+  STOP_REQUEST_STALE_MS,
   daemonControlPath,
   isControlRequestStale,
   parseDaemonControlRequest,

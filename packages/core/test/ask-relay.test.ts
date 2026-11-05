@@ -12,7 +12,8 @@ import {
 } from "../lib/ask-relay.ts";
 import { postBrainReply } from "../lib/brain-router.ts";
 import { menuPrompt, replyExcerpt, replyPrompt } from "../lib/handlers/ask-command.ts";
-import { NO_ANSWER, REPLY_BUTTON_ID, questionHeader } from "../lib/ask-relay.ts";
+import { NO_ANSWER, REPLY_BUTTON_ID, questionHeader, settleAskRelays } from "../lib/ask-relay.ts";
+import { MODAL_MAX_FILES, askModal } from "../lib/handlers/ask-command.ts";
 import { jest } from "bun:test";
 import { discordTools } from "../lib/tools/discord-tools.ts";
 
@@ -213,4 +214,32 @@ test("a placeholder nobody answers says so before Discord gives up", async () =>
   } finally {
     jest.useRealTimers();
   }
+});
+
+test("/stop closes that chat's unanswered asks now, and leaves answered ones and other chats alone", async () => {
+  const waiting = fakeInteraction();
+  const answered = fakeInteraction();
+  const elsewhere = fakeInteraction();
+  openAskRelay("s1", interactionChannel(waiting), "gdmA");
+  const done = interactionChannel(answered);
+  openAskRelay("s2", done, "gdmA");
+  await done.send({ content: "already said" });
+  openAskRelay("s3", interactionChannel(elsewhere), "gdmB");
+
+  await settleAskRelays("gdmA", "⏹️ Stopped.");
+  expect(waiting.calls.map((c) => c.body.content)).toEqual(["⏹️ Stopped."]);
+  expect(answered.calls.map((c) => c.body.content)).toEqual(["already said"]);
+  expect(elsewhere.calls).toHaveLength(0);
+});
+
+test("the Reply and menu boxes take files as well as text", () => {
+  const json = askModal("ask:reply", "Reply to Choomfie", { label: "Your reply", required: true, placeholder: "…" }).toJSON() as {
+    custom_id: string;
+    components: { type: number; label: string; component: { type: number; custom_id: string; required?: boolean; max_values?: number } }[];
+  };
+  expect(json.custom_id).toBe("ask:reply");
+  const [text, files] = json.components;
+  expect(text.component).toMatchObject({ custom_id: "text", required: true });
+  expect(files.label).toBe("Attach files (optional)");
+  expect(files.component).toMatchObject({ type: 19, custom_id: "files", required: false, max_values: MODAL_MAX_FILES });
 });

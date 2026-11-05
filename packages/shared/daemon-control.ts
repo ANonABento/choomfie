@@ -9,7 +9,7 @@
  *
  * Only the daemon owns the Claude session, so only the daemon can replace it.
  * `/compact` and `/clear` in Discord write a request here; the daemon polls,
- * consumes it, and cycles.
+ * consumes it, and cycles. `/stop` interrupts the turn in flight instead.
  */
 
 /** How often the daemon checks for a request. Short: a person is waiting. */
@@ -25,11 +25,18 @@ export const CONTROL_POLL_INTERVAL_MS = 2_000;
 export const CONTROL_REQUEST_STALE_MS = 2 * 60_000;
 
 /**
+ * A `/stop` goes stale much sooner: it means "the reply I'm watching", and a
+ * leftover one must never cut off some later, unrelated turn.
+ */
+export const STOP_REQUEST_STALE_MS = 20_000;
+
+/**
  * `compact` keeps a handoff summary (Claude Code's `/compact`); `clear` starts
  * the next session with nothing (Claude Code's `/clear`). Neither touches
- * memories, reminders or personas — those live in SQLite.
+ * memories, reminders or personas — those live in SQLite. `stop` interrupts
+ * the turn in progress (Esc in Claude Code) and keeps the session.
  */
-export type DaemonControlCommand = "compact" | "clear";
+export type DaemonControlCommand = "compact" | "clear" | "stop";
 
 export type DaemonControlRequest = {
   command: DaemonControlCommand;
@@ -56,7 +63,7 @@ export function parseDaemonControlRequest(
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
 
-  if (raw.command !== "compact" && raw.command !== "clear") return null;
+  if (raw.command !== "compact" && raw.command !== "clear" && raw.command !== "stop") return null;
   if (typeof raw.requestedAt !== "number") return null;
 
   return {
@@ -72,5 +79,6 @@ export function isControlRequestStale(
   request: DaemonControlRequest,
   now: number = Date.now(),
 ): boolean {
-  return now - request.requestedAt > CONTROL_REQUEST_STALE_MS;
+  const limit = request.command === "stop" ? STOP_REQUEST_STALE_MS : CONTROL_REQUEST_STALE_MS;
+  return now - request.requestedAt > limit;
 }

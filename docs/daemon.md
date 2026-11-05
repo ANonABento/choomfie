@@ -54,7 +54,7 @@ Plan limits come from the SDK's `rate_limit_event`, normalised in `packages/core
 
 The worker sits two processes below the daemon (daemon → Agent SDK → claude CLI → supervisor → worker), so there is no IPC between them. `meta/worker-health.json` carries the worker's heartbeat up; `meta/control.json` carries requests down. Contract in `packages/shared/daemon-control.ts` (writer: core, reader: daemon), mirroring `worker-health.ts`.
 
-- `/compact` and `/clear` write a request; the daemon polls every 2s (`CONTROL_POLL_INTERVAL_MS`) and cycles
+- `/compact` and `/clear` write a request; the daemon polls every 2s (`CONTROL_POLL_INTERVAL_MS`) and cycles. `/stop` writes a `stop` request instead: the daemon calls `interrupt()` on the turn in flight and keeps the session. It goes stale after 20s (`STOP_REQUEST_STALE_MS`) rather than 2 minutes, so a leftover one never cuts off a later turn
 - **Consume-once**: `consumeControlRequest` deletes the file *before* cycling, so a crash mid-cycle can't replay the request against the session that replaces it. Malformed and stale files are deleted too — left in place, an unparseable one would be re-read every poll forever
 - Requests older than `CONTROL_REQUEST_STALE_MS` (2 min) are discarded. Without it, a `/compact` issued while the daemon was down would cycle the *next* session seconds after it started
 - `/clear` is `cycleSession(..., { skipHandoff: true })` — no summary is captured, so no turn is spent on one. `handoffs.json` still records the cycle, because a session missing context you expected is exactly when you want that entry
