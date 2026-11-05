@@ -1,0 +1,12 @@
+/**
+ * __LABEL__ plugin — __LABEL__'s web UI as a Choomfie brain, on the web-brain kit.
+ *
+ * Log in once with `bun run webbrain login __ID__`, enable with `/plugins`,
+ * then `/brain __ID__` in a channel.
+ */
+
+import { defineWebBrain } from "@choomfie/webbrain";
+import { __ID_CAMEL__Adapter } from "./adapter.ts";
+
+export { __ID_CAMEL__Adapter as adapter };
+export default defineWebBrain(__ID_CAMEL__Adapter);

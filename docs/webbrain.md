@@ -31,9 +31,15 @@ Prefer the site's own JSON endpoints for reading answers (`pageFetch(page, url)`
 | **Chats** | The conversation id is stored on the chat record (`ctx.chats`), so `/chat list|resume` and `/clear` work for every web brain. |
 | **Late results** (`watch.ts`) | After a `background` answer, polls `readLate` every minute for up to 3h and posts what lands. In memory: a restart drops the watch. |
 
+## Adding a site from a recording
+
+The `new-web-brain` skill (`.claude/skills/new-web-brain/`) walks a Claude Code session through it: `webbrain record`, read the capture, copy `packages/webbrain/template/`, write the adapter, `webbrain doctor` until it passes, enable. For sites with no JSON endpoint to poll, `waitForSettledText` treats the answer as done once its text stops changing and the site's busy marker (a stop button) is gone.
+
 ## Owner commands
 
 - `bun run webbrain login <id>` — opens the site headed on its profile; sign in, close the window. Refuses while the profile is open elsewhere (Chrome's `SingletonLock`).
+- `bun run webbrain record <id> <url>` — headed, on `<id>`'s profile (so signing in here is the login). You send `Reply with exactly: pong` by hand; it writes `network.jsonl` (fetch/XHR/stream entries with clipped request and response bodies, **no headers**), `controls-*.json` and `aria-*.txt` (selector material, before and after), `urls.txt` and `meta.json` to `<data>/webbrain/<id>/recording/`. That holds account data: it stays in the data dir, never the repo.
+- `bun run webbrain doctor <id> [--headed]` — one real round trip through the adapter in a new chat; passes when the answer contains `pong`. Exit code 0/1. Sends a real message.
 - `CHOOMFIE_<ID>_HEADED=1` — run that site's browser visibly, for debugging.
 
 A site that kept state in `<data>/<id>/` before the kit (Waymond) has it moved to `<data>/webbrain/<id>/` on first start.

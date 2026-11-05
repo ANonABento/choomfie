@@ -20,6 +20,7 @@ export {
   type Page,
 } from "./adapter.ts";
 export { pageFetch, type PageFetchResult } from "./page-fetch.ts";
+export { waitForSettledText, type SettleOptions } from "./settle.ts";
 export { launchContext, type EngineName } from "./engine/launch.ts";
 export { siteDir, profileDir, outboxDir, profileInUse } from "./paths.ts";
 export { TabPool } from "./tabs.ts";
