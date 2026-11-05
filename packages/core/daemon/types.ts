@@ -1,6 +1,7 @@
 import type {
   ModelUsage,
   Query,
+  SDKResultMessage,
   SDKResultSuccess,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -90,7 +91,7 @@ export type MetaState = {
   restartBackoff: number;
   pushMessage: ((msg: SDKUserMessage) => void) | null;
   closeGenerator: (() => void) | null;
-  resultWaiters: Array<(result: SDKResultSuccess) => void>;
+  resultWaiters: Array<(result: SDKResultMessage) => void>;
   lastAssistantText: string | null;
   workerHealth: WorkerHealthStatus;
   workerHealthTimer: ReturnType<typeof setInterval> | null;

@@ -37,7 +37,7 @@ export async function writeDaemonState(state: MetaState): Promise<void> {
       checkedAt: state.context.checkedAt,
       threshold: state.thresholds.tokenThreshold,
     },
-    /** Everything the session has ever read in. Only grows; never cycles. */
+    /** Input tokens (cache included) this session has read in. Resets each cycle. */
     cumulativeInputTokens: state.totalInputTokens,
     tokenUsageToday: state.tokenUsageToday,
     /** Per-model token and cost breakdown for this session. */

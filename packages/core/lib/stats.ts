@@ -42,7 +42,7 @@ export async function getTokenUsageToday(ctx: Pick<AppContext, "DATA_DIR">): Pro
       await readFile(join(ctx.DATA_DIR, "meta", "daemon-state.json"), "utf-8")
     ) as DaemonState;
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Date().toLocaleDateString("en-CA"); // local date, as the daemon writes it
     if (daemonState.tokenUsageToday?.date === today) {
       const inputTokens = Number(daemonState.tokenUsageToday.inputTokens ?? 0);
       if (!Number.isFinite(inputTokens) || inputTokens < 0) return 0;

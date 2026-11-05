@@ -6,8 +6,9 @@ import { generateSessionId } from "./session-core.ts";
 import { DAEMON_STATE_PATH } from "./state-file.ts";
 import type { DaemonSettings, MetaState } from "./types.ts";
 
+/** Local calendar date (YYYY-MM-DD): "today" should roll over at your midnight, not UTC's. */
 export function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+  return new Date().toLocaleDateString("en-CA");
 }
 
 export function createInitialState(settings: DaemonSettings): MetaState {

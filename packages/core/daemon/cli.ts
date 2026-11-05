@@ -56,7 +56,7 @@ export async function testCycle(settings: DaemonSettings): Promise<void> {
     log("Triggering manual cycle...");
     const preCycleTurns = state.turnCount;
     state.lastCycleReason = "manual_test";
-    await cycleSession(state, state.totalInputTokens);
+    await cycleSession(state, state.context.tokens ?? undefined);
 
     if (state.state !== "ACTIVE") {
       log("FAIL: Session did not reach ACTIVE state after cycle");

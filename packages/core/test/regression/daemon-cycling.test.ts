@@ -21,6 +21,7 @@ import {
   markCyclePending,
   runPendingCycleIfIdle,
   shouldCycle,
+  waitForResult,
 } from "../../daemon/runtime.ts";
 import type { MetaState } from "../../daemon/types.ts";
 
@@ -316,5 +317,72 @@ describe("daily token accounting", () => {
 
     expect(state.totalInputTokens).toBe(25);
     expect(state.tokenUsageToday.inputTokens).toBe(525);
+  });
+});
+
+// Shapes below are what a live SDK 0.3.283 session sent (probed with Haiku):
+// modelUsage and total_cost_usd climb across results, usage is per prompt and
+// main-loop only, an interrupted turn ends in error_during_execution with
+// zeroed usage, and system/init arrives before every prompt.
+describe("per-result accounting from modelUsage", () => {
+  const mu = (input: number, cacheRead: number, cacheWrite: number) => ({
+    "claude-haiku": {
+      inputTokens: input,
+      cacheReadInputTokens: cacheRead,
+      cacheCreationInputTokens: cacheWrite,
+      outputTokens: 0,
+      webSearchRequests: 0,
+      costUSD: 0,
+      contextWindow: 200_000,
+      maxOutputTokens: 0,
+    },
+  });
+  const result = (subtype: string, modelUsage: object, usage: object, cost = 0) =>
+    ({ type: "result", subtype, num_turns: 3, total_cost_usd: cost, usage, modelUsage, result: "" }) as never;
+
+  test("counts the growth of modelUsage, which includes calls usage leaves out", () => {
+    const state = activeState();
+    // usage says 14,838 but modelUsage saw 15,735: a helper call outside the main loop.
+    handleSessionMessage(state, result("success", mu(907, 0, 14_828), { input_tokens: 10, cache_creation_input_tokens: 14_828 }));
+    expect(state.tokenUsageToday.inputTokens).toBe(15_735);
+
+    handleSessionMessage(state, result("success", mu(925, 29_762, 15_221), { input_tokens: 18 }));
+    expect(state.tokenUsageToday.inputTokens).toBe(45_908);
+    expect(state.totalInputTokens).toBe(45_908);
+  });
+
+  test("an interrupted turn still counts as a turn and keeps the cost", () => {
+    const state = activeState();
+    handleSessionMessage(state, result("success", mu(10, 0, 100), {}, 0.03));
+    handleSessionMessage(state, result("error_during_execution", mu(10, 0, 100), { input_tokens: 0 }, 0.035));
+
+    expect(state.turnCount).toBe(2);
+    expect(state.totalCostUsd).toBe(0.035);
+    expect(state.tokenUsageToday.inputTokens).toBe(110);
+  });
+
+  test("a running total that shrinks (SDK reset) counts as all new", () => {
+    const state = activeState();
+    handleSessionMessage(state, result("success", mu(0, 0, 5_000), {}));
+    handleSessionMessage(state, result("success", mu(0, 0, 300), {}));
+    expect(state.tokenUsageToday.inputTokens).toBe(5_300);
+  });
+
+  test("an error result rejects its waiter instead of leaving it for the next prompt", async () => {
+    const state = activeState();
+    const waiting = waitForResult(state, 5_000);
+    handleSessionMessage(state, result("error_during_execution", mu(0, 0, 0), {}));
+    await expect(waiting).rejects.toThrow("error_during_execution");
+    expect(state.resultWaiters).toHaveLength(0);
+  });
+
+  test("system/init is recorded once, not re-handled before every prompt", () => {
+    const state = activeState();
+    const init = { type: "system", subtype: "init", model: "claude-haiku-4-5", claude_code_version: "2.1.283" } as never;
+    handleSessionMessage(state, init);
+    const recorded = state.resolved;
+    handleSessionMessage(state, init);
+    expect(state.resolved).toBe(recorded);
+    expect(state.resolved.model).toBe("claude-haiku-4-5");
   });
 });

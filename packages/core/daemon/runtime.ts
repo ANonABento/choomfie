@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type {
+  ModelUsage,
   SDKAssistantMessage,
   SDKCompactBoundaryMessage,
   SDKMessage,
@@ -277,58 +278,40 @@ export function handleSessionMessage(state: MetaState, message: SDKMessage): voi
   switch (message.type) {
     case "result": {
       const result = message as SDKResultMessage;
-      if (result.subtype === "success") {
-        const successResult = result as SDKResultSuccess;
-        // One result closes one prompt, so count results. `num_turns` is the
-        // model/tool round-trips inside that one prompt, not a running total:
-        // assigning it left nearly every handoff at "1 turn" even after 50+
-        // calls, and the turn threshold never fired.
-        state.turnCount++;
-        state.totalCostUsd = successResult.total_cost_usd;
+      // One result closes one prompt, error or not, so count results.
+      // `num_turns` is the model/tool round-trips inside that one prompt, not a
+      // running total: assigning it left nearly every handoff at "1 turn" even
+      // after 50+ calls, and the turn threshold never fired.
+      state.turnCount++;
 
-        // Session-cumulative snapshot, not a per-turn delta (verified against
-        // the SDK: a model's inputTokens climbs across results rather than
-        // restarting), so it replaces rather than accumulates.
-        if (successResult.modelUsage) {
-          state.modelUsage = successResult.modelUsage;
-        }
+      // Session-cumulative, on error results too (an interrupted turn still
+      // spent money), so assigned rather than accumulated.
+      if (typeof result.total_cost_usd === "number") state.totalCostUsd = result.total_cost_usd;
+      const inputTokens = resultInputTokens(state, result);
+      if (result.modelUsage) state.modelUsage = result.modelUsage;
 
-        const usage = successResult.usage;
-        // `input_tokens` is only the uncached tail, a couple of tokens per
-        // call once caching kicks in. Cache reads and writes are where the
-        // context actually goes, so leaving them out made the daily figure
-        // read ~0 on a busy day.
-        const inputTokens =
-          (usage?.input_tokens ?? 0) +
-          (usage?.cache_read_input_tokens ?? 0) +
-          (usage?.cache_creation_input_tokens ?? 0);
-        if (usage) {
-          state.totalInputTokens += inputTokens;
-
-          // Daily counter survives session cycles (which reset
-          // totalInputTokens), so roll it over on date change rather than
-          // rebuilding it per session.
-          const today = todayKey();
-          if (state.tokenUsageToday.date !== today) {
-            state.tokenUsageToday = { date: today, inputTokens: 0 };
-          }
-          state.tokenUsageToday.inputTokens += inputTokens;
-        }
-
-        log(
-          `Turn ${state.turnCount}: +${inputTokens} tokens, ` +
-            `${state.totalInputTokens} total, $${state.totalCostUsd.toFixed(4)}`
-        );
-
-        verbose(`Result text (first 200 chars): ${successResult.result?.slice(0, 200)}`);
-
-        if (state.resultWaiters.length > 0) {
-          const waiter = state.resultWaiters.shift()!;
-          waiter(successResult);
-        }
-      } else {
-        log(`Session error result: ${JSON.stringify(result)}`);
+      state.totalInputTokens += inputTokens;
+      // Daily counter survives session cycles (which reset totalInputTokens),
+      // so roll it over on date change rather than rebuilding it per session.
+      const today = todayKey();
+      if (state.tokenUsageToday.date !== today) {
+        state.tokenUsageToday = { date: today, inputTokens: 0 };
       }
+      state.tokenUsageToday.inputTokens += inputTokens;
+
+      log(
+        `Turn ${state.turnCount}${result.subtype === "success" ? "" : ` (${result.subtype})`}: ` +
+          `+${inputTokens} tokens, ${state.totalInputTokens} total, $${state.totalCostUsd.toFixed(4)}`
+      );
+
+      if (result.subtype === "success") {
+        verbose(`Result text (first 200 chars): ${(result as SDKResultSuccess).result?.slice(0, 200)}`);
+      } else {
+        verbose(`Session error result: ${JSON.stringify(result)}`);
+      }
+      // Errors too: a waiter left hanging would be handed the *next* prompt's
+      // result instead of its own.
+      state.resultWaiters.shift()?.(result);
       break;
     }
 
@@ -371,12 +354,21 @@ export function handleSessionMessage(state: MetaState, message: SDKMessage): voi
       if (isCompactBoundaryMessage(message)) {
         log("Context compaction occurred");
       } else if (message.subtype === "init") {
+        // Sent at the start of every prompt, not once per session: only act
+        // when it says something new.
+        if (
+          state.resolved.model === message.model &&
+          state.resolved.claudeCodeVersion === message.claude_code_version
+        ) {
+          break;
+        }
+        const firstInit = state.resolved.claudeCodeVersion === null;
         state.resolved = {
           model: message.model,
           claudeCodeVersion: message.claude_code_version,
         };
         log(`Session model: ${message.model} (bundled Claude Code ${message.claude_code_version})`);
-        void warnIfBundledCliStale(message.claude_code_version);
+        if (firstInit) void warnIfBundledCliStale(message.claude_code_version);
         void writeDaemonState(state);
       }
       break;
@@ -386,6 +378,38 @@ export function handleSessionMessage(state: MetaState, message: SDKMessage): voi
       verbose(`Message type: ${message.type}`);
       break;
   }
+}
+
+function inputTokensOf(modelUsage: Record<string, ModelUsage> | undefined): number {
+  let total = 0;
+  for (const m of Object.values(modelUsage ?? {})) {
+    total += (m.inputTokens ?? 0) + (m.cacheReadInputTokens ?? 0) + (m.cacheCreationInputTokens ?? 0);
+  }
+  return total;
+}
+
+/**
+ * Input tokens this result added, cache reads and writes included —
+ * `input_tokens` alone is a couple of tokens per call once caching kicks in.
+ *
+ * Taken from the growth of `modelUsage` (session-cumulative, every model call:
+ * subagents, compaction and helper calls too) when the result has it. `usage`
+ * is per-prompt but main loop only, so it misses everything else; it is the
+ * fallback. A shrinking total means the SDK reset its running count, and the
+ * new total is then all new.
+ */
+export function resultInputTokens(state: MetaState, result: SDKResultMessage): number {
+  if (result.modelUsage && Object.keys(result.modelUsage).length > 0) {
+    const now = inputTokensOf(result.modelUsage);
+    const before = inputTokensOf(state.modelUsage);
+    return now >= before ? now - before : now;
+  }
+  const usage = result.usage;
+  return (
+    (usage?.input_tokens ?? 0) +
+    (usage?.cache_read_input_tokens ?? 0) +
+    (usage?.cache_creation_input_tokens ?? 0)
+  );
 }
 
 export function startContextMonitor(state: MetaState): void {
@@ -609,9 +633,10 @@ export function waitForResult(
       reject(new Error(`Timed out waiting for result after ${timeoutMs}ms`));
     }, timeoutMs);
 
-    const waiter = (result: SDKResultSuccess) => {
+    const waiter = (result: SDKResultMessage) => {
       clearTimeout(timer);
-      resolve(result);
+      if (result.subtype === "success") resolve(result as SDKResultSuccess);
+      else reject(new Error(`Turn ended with ${result.subtype}`));
     };
 
     state.resultWaiters.push(waiter);
