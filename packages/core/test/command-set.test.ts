@@ -52,12 +52,12 @@ describe("slash command set", () => {
     for (const c of slash()) walk(c);
   });
 
-  test("only /choomfie, /brain, /clear, /stop and the Ask Choomfie menu work outside the bot's servers", () => {
+  test("only /choomfie, /access, /brain, /clear, /stop and the Ask Choomfie menu work outside the bot's servers", () => {
     const anywhere = (getCommandDefs() as Json[])
       .filter((c) => c.integration_types?.includes(IT.UserInstall))
       .map((c) => c.name)
       .sort();
-    expect(anywhere).toEqual(["Ask Choomfie", "brain", "choomfie", "clear", "stop"]);
+    expect(anywhere).toEqual(["Ask Choomfie", "access", "brain", "choomfie", "clear", "stop"]);
     for (const c of getCommandDefs() as Json[]) {
       expect(c.integration_types?.length).toBeGreaterThan(0);
       if (anywhere.includes(c.name)) expect(c.contexts).toContain(CT.PrivateChannel);
@@ -120,10 +120,11 @@ describe("/stop and /brain", () => {
     }
   });
 
-  test("/stop in a Claude channel says it can't, instead of pretending", async () => {
+  test("/stop in a Claude channel outside daemon mode says where it works, instead of pretending", async () => {
     const { interaction, replies } = fakeInteraction();
     await commands.get("stop")!.handler(interaction as never, baseCtx() as never);
-    expect(replies[0].content).toContain("Claude can't be interrupted");
+    expect(replies[0].content).toContain("daemon mode");
+    expect(replies[0].content).toContain("Esc");
   });
 
   test("/brain with no name reports; /brain <name> switches; /brain claude clears", async () => {
@@ -138,6 +139,10 @@ describe("/stop and /brain", () => {
       const set = fakeInteraction({ opts: { name: "tb" } });
       await commands.get("brain")!.handler(set.interaction as never, ctx as never);
       expect(map.chan1).toBe("tb");
+      expect(set.replies[0].content).toBe(
+        "**TB** answers you in this channel. Others on your allowlist get Claude. " +
+          "To let them use TB too: `/config setting:brainAccess value:allowlist`"
+      );
 
       const back = fakeInteraction({ opts: { name: "claude" } });
       await commands.get("brain")!.handler(back.interaction as never, ctx as never);

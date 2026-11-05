@@ -25,7 +25,7 @@ import {
   type ButtonInteraction,
 } from "discord.js";
 import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds } from "@choomfie/shared";
-import { botIsAbsent, interactionChannel, rememberBrainRelay } from "../ask-relay.ts";
+import { botIsAbsent, interactionChannel, rememberBrainRelay, settleAskRelays } from "../ask-relay.ts";
 import { registerButtonHandler, registerCommand } from "../register.ts";
 import {
   clearPendingApproval,
@@ -37,7 +37,8 @@ import {
   type SendableChannel,
 } from "../brain-router.ts";
 import { isAllowed, isOwner } from "../access.ts";
-import { onMessageReceived } from "../typing.ts";
+import { onMessageReceived, onReplySent } from "../typing.ts";
+import { isDaemonMode, requestDaemonControl } from "../daemon-status.ts";
 import { requireOwner } from "./shared.ts";
 
 function label(id: string): string {
@@ -88,7 +89,9 @@ registerCommand("brain", {
         `**${label(current)}** answers here (${source}).`,
         current === CLAUDE_BRAIN
           ? ""
-          : `Answers: ${ctx.config.getBrainAccess() === "owner" ? "owner only" : "everyone on the allowlist"}; others get Claude.`,
+          : ctx.config.getBrainAccess() === "owner"
+            ? `It answers you; others on your allowlist get Claude. To let them use ${label(current)} too: \`/config setting:brainAccess value:allowlist\``
+            : `It answers everyone on your allowlist. To keep it to yourself: \`/config setting:brainAccess value:owner\``,
         `Loaded brains: ${listBrainIds().map((b) => `\`${b}\``).join(", ")} · \`/brain <name>\` to switch`,
       ].filter(Boolean);
       await reply(lines.join("\n"));
@@ -103,12 +106,15 @@ registerCommand("brain", {
     // `claude` clears the override, so a thread falls back to its parent again.
     ctx.config.setChannelBrain(channelId, wanted === CLAUDE_BRAIN ? undefined : wanted);
     const now = resolveBrainId(channelId, parentId, (id) => ctx.config.getChannelBrain(id));
-    const who = ctx.config.getBrainAccess() === "owner" ? "only you" : "everyone on the allowlist";
+    const name = label(now);
     await interaction.reply(
       now === CLAUDE_BRAIN
         ? "This channel is answered by **Claude**."
-        : `This channel is now answered by **${label(now)}** — for ${who}. Others still get Claude. ` +
-            "Change who with `/config setting:brainAccess`."
+        : ctx.config.getBrainAccess() === "owner"
+          ? `**${name}** answers you in this channel. Others on your allowlist get Claude. ` +
+            `To let them use ${name} too: \`/config setting:brainAccess value:allowlist\``
+          : `**${name}** answers everyone on your allowlist in this channel. ` +
+            "To keep it to yourself: `/config setting:brainAccess value:owner`"
     );
   },
 });
@@ -129,12 +135,20 @@ registerCommand("stop", {
       ctx.config.getChannelBrain(id)
     );
     if (current === CLAUDE_BRAIN) {
-      // Interrupting the Claude session means reaching into the daemon's turn
-      // loop; not wired yet. Say so rather than pretend.
-      await interaction.reply({
-        content: "Claude can't be interrupted from Discord yet — it finishes its turn. Other brains stop with `/stop`.",
-        flags: MessageFlags.Ephemeral,
-      });
+      // Only the daemon owns a Claude session it can interrupt. In foreground
+      // the session is a terminal Claude Code window, which nothing outside it
+      // can press Esc in.
+      if (!(await isDaemonMode(ctx.DATA_DIR))) {
+        await interaction.reply({
+          content: "Claude can only be interrupted from Discord in daemon mode (`choomfie --daemon`). In the terminal, press Esc.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      await requestDaemonControl(ctx.DATA_DIR, "stop", { requestedBy: interaction.user.id });
+      onReplySent(channelId); // the interrupted turn won't reply, so stop typing now
+      await settleAskRelays(channelId, "⏹️ Stopped.");
+      await interaction.reply({ content: "Asked **Claude** to stop.", flags: MessageFlags.Ephemeral });
       return;
     }
     const brain = getBrain(current);

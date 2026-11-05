@@ -16,6 +16,7 @@ import {
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
 } from "discord.js";
+import { ANYWHERE } from "@choomfie/shared";
 import { registerCommand } from "../register.ts";
 import { saveAccess } from "../context.ts";
 import { requireOwner } from "./shared.ts";
@@ -115,23 +116,29 @@ async function revokeUser(interaction: ChatInputCommandInteraction, ctx: AppCont
 
 // /access list|allow|revoke
 registerCommand("access", {
-  data: new SlashCommandBuilder()
-    .setName("access")
-    .setDescription("Who can talk to Choomfie (owner only)")
-    .addSubcommand((s) => s.setName("list").setDescription("Show the allowlist"))
-    .addSubcommand((s) =>
-      s
-        .setName("allow")
-        .setDescription("Let a user talk to Choomfie")
-        .addUserOption((o) => o.setName("user").setDescription("User to allow").setRequired(true)),
-    )
-    .addSubcommand((s) =>
-      s
-        .setName("revoke")
-        .setDescription("Stop a user from talking to Choomfie")
-        .addUserOption((o) => o.setName("user").setDescription("User to remove").setRequired(true)),
-    )
-    .toJSON(),
+  data: {
+    ...new SlashCommandBuilder()
+      .setName("access")
+      .setDescription("Who can talk to Choomfie (owner only)")
+      .addSubcommand((s) => s.setName("list").setDescription("Show the allowlist"))
+      .addSubcommand((s) =>
+        s
+          .setName("allow")
+          .setDescription("Let a user talk to Choomfie")
+          .addUserOption((o) => o.setName("user").setDescription("User to allow").setRequired(true)),
+      )
+      .addSubcommand((s) =>
+        s
+          .setName("revoke")
+          .setDescription("Stop a user from talking to Choomfie")
+          .addUserOption((o) => o.setName("user").setDescription("User to remove").setRequired(true)),
+      )
+      .toJSON(),
+    // Usable in group DMs: that's where a friend clicking 💬 Reply needs letting
+    // in, and the user picker there lists the group. Still owner-only, and every
+    // reply is ephemeral, so the group never sees it.
+    ...ANYWHERE,
+  },
   handler: async (interaction, ctx) => {
     if (await requireOwner(interaction, ctx)) return;
     switch (interaction.options.getSubcommand()) {

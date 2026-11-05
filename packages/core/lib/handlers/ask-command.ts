@@ -9,8 +9,9 @@
  * interaction, for 15 minutes (see ask-relay.ts).
  *
  * Keeping a conversation going there:
- * - every answer carries a stateless 💬 Reply button → a text box → a new ask
- *   that quotes the answer it replies to (so context survives a session cycle);
+ * - every answer carries a stateless 💬 Reply button → a text box (plus an
+ *   optional file upload) → a new ask that quotes the answer it replies to, so
+ *   context survives a session cycle;
  * - the menu opens a text box for an optional instruction ("summarize this");
  * - the question is quoted above the answer, since nobody else sees a modal's
  *   text or which message was right-clicked.
@@ -20,9 +21,10 @@
  */
 
 import {
-  ActionRowBuilder,
   ApplicationCommandType,
   ContextMenuCommandBuilder,
+  FileUploadBuilder,
+  LabelBuilder,
   MessageFlags,
   ModalBuilder,
   SlashCommandBuilder,
@@ -129,7 +131,7 @@ export async function runAsk(interaction: AskInteraction, ctx: AppContext, input
     return;
   }
 
-  meta.chat_id = openAskRelay(interaction.id, relay);
+  meta.chat_id = openAskRelay(interaction.id, relay, chatKey);
   await forwardToClaude(ctx, `${ASK_NOTE}\n${content}`, meta);
 }
 
@@ -158,16 +160,43 @@ export function replyPrompt(excerpt: string, text: string): string {
   return excerpt ? `[Replying to your earlier answer: "${excerpt}"]\n${text.trim()}` : text.trim();
 }
 
-function textBox(id: string, label: string, required: boolean, placeholder: string) {
-  return new ActionRowBuilder<TextInputBuilder>().addComponents(
-    new TextInputBuilder()
-      .setCustomId(id)
-      .setLabel(label)
-      .setStyle(TextInputStyle.Paragraph)
-      .setRequired(required)
-      .setMaxLength(4000)
-      .setPlaceholder(placeholder)
-  );
+/** Discord's cap on files in one modal upload field. */
+export const MODAL_MAX_FILES = 10;
+
+/**
+ * A text box plus an optional file upload, as the modal's two labelled fields.
+ * Group DMs have no other way to hand Choomfie a file mid-conversation.
+ */
+export function askModal(customId: string, title: string, text: { label: string; required: boolean; placeholder: string }) {
+  return new ModalBuilder()
+    .setCustomId(customId)
+    .setTitle(title.slice(0, 45))
+    .addLabelComponents(
+      new LabelBuilder()
+        .setLabel(text.label)
+        .setTextInputComponent(
+          new TextInputBuilder()
+            .setCustomId("text")
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(text.required)
+            .setMaxLength(4000)
+            .setPlaceholder(text.placeholder)
+        ),
+      new LabelBuilder()
+        .setLabel("Attach files (optional)")
+        .setFileUploadComponent(
+          new FileUploadBuilder().setCustomId("files").setRequired(false).setMaxValues(MODAL_MAX_FILES)
+        )
+    );
+}
+
+/** Files uploaded in the modal, if the field was used. */
+function uploadedFiles(interaction: ModalSubmitInteraction): AttachmentLike[] {
+  try {
+    return [...(interaction.fields.getUploadedFiles("files")?.values() ?? [])];
+  } catch {
+    return []; // field absent (an older modal still open across a restart)
+  }
 }
 
 // --- /choomfie ---
@@ -224,10 +253,11 @@ registerMessageMenu(ASK_MENU_NAME, {
       at: now,
     });
     await interaction.showModal(
-      new ModalBuilder()
-        .setCustomId(`ask:menu:${interaction.id}`)
-        .setTitle(`Ask Choomfie about ${m.author.username}'s message`.slice(0, 45))
-        .addComponents(textBox("text", "What should Choomfie do? (optional)", false, "e.g. summarize this, is this true?"))
+      askModal(`ask:menu:${interaction.id}`, `Ask Choomfie about ${m.author.username}'s message`, {
+        label: "What should Choomfie do? (optional)",
+        required: false,
+        placeholder: "e.g. summarize this, is this true?",
+      })
     );
   },
 });
@@ -241,10 +271,11 @@ registerButtonHandler("ask", async (interaction, parts, ctx) => {
     return;
   }
   await interaction.showModal(
-    new ModalBuilder()
-      .setCustomId("ask:reply")
-      .setTitle("Reply to Choomfie")
-      .addComponents(textBox("text", "Your reply", true, "Keep the conversation going…"))
+    askModal("ask:reply", "Reply to Choomfie", {
+      label: "Your reply",
+      required: true,
+      placeholder: "Keep the conversation going…",
+    })
   );
 });
 
@@ -255,6 +286,7 @@ registerModalHandler("ask", async (interaction, parts, ctx) => {
     const answer = interaction.isFromMessage() ? interaction.message : null;
     await runAsk(interaction, ctx, {
       prompt: replyPrompt(replyExcerpt(answer?.content ?? ""), text),
+      attachments: uploadedFiles(interaction),
       ephemeral: answer?.flags.has(MessageFlags.Ephemeral) ?? false,
       header: questionHeader(interaction.user.username, text),
     });
@@ -274,7 +306,7 @@ registerModalHandler("ask", async (interaction, parts, ctx) => {
     const about = `about ${target.author}'s message`;
     await runAsk(interaction, ctx, {
       prompt: menuPrompt(target.author, target.content, target.attachments.length, text),
-      attachments: target.attachments,
+      attachments: [...target.attachments, ...uploadedFiles(interaction)],
       header: questionHeader(interaction.user.username, text.trim() ? `${text.trim()} (${about})` : `asked ${about}`),
     });
   }
