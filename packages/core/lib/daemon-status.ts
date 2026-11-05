@@ -28,6 +28,8 @@ export interface DaemonSnapshot {
   sessionUptimeSeconds?: number;
   model?: string | null;
   fallbackModel?: string | null;
+  resolvedModel?: string | null;
+  claudeCodeVersion?: string | null;
   turns?: { current?: number; threshold?: number };
   context?: {
     tokens?: number | null;

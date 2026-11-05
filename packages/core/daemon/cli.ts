@@ -243,8 +243,14 @@ export async function showStatus(): Promise<void> {
     console.error(`  Uptime: ${state.sessionUptimeSeconds}s`);
     console.error(
       `  Model: ${state.model ?? "Claude Code default"}` +
+        (state.resolvedModel && state.resolvedModel !== state.model
+          ? ` → ${state.resolvedModel}`
+          : "") +
         (state.fallbackModel ? ` (fallback: ${state.fallbackModel})` : ""),
     );
+    if (state.claudeCodeVersion) {
+      console.error(`  Claude Code (bundled): ${state.claudeCodeVersion}`);
+    }
     console.error(`  Turns: ${state.turns?.current}/${state.turns?.threshold}`);
     const context = state.context;
     console.error(

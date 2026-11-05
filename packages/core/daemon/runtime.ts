@@ -31,6 +31,7 @@ import {
   type WorkerHeartbeat,
 } from "@choomfie/shared";
 import { CONTROL_POLL_INTERVAL_MS, INCOMING_POLL_INTERVAL_MS } from "@choomfie/shared";
+import { warnIfBundledCliStale } from "./cli-version.ts";
 import { takeControlRequest } from "./control.ts";
 import { formatChannelPrompt, takeInboundMessages } from "./incoming.ts";
 import { parseRateLimitInfo } from "./rate-limit.ts";
@@ -77,6 +78,7 @@ export async function startSession(
   // Per-session, so it resets with the session. `state.rateLimit` deliberately
   // does not — plan windows belong to the account and outlive any session.
   state.modelUsage = {};
+  state.resolved = { model: null, claudeCodeVersion: null };
   state.turnInFlight = false;
   state.lastActivityAt = Date.now();
   state.pendingCycleReason = null;
@@ -277,7 +279,11 @@ export function handleSessionMessage(state: MetaState, message: SDKMessage): voi
       const result = message as SDKResultMessage;
       if (result.subtype === "success") {
         const successResult = result as SDKResultSuccess;
-        state.turnCount = successResult.num_turns;
+        // One result closes one prompt, so count results. `num_turns` is the
+        // model/tool round-trips inside that one prompt, not a running total:
+        // assigning it left nearly every handoff at "1 turn" even after 50+
+        // calls, and the turn threshold never fired.
+        state.turnCount++;
         state.totalCostUsd = successResult.total_cost_usd;
 
         // Session-cumulative snapshot, not a per-turn delta (verified against
@@ -288,8 +294,15 @@ export function handleSessionMessage(state: MetaState, message: SDKMessage): voi
         }
 
         const usage = successResult.usage;
+        // `input_tokens` is only the uncached tail, a couple of tokens per
+        // call once caching kicks in. Cache reads and writes are where the
+        // context actually goes, so leaving them out made the daily figure
+        // read ~0 on a busy day.
+        const inputTokens =
+          (usage?.input_tokens ?? 0) +
+          (usage?.cache_read_input_tokens ?? 0) +
+          (usage?.cache_creation_input_tokens ?? 0);
         if (usage) {
-          const inputTokens = usage.input_tokens ?? 0;
           state.totalInputTokens += inputTokens;
 
           // Daily counter survives session cycles (which reset
@@ -303,7 +316,7 @@ export function handleSessionMessage(state: MetaState, message: SDKMessage): voi
         }
 
         log(
-          `Turn ${state.turnCount}: +${usage?.input_tokens ?? 0} tokens, ` +
+          `Turn ${state.turnCount}: +${inputTokens} tokens, ` +
             `${state.totalInputTokens} total, $${state.totalCostUsd.toFixed(4)}`
         );
 
@@ -357,6 +370,14 @@ export function handleSessionMessage(state: MetaState, message: SDKMessage): voi
     case "system": {
       if (isCompactBoundaryMessage(message)) {
         log("Context compaction occurred");
+      } else if (message.subtype === "init") {
+        state.resolved = {
+          model: message.model,
+          claudeCodeVersion: message.claude_code_version,
+        };
+        log(`Session model: ${message.model} (bundled Claude Code ${message.claude_code_version})`);
+        void warnIfBundledCliStale(message.claude_code_version);
+        void writeDaemonState(state);
       }
       break;
     }

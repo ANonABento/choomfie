@@ -126,4 +126,10 @@ export type MetaState = {
   thresholds: DaemonThresholds;
   /** Model settings for this run, from config.json. Applied to every session. */
   models: ModelSettings;
+  /**
+   * What the session actually runs, from its `system/init` message. `models.model`
+   * may be an alias ("opus") resolved by the SDK's bundled Claude Code, so this
+   * is the only place the real model shows up. Null until init arrives.
+   */
+  resolved: { model: string | null; claudeCodeVersion: string | null };
 };

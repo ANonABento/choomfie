@@ -198,12 +198,15 @@ function buildEmbed(daemon: DaemonSnapshot, now: number = Date.now()): EmbedBuil
         `$${(daemon.costUsd ?? 0).toFixed(4)} · ` +
         `${plural(daemon.turns?.current ?? 0, "turn")} · ` +
         `${plural(daemon.totalCycles ?? 0, "cycle")}\n` +
-        `Model: **${daemon.model ?? "Claude Code default"}**`,
+        `Model: **${daemon.model ?? "Claude Code default"}**` +
+        (daemon.resolvedModel && daemon.resolvedModel !== daemon.model
+          ? ` → \`${daemon.resolvedModel}\``
+          : ""),
       inline: true,
     },
     {
       name: "Today",
-      value: `${(daemon.tokenUsageToday?.inputTokens ?? 0).toLocaleString()} input tokens`,
+      value: `${(daemon.tokenUsageToday?.inputTokens ?? 0).toLocaleString()} input tokens (incl. cached)`,
       inline: true,
     },
     {

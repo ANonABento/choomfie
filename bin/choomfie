@@ -13,6 +13,7 @@ fi
 USE_TMUX=false
 USE_DAEMON=false
 ALWAYS_ON=false
+USE_RESTART=false
 EXTRA_ARGS=()
 
 for arg in "$@"; do
@@ -20,9 +21,17 @@ for arg in "$@"; do
     --tmux) USE_TMUX=true ;;
     --daemon) USE_DAEMON=true ;;
     --always-on) ALWAYS_ON=true; USE_TMUX=true ;;
+    --restart|restart) USE_RESTART=true ;;
     *) EXTRA_ARGS+=("$arg") ;;
   esac
 done
+
+if [ "$USE_RESTART" = true ]; then
+  echo "Stopping daemon..."
+  (cd "$ROOT_DIR" && bun packages/core/daemon.ts --stop) || true
+  echo "Restarting daemon..."
+  exec "$0" --daemon "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"
+fi
 
 # --- Refuse to fight a running daemon ---
 # supervisor.ts makes this same check, but it runs underneath the claude CLI,
@@ -98,6 +107,13 @@ if [ "$USE_DAEMON" = false ]; then
   done
 fi
 
+# claude.ai connectors (Notion, Drive, Docs, ...) put their instructions into
+# every session's context and the persona never uses them. Off by default in
+# both launch paths (the daemon sets it in createSession); export
+# ENABLE_CLAUDEAI_MCP_SERVERS=true to keep them. Also passed inline in INNER_CMD
+# because an already-running tmux server doesn't inherit this shell's env.
+export ENABLE_CLAUDEAI_MCP_SERVERS="${ENABLE_CLAUDEAI_MCP_SERVERS:-false}"
+
 if [ "$USE_DAEMON" = true ]; then
   QUOTED_ARGS=""
   for a in "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"; do
@@ -114,7 +130,7 @@ else
     "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"; do
     QUOTED_CLAUDE_ARGS="$QUOTED_CLAUDE_ARGS $(printf %q "$a")"
   done
-  INNER_CMD="cd $(printf %q "$ROOT_DIR") && exec claude --plugin-dir $(printf %q "$ROOT_DIR") --dangerously-load-development-channels server:choomfie$QUOTED_CLAUDE_ARGS"
+  INNER_CMD="cd $(printf %q "$ROOT_DIR") && ENABLE_CLAUDEAI_MCP_SERVERS=$(printf %q "$ENABLE_CLAUDEAI_MCP_SERVERS") exec claude --plugin-dir $(printf %q "$ROOT_DIR") --dangerously-load-development-channels server:choomfie$QUOTED_CLAUDE_ARGS"
 fi
 
 if [ "$USE_TMUX" = true ]; then

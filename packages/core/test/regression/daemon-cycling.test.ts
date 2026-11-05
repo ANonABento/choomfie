@@ -45,6 +45,22 @@ describe("shouldCycle", () => {
     expect(shouldCycle(state, 999)).toBe(false);
   });
 
+  test("counts one turn per result, whatever num_turns says", () => {
+    const state = activeState(3, 1_000_000);
+    for (const num_turns of [1, 7, 1]) {
+      handleSessionMessage(state, {
+        type: "result",
+        subtype: "success",
+        num_turns,
+        total_cost_usd: 0,
+        result: "",
+      } as never);
+    }
+
+    expect(state.turnCount).toBe(3);
+    expect(shouldCycle(state)).toBe(true);
+  });
+
   test("never cycles unless the session is ACTIVE", () => {
     const state = activeState(5, 1_000);
     state.turnCount = 99;
@@ -277,6 +293,16 @@ describe("daily token accounting", () => {
 
     expect(state.tokenUsageToday.date).not.toBe("1999-12-31");
     expect(state.tokenUsageToday.inputTokens).toBe(40);
+  });
+
+  test("counts cache reads and writes, not just the uncached tail", () => {
+    const state = activeState();
+    handleSessionMessage(state, {
+      ...successResult(2),
+      usage: { input_tokens: 2, cache_read_input_tokens: 90_000, cache_creation_input_tokens: 1_500 },
+    } as never);
+
+    expect(state.tokenUsageToday.inputTokens).toBe(91_502);
   });
 
   test("survives a session cycle, unlike totalInputTokens", () => {

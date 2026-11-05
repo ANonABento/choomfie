@@ -46,6 +46,7 @@ export function createInitialState(settings: DaemonSettings): MetaState {
     pendingCycleReason: null,
     thresholds: { tokenThreshold, turnThreshold },
     models: { model, fallbackModel },
+    resolved: { model: null, claudeCodeVersion: null },
   };
 }
 

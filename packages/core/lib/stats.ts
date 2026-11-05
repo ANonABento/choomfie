@@ -93,7 +93,7 @@ export async function buildStatsEmbed(ctx: AppContext): Promise<EmbedBuilder> {
       { name: "Uptime", value: uptime, inline: true },
       { name: "Messages Handled", value: `${messagesHandled} total (${ctx.messageStats.received} in / ${ctx.messageStats.sent} out)`, inline: true },
       { name: "Current Persona", value: `**${persona.name}** (\`${personaKey}\`)`, inline: true },
-      { name: "Token Usage Today", value: `${tokenUsageToday.toLocaleString()} input tokens`, inline: true },
+      { name: "Token Usage Today", value: `${tokenUsageToday.toLocaleString()} input tokens (incl. cached)`, inline: true },
       { name: "Active Plugins", value: activePlugins.slice(0, 1024), inline: false },
       { name: "Top Tools", value: topToolsText.slice(0, 1024), inline: false },
     )
