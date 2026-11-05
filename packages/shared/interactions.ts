@@ -109,7 +109,7 @@ export function registerMessageMenu(name: string, def: MessageMenuDef) {
  * back to the app's configured install types, so ticking "User Install" in the
  * Developer Portal would otherwise turn every owner command into something
  * usable from any chat the owner is in. Only commands that opt in
- * (`/choomfie`, `/brain`, `/stop`, "Ask Choomfie") work outside the bot's servers.
+ * (`/choomfie`, `/access`, `/brain`, `/stop`, `/clear`, "Ask Choomfie") work outside the bot's servers.
  */
 export const GUILD_INSTALL_ONLY = {
   integration_types: [ApplicationIntegrationType.GuildInstall],
