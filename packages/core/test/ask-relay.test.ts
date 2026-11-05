@@ -12,7 +12,7 @@ import {
 } from "../lib/ask-relay.ts";
 import { postBrainReply } from "../lib/brain-router.ts";
 import { menuPrompt, replyExcerpt, replyPrompt } from "../lib/handlers/ask-command.ts";
-import { NO_ANSWER, REPLY_BUTTON_ID, questionHeader, settleAskRelays } from "../lib/ask-relay.ts";
+import { NO_ANSWER, REPLY_BUTTON_ID, RESTARTED, questionHeader, settleAllRelays, settleAskRelays } from "../lib/ask-relay.ts";
 import { MODAL_MAX_FILES, askModal } from "../lib/handlers/ask-command.ts";
 import { jest } from "bun:test";
 import { discordTools } from "../lib/tools/discord-tools.ts";
@@ -242,4 +242,16 @@ test("the Reply and menu boxes take files as well as text", () => {
   expect(text.component).toMatchObject({ custom_id: "text", required: true });
   expect(files.label).toBe("Attach files (optional)");
   expect(files.component).toMatchObject({ type: 19, custom_id: "files", required: false, max_values: MODAL_MAX_FILES });
+});
+
+test("a worker shutdown closes every unanswered placeholder instead of leaving it thinking", async () => {
+  await settleAllRelays(); // clear any left by earlier tests
+  const waiting = fakeInteraction();
+  const answered = fakeInteraction();
+  interactionChannel(waiting);
+  await interactionChannel(answered).send({ content: "done" });
+  expect(await settleAllRelays()).toBe(1);
+  expect(waiting.calls.map((c) => c.body.content)).toEqual([RESTARTED]);
+  expect(answered.calls.map((c) => c.body.content)).toEqual(["done"]);
+  expect(await settleAllRelays()).toBe(0);
 });

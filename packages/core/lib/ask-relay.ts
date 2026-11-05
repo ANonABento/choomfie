@@ -113,6 +113,7 @@ export function interactionChannel(
   /** Replace a still-unanswered "thinking…" with a final line. */
   const settle = (content: string) =>
     inOrder(async () => {
+      unanswered.delete(relay);
       if (edited) return;
       edited = true;
       await interaction.editReply({ content, allowedMentions: { parse: [] } } as never);
@@ -131,6 +132,7 @@ export function interactionChannel(
     }
     if (!edited) {
       edited = true;
+      unanswered.delete(relay);
       return interaction.editReply(body as never);
     }
     return interaction.followUp(
@@ -138,7 +140,7 @@ export function interactionChannel(
     );
   };
 
-  return {
+  const relay: RelayChannel = {
     alive,
     settle,
     send(options) {
@@ -167,6 +169,28 @@ export function interactionChannel(
       });
     },
   };
+  if (!edited) unanswered.add(relay);
+  return relay;
+}
+
+/** Relays still showing "thinking…". In memory, so the worker settles them before it exits. */
+const unanswered = new Set<RelayChannel>();
+
+export const RESTARTED =
+  "♻️ Choomfie restarted before answering — try again.";
+
+/**
+ * Close every unanswered placeholder (worker shutdown). Their timers and any
+ * reply in flight die with this process, so without this they stay on
+ * "thinking…" until Discord gives up.
+ */
+export async function settleAllRelays(content = RESTARTED, timeoutMs = 3_000): Promise<number> {
+  const pending = [...unanswered];
+  await Promise.race([
+    Promise.all(pending.map((r) => r.settle(content).catch(() => {}))),
+    new Promise((r) => setTimeout(r, timeoutMs)),
+  ]);
+  return pending.length;
 }
 
 /** `ask:<id>` chat ids handed to Claude → the interaction to answer through, and the chat it came from. */
