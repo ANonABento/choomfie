@@ -1,5 +1,5 @@
 /**
- * The worker→daemon control channel behind `/compact` and `/clear`.
+ * The worker→daemon control channel behind `/compact`, `/clear`, `/resume` and `/stop`.
  *
  * The worker cannot talk to the daemon directly — it sits two processes below
  * it — so a file in the data dir carries the request. These tests guard the
@@ -35,16 +35,13 @@ afterEach(() => {
 });
 
 describe("control request parsing", () => {
-  test("accepts the two real commands and nothing else", () => {
-    const base = { requestedAt: Date.now() };
-    expect(parseDaemonControlRequest({ ...base, command: "compact" })?.command).toBe(
-      "compact",
-    );
-    expect(parseDaemonControlRequest({ ...base, command: "clear" })?.command).toBe(
-      "clear",
-    );
+  test("accepts the real commands and nothing else", () => {
+    const base = { requestedAt: Date.now(), location: "t1" };
+    for (const command of ["compact", "clear", "stop", "resume"] as const) {
+      expect(parseDaemonControlRequest({ ...base, command })?.command).toBe(command);
+    }
 
-    // A command the daemon has no handler for must not reach cycleSession.
+    // A command the daemon has no handler for must not be acted on.
     expect(parseDaemonControlRequest({ ...base, command: "restart" })).toBeNull();
     expect(parseDaemonControlRequest({ ...base, command: "" })).toBeNull();
   });
@@ -57,10 +54,16 @@ describe("control request parsing", () => {
     }
   });
 
+  test("every command names the location whose session it is about", () => {
+    expect(parseDaemonControlRequest({ command: "resume", requestedAt: Date.now() })).toBeNull();
+    expect(parseDaemonControlRequest({ command: "stop", requestedAt: Date.now(), location: "" })).toBeNull();
+  });
+
   test("drops optional fields that are the wrong type rather than passing them on", () => {
     const parsed = parseDaemonControlRequest({
       command: "compact",
       requestedAt: Date.now(),
+      location: "t1",
       requestedBy: 12345,
       chatId: { id: "nope" },
     });
@@ -76,11 +79,12 @@ describe("staleness", () => {
     // it started, for a request nobody remembers making.
     const old = {
       command: "compact" as const,
+      location: "t1",
       requestedAt: Date.now() - CONTROL_REQUEST_STALE_MS - 1,
     };
     expect(isControlRequestStale(old)).toBe(true);
 
-    const fresh = { command: "compact" as const, requestedAt: Date.now() };
+    const fresh = { command: "compact" as const, location: "t1", requestedAt: Date.now() };
     expect(isControlRequestStale(fresh)).toBe(false);
   });
 });
@@ -91,6 +95,7 @@ describe("worker side", () => {
     await requestDaemonControl(dir, "clear", {
       requestedBy: "1234",
       chatId: "5678",
+      location: "t1",
     });
 
     const parsed = parseDaemonControlRequest(
@@ -100,14 +105,15 @@ describe("worker side", () => {
     expect(parsed!.command).toBe("clear");
     expect(parsed!.requestedBy).toBe("1234");
     expect(parsed!.chatId).toBe("5678");
+    expect(parsed!.location).toBe("t1");
     expect(isControlRequestStale(parsed!)).toBe(false);
   });
 
   test("a second request replaces the first rather than queueing", async () => {
     // Pressing /compact then /clear should clear, not compact-then-clear.
     const dir = newDataDir();
-    await requestDaemonControl(dir, "compact", {});
-    await requestDaemonControl(dir, "clear", {});
+    await requestDaemonControl(dir, "compact", { location: "t1" });
+    await requestDaemonControl(dir, "clear", { location: "t1" });
 
     const parsed = parseDaemonControlRequest(
       JSON.parse(await readFile(daemonControlPath(dir), "utf-8")),
@@ -125,7 +131,7 @@ describe("daemon side", () => {
   test("a request is consumed exactly once", async () => {
     const dir = newDataDir();
     const path = daemonControlPath(dir);
-    await requestDaemonControl(dir, "compact", { chatId: "42" });
+    await requestDaemonControl(dir, "compact", { chatId: "42", location: "t1" });
 
     const first = await consumeControlRequest(path);
     expect(first?.command).toBe("compact");
@@ -165,16 +171,16 @@ describe("daemon side", () => {
 describe("stop", () => {
   test("parses, and goes stale in seconds, not minutes", async () => {
     const now = Date.now();
-    expect(parseDaemonControlRequest({ command: "stop", requestedAt: now })?.command).toBe("stop");
+    expect(parseDaemonControlRequest({ command: "stop", requestedAt: now, location: "t1" })?.command).toBe("stop");
     // A leftover stop must never cut off some later, unrelated turn.
-    expect(isControlRequestStale({ command: "stop", requestedAt: now - STOP_REQUEST_STALE_MS - 1 }, now)).toBe(true);
-    expect(isControlRequestStale({ command: "stop", requestedAt: now - 5_000 }, now)).toBe(false);
+    expect(isControlRequestStale({ command: "stop", location: "t1", requestedAt: now - STOP_REQUEST_STALE_MS - 1 }, now)).toBe(true);
+    expect(isControlRequestStale({ command: "stop", location: "t1", requestedAt: now - 5_000 }, now)).toBe(false);
     expect(STOP_REQUEST_STALE_MS).toBeLessThan(CONTROL_REQUEST_STALE_MS);
   });
 
   test("the worker writes one the daemon accepts", async () => {
     const dir = newDataDir();
-    await requestDaemonControl(dir, "stop", { requestedBy: "owner" });
+    await requestDaemonControl(dir, "stop", { requestedBy: "owner", location: "t1" });
     expect((await consumeControlRequest(daemonControlPath(dir)))?.command).toBe("stop");
   });
 });

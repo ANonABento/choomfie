@@ -14,7 +14,6 @@ import {
   errorMessage,
   pushBrainReply,
   registerBrain,
-  titleFrom,
   unregisterBrain,
   type Brain,
   type Plugin,
@@ -145,7 +144,7 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
       },
 
       async send(message) {
-        const chat = chats.current(message.chatKey, adapter.id, titleFrom(message.content));
+        const chat = chats.current(message.chatKey, adapter.id, message.content);
         // In a chat the bot isn't in, status goes in the "thinking…" reply instead.
         const relayProgress = message.progress;
         const channel = relayProgress ? null : await channelFor(ctx, message.chatKey);

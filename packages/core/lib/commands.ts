@@ -18,7 +18,7 @@ import {
 } from "discord.js";
 import type { AppContext } from "./types.ts";
 import { AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, relativeTime } from "@choomfie/shared";
-import { liveChat, shortPath } from "./chats/here.ts";
+import { cwdLabel, liveChat } from "./chats/here.ts";
 import { parentChannelId, resolveBrainId } from "./brain-router.ts";
 import { VERSION } from "./version.ts";
 import { registerCommand, registerButtonHandler } from "./register.ts";
@@ -407,7 +407,8 @@ async function chatHere(interaction: ChatInputCommandInteraction, ctx: AppContex
   const { brain, chat } = await liveChat(interaction, ctx);
   if (chat) {
     lines.push(`Chat: **${chat.title}** · since ${relativeTime(chat.createdAt)}`);
-    if (chat.cwd) lines.push(`cwd: \`${shortPath(chat.cwd)}\``);
+    const cwd = cwdLabel(ctx, chat.cwd);
+    if (cwd) lines.push(`cwd: \`${cwd}\``);
   } else if (brain === CLAUDE_BRAIN && !(await isDaemonMode(ctx.DATA_DIR))) {
     lines.push("Chat: the terminal session");
   } else {
@@ -493,22 +494,20 @@ registerCommand("status", {
         },
       );
       // One session per location: which are running, and where.
-      if (daemon.multiSession) {
-        const sessions = daemon.sessions ?? [];
-        embed.addFields({
-          name: `Claude sessions (${sessions.length}/${daemon.maxSessions ?? "?"})`,
-          value:
-            sessions
-              .map(
-                (s) =>
-                  `${s.location === interaction.channelId ? "▶ " : ""}<#${s.location}> **${s.title}** · ` +
-                  `${s.turns} turns${s.contextTokens ? ` · ${Math.round(s.contextTokens / 1000)}k ctx` : ""}` +
-                  (s.busy ? " · busy" : "")
-              )
-              .join("\n")
-              .slice(0, 1024) || "None running — the next message starts one.",
-        });
-      }
+      const sessions = daemon.sessions ?? [];
+      embed.addFields({
+        name: `Claude sessions (${sessions.length}/${daemon.maxSessions ?? "?"})`,
+        value:
+          sessions
+            .map(
+              (s) =>
+                `${s.location === interaction.channelId ? "▶ " : ""}<#${s.location}> **${s.title}** · ` +
+                `${s.turns} turns${s.contextTokens ? ` · ${Math.round(s.contextTokens / 1000)}k ctx` : ""}` +
+                (s.busy ? " · busy" : "")
+            )
+            .join("\n")
+            .slice(0, 1024) || "None running — the next message starts one.",
+      });
     }
 
     embed.setFooter({

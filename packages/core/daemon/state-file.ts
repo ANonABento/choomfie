@@ -1,87 +1,95 @@
+/**
+ * meta/daemon-state.json — the daemon's one-way report to the worker, read by
+ * `/status`, `/usage`, the `status` tool and the rate-limit alerter
+ * (`lib/daemon-status.ts` is the reader).
+ *
+ * Daemon-wide figures at the top level; each live session under `sessions`.
+ * `turns`, `context`, `modelUsage` and the resolved model describe the most
+ * recently active session, which is what a single-line summary wants.
+ */
+
 import { writeJsonAtomic } from "@choomfie/shared";
 import { META_DIR } from "./constants.ts";
 import { getErrorMessage } from "./error.ts";
 import { log } from "./log.ts";
-import type { MetaState } from "./types.ts";
+import type { RateLimitSnapshot } from "./rate-limit.ts";
+import type { DaemonSettings, MetaState, TokenUsageToday } from "./types.ts";
 
 export const DAEMON_STATE_PATH = `${META_DIR}/daemon-state.json`;
 
-/** The hub replaces the writer: one state file describing every live session. */
-let writer: ((state: MetaState) => Promise<void>) | null = null;
-
-export function setDaemonStateWriter(fn: ((state: MetaState) => Promise<void>) | null): void {
-  writer = fn;
+export interface LiveSessionState {
+  location: string;
+  title: string;
+  busy: boolean;
+  state: MetaState;
 }
 
-export async function writeDaemonState(state: MetaState): Promise<void> {
-  if (writer) return writer(state);
-  await writeStateFile(daemonStateData(state));
+export interface DaemonStateInput {
+  startedAt: number;
+  settings: DaemonSettings;
+  sessions: LiveSessionState[];
+  usageToday: TokenUsageToday;
+  /** Account-level: the newest any session has reported. */
+  rateLimit: RateLimitSnapshot | null;
+  totalCycles: number;
+  worker: { alive: boolean; consecutiveFailures: number };
 }
 
-export async function writeStateFile(data: Record<string, unknown>): Promise<void> {
+export function buildDaemonState(input: DaemonStateInput): Record<string, unknown> {
+  const { settings, sessions } = input;
+  const latest = sessions.reduce<MetaState | null>(
+    (a, s) => (!a || s.state.lastActivityAt > a.lastActivityAt ? s.state : a),
+    null
+  );
+  return {
+    mode: "daemon",
+    pid: process.pid,
+    state: "ACTIVE",
+    sessionUptimeSeconds: Math.round((Date.now() - input.startedAt) / 1000),
+    // null rather than omitted, so readers can tell "default" from "not reported".
+    model: settings.model ?? null,
+    fallbackModel: settings.fallbackModel ?? null,
+    // What `model` resolved to — an alias like "opus" is resolved by the SDK's
+    // bundled Claude Code, which can lag the installed CLI.
+    resolvedModel: latest?.resolved.model ?? null,
+    claudeCodeVersion: latest?.resolved.claudeCodeVersion ?? null,
+    turns: { current: latest?.turnCount ?? 0, threshold: settings.turnThreshold },
+    // Live context size, which is what cycling compares against the threshold.
+    context: {
+      tokens: latest?.context.tokens ?? null,
+      maxTokens: latest?.context.maxTokens ?? null,
+      percentage: latest?.context.percentage ?? null,
+      checkedAt: latest?.context.checkedAt ?? null,
+      threshold: settings.tokenThreshold,
+    },
+    tokenUsageToday: input.usageToday,
+    modelUsage: latest?.modelUsage ?? {},
+    /** Plan rate-limit windows. Null on an API-key account, or before the first event. */
+    rateLimit: input.rateLimit,
+    costUsd: sessions.reduce((n, s) => n + s.state.totalCostUsd, 0),
+    totalCycles: input.totalCycles,
+    lastCycleReason: latest?.lastCycleReason ?? null,
+    workerHealth: { processAlive: input.worker.alive, consecutiveFailures: input.worker.consecutiveFailures },
+    maxSessions: settings.maxSessions,
+    sessions: sessions.map((s) => ({
+      location: s.location,
+      chatId: s.state.chat.id,
+      title: s.title,
+      cwd: s.state.chat.cwd,
+      sdkSessionId: s.state.chat.sdkSessionId,
+      busy: s.busy,
+      turns: s.state.turnCount,
+      contextTokens: s.state.context.tokens,
+      lastActivityAt: s.state.lastActivityAt,
+    })),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export async function writeDaemonState(data: Record<string, unknown>): Promise<void> {
   try {
     await writeJsonAtomic(DAEMON_STATE_PATH, data);
   } catch (error: unknown) {
     log(`Failed to write daemon state: ${getErrorMessage(error)}`);
   }
-}
-
-/** One session's state, in daemon-state.json's shape. */
-export function daemonStateData(state: MetaState): Record<string, unknown> {
-  const uptime =
-    state.sessionStartTime > 0
-      ? Math.round((Date.now() - state.sessionStartTime) / 1000)
-      : 0;
-
-  const data = {
-    mode: "daemon",
-    pid: process.pid,
-    state: state.state,
-    sessionId: state.sessionId,
-    sessionUptimeSeconds: uptime,
-    // null rather than omitted, so readers can tell "default" from "not reported".
-    model: state.models.model ?? null,
-    fallbackModel: state.models.fallbackModel ?? null,
-    // What `model` actually resolved to — an alias like "opus" is resolved by
-    // the SDK's bundled Claude Code, which can lag the installed CLI.
-    resolvedModel: state.resolved.model,
-    claudeCodeVersion: state.resolved.claudeCodeVersion,
-    turns: { current: state.turnCount, threshold: state.thresholds.turnThreshold },
-    // Live context size, which is what `shouldCycle` compares against the
-    // threshold. Null until the first check lands. Replaces a `tokens.current`
-    // that reported cumulative input tokens against this same threshold —
-    // a number that measured something else entirely.
-    context: {
-      tokens: state.context.tokens,
-      maxTokens: state.context.maxTokens,
-      percentage: state.context.percentage,
-      checkedAt: state.context.checkedAt,
-      threshold: state.thresholds.tokenThreshold,
-    },
-    /** Input tokens (cache included) this session has read in. Resets each cycle. */
-    cumulativeInputTokens: state.totalInputTokens,
-    tokenUsageToday: state.tokenUsageToday,
-    /** Per-model token and cost breakdown for this session. */
-    modelUsage: state.modelUsage,
-    /** Plan rate-limit windows. Null on an API-key account, or before the first event. */
-    rateLimit: state.rateLimit,
-    costUsd: state.totalCostUsd,
-    totalCycles: state.totalCycles,
-    lastCycleReason: state.lastCycleReason,
-    /** A threshold was crossed and the cycle is waiting for the session to go idle. */
-    pendingCycleReason: state.pendingCycleReason,
-    workerHealth: {
-      processAlive: state.workerHealth.processAlive,
-      lastHealthyAt: state.workerHealth.lastHealthyAt || null,
-      consecutiveFailures: state.workerHealth.consecutiveFailures,
-    },
-    /** The Choomfie chat this session holds — the worker keeps the record, keyed by `id`. */
-    chat: {
-      id: state.chat.id,
-      cwd: state.chat.cwd,
-      sdkSessionId: state.chat.sdkSessionId,
-    },
-    updatedAt: new Date().toISOString(),
-  };
-  return data;
 }

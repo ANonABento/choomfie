@@ -1,12 +1,19 @@
 /**
- * Multi-session daemon: the session pool's routing, and the loopback tool
- * endpoint its sessions reach Choomfie through.
+ * The daemon: the session pool's routing, a chat session's compact and
+ * recovery, and the loopback tool endpoint sessions reach Choomfie through.
  */
 import { describe, expect, test } from "bun:test";
-import { parseDaemonControlRequest } from "@choomfie/shared";
-import { SessionPool, type LiveSession, type PoolChat } from "../daemon/hub/pool.ts";
+import { SessionPool, type LiveSession, type PoolChat } from "../daemon/pool.ts";
 import { startLocalMcp } from "../lib/remote-mcp.ts";
 import { formatChannelPrompt } from "../daemon/incoming.ts";
+import { Database } from "bun:sqlite";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { CLAUDE_BRAIN } from "@choomfie/shared";
+import { ChatStore } from "../lib/chats/store.ts";
+import { migrateLegacy } from "../daemon/hub.ts";
+import { PLUGIN_DIR } from "../daemon/constants.ts";
 
 class FakeSession implements LiveSession {
   pushed: string[] = [];
@@ -148,19 +155,11 @@ describe("SessionPool", () => {
   });
 });
 
-describe("hub routing details", () => {
+describe("inbound routing", () => {
   test("the location key routes but never reaches the prompt", () => {
     expect(formatChannelPrompt("hi", { chat_id: "ask:1", location_id: "g1", user: "k" })).toBe(
       '<channel source="choomfie" chat_id="ask:1" user="k">\nhi\n</channel>'
     );
-  });
-
-  test("a multi-session resume needs only the location", () => {
-    expect(parseDaemonControlRequest({ command: "resume", requestedAt: 1, location: "t1" })).toMatchObject({
-      command: "resume",
-      location: "t1",
-    });
-    expect(parseDaemonControlRequest({ command: "resume", requestedAt: 1 })).toBeNull();
   });
 });
 
@@ -203,6 +202,31 @@ describe("startLocalMcp", () => {
       expect(calls).toEqual(["reply"]);
     } finally {
       ep.stop();
+    }
+  });
+});
+
+describe("migrateLegacy", () => {
+  test("old shared chat: seeds folded in, binding dropped, sessions keep the cwd they ran in", () => {
+    const dir = mkdtempSync(join(tmpdir(), "migrate-"));
+    try {
+      const db = new Database(":memory:");
+      const chats = new ChatStore(db);
+      const old = chats.create({ locationId: "claude:global", brain: CLAUDE_BRAIN, backendRef: "sdk-1" });
+      chats.bind("claude:global", old.id);
+      const fresh = chats.create({ locationId: "t1", brain: CLAUDE_BRAIN });
+      const legacy = join(dir, "claude-chat.json");
+      writeFileSync(legacy, JSON.stringify({ current: { id: old.id, cwd: "/x" }, seeds: { [old.id]: "old summary" } }));
+
+      const seeds = migrateLegacy(db, { other: "kept" }, legacy);
+
+      expect(seeds).toEqual({ other: "kept", [old.id]: "old summary" });
+      expect(existsSync(legacy)).toBe(false);
+      expect(chats.bound("claude:global", CLAUDE_BRAIN)).toBeNull();
+      expect(chats.get(old.id)!.cwd).toBe(PLUGIN_DIR);
+      expect(chats.get(fresh.id)!.cwd).toBeNull(); // no session yet: gets the chat home
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

@@ -1,4 +1,9 @@
-import { existsSync } from "node:fs";
+/**
+ * Per-session bookkeeping shared by every daemon session: folding stream
+ * messages into state (turns, tokens, cost, rate limits), the cycling
+ * thresholds, the handoff summary, and the worker's health from its heartbeat.
+ */
+
 import { readFile } from "node:fs/promises";
 import type {
   ModelUsage,
@@ -8,56 +13,23 @@ import type {
   SDKRateLimitEvent,
   SDKResultMessage,
   SDKResultSuccess,
-  SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import { isHeartbeatStale, parseWorkerHeartbeat, workerHealthPath, type WorkerHeartbeat } from "@choomfie/shared";
 import {
-  CONTEXT_CHECK_FAILURE_LIMIT,
-  CONTEXT_CHECK_INTERVAL,
   CONTEXT_HARD_CEILING_MAX_FRACTION,
   CONTEXT_HARD_CEILING_RATIO,
   CYCLE_IDLE_DEBOUNCE_MS,
   DATA_DIR,
   HANDOFF_SUMMARY_TIMEOUT,
   HANDOFF_TURN_DRAIN_TIMEOUT,
-  INITIAL_RESTART_BACKOFF,
-  MAX_ERROR_RETRIES,
-  PLUGIN_DIR,
-  MAX_RESTART_BACKOFF,
-  WORKER_HEALTH_INTERVAL,
-  WORKER_MAX_CONSECUTIVE_FAILURES,
 } from "./constants.ts";
-import {
-  isHeartbeatStale,
-  parseWorkerHeartbeat,
-  readLiveChoomfiePid,
-  workerHealthPath,
-  type WorkerHeartbeat,
-} from "@choomfie/shared";
-import { CONTROL_POLL_INTERVAL_MS, INCOMING_POLL_INTERVAL_MS } from "@choomfie/shared";
 import { warnIfBundledCliStale } from "./cli-version.ts";
-import { takeControlRequest } from "./control.ts";
-import { formatChannelPrompt, takeInboundMessages } from "./incoming.ts";
 import { parseRateLimitInfo } from "./rate-limit.ts";
-import { loadHandoffs, getLastHandoffSummary, saveHandoff } from "./handoffs.ts";
-import { cleanup, todayKey } from "./lifecycle.ts";
-import { freshChat, saveChatState, withSeed } from "./chat-state.ts";
-import { log, setSessionId, verbose } from "./log.ts";
-import { createMessageGenerator } from "./message-generator.ts";
+import { todayKey } from "./lifecycle.ts";
+import { log, verbose } from "./log.ts";
 import { getErrorMessage } from "./error.ts";
-import {
-  createSession,
-  enableChannelNotifications,
-  extractAssistantText,
-  generateSessionId,
-  isUnrecoverableAnthropicError,
-} from "./session-core.ts";
-import { writeDaemonState } from "./state-file.ts";
-import type {
-  CycleOptions,
-  HandoffEntry,
-  MetaState,
-  StartSessionOptions,
-} from "./types.ts";
+import { extractAssistantText } from "./session-core.ts";
+import type { MetaState } from "./types.ts";
 
 function isCompactBoundaryMessage(
   message: SDKMessage
@@ -65,213 +37,11 @@ function isCompactBoundaryMessage(
   return message.type === "system" && message.subtype === "compact_boundary";
 }
 
-export async function startSession(
-  state: MetaState,
-  handoffSummary?: string,
-  options: StartSessionOptions = {}
-): Promise<void> {
-  state.state = "STARTING";
-  state.turnCount = 0;
-  state.totalInputTokens = 0;
-  state.totalCostUsd = 0;
-  state.sessionStartTime = Date.now();
-  state.contextCheckFailures = 0;
-  state.lastAssistantText = null;
-  state.resultWaiters = [];
-  state.context = { tokens: null, maxTokens: null, percentage: null, checkedAt: null };
-  // Per-session, so it resets with the session. `state.rateLimit` deliberately
-  // does not — plan windows belong to the account and outlive any session.
-  state.modelUsage = {};
-  state.resolved = { model: null, claudeCodeVersion: null };
-  state.chat.sdkSessionId = null;
-  state.chat.seeds = withSeed(state.chat.seeds, state.chat.id, handoffSummary);
-  void saveChatState({ current: { id: state.chat.id, cwd: state.chat.cwd }, seeds: state.chat.seeds });
-  state.turnInFlight = false;
-  state.lastActivityAt = Date.now();
-  state.pendingCycleReason = null;
-
-  const sessionId = generateSessionId();
-  state.sessionId = sessionId;
-  setSessionId(sessionId);
-
-  log("Starting new Claude Code session...");
-
-  const { generator, push: enqueue, close } = createMessageGenerator();
-  // Every prompt opens a turn and restarts the idle clock, whoever pushed it —
-  // the incoming sweep, the cycle announcement, or the handoff request.
-  const push = (msg: SDKUserMessage) => {
-    state.turnInFlight = true;
-    state.lastActivityAt = Date.now();
-    enqueue(msg);
-  };
-  state.pushMessage = push;
-  state.closeGenerator = close;
-
-  state.session = createSession(generator, handoffSummary, state.models, {
-    cwd: state.chat.cwd,
-    resume: options.resume,
-  });
-
-  void consumeSessionStream(state).catch((error: unknown) => {
-    log(`Session stream error: ${getErrorMessage(error)}`);
-    void handleStreamError(state, error);
-  });
-
-  await new Promise((resolve) => setTimeout(resolve, 3000));
-
-  // Expected to fail on every current SDK build — `enableChannel` demands a
-  // marketplace-sourced plugin and Choomfie loads locally. Kept as a tripwire:
-  // the day it succeeds is the day daemon sessions could use the same delivery
-  // path as foreground, and this line is how we find out. Inbound messages do
-  // not depend on it either way — they arrive through the incoming queue below.
-  try {
-    await enableChannelNotifications(state.session);
-    log("Channel notifications enabled (choomfie MCP server)");
-  } catch (error: unknown) {
-    verbose(
-      `Channel capability unavailable (${getErrorMessage(error)}) — ` +
-        "inbound messages will arrive through meta/incoming instead.",
-    );
-  }
-
-  state.state = "ACTIVE";
-  log("Session active");
-
-  void writeDaemonState(state);
-  startContextMonitor(state);
-  startWorkerHealthMonitor(state);
-  startControlMonitor(state);
-  startIncomingMonitor(state);
-
-  // Messages that arrived while this session was starting are still sitting in
-  // meta/incoming — the worker keeps writing through a cycle, and the sweep above
-  // only skips them while the state is not ACTIVE. The first tick delivers
-  // them, so a message sent mid-cycle is answered a second late rather than
-  // lost. (There used to be an in-memory `messageQueue` here meant to do this;
-  // nothing ever pushed to it, because messages reached the session through MCP
-  // and never passed through the daemon at all.)
-  state.restartBackoff = INITIAL_RESTART_BACKOFF;
-
-  // A cycle someone asked for gets reported back where they asked, and says
-  // which of the two it was — after a `/clear` there is no handoff summary, so
-  // "what were we doing?" would be a question the new session cannot answer.
-  if (options.announceTo) {
-    log(`Reporting ${options.requestedCommand ?? "cycle"} back to channel ${options.announceTo}`);
-    push({
-      type: "user",
-      message: {
-        role: "user",
-        content:
-          announcementFor(options, handoffSummary, state.chat.cwd) +
-          `Post a brief, casual message in channel ${options.announceTo} confirming you're back. ` +
-          "Use the reply tool with that channel_id. Keep it to one line.",
-      },
-      parent_tool_use_id: null,
-    });
-    return;
-  }
-
-  if (handoffSummary && state.totalCycles > 0) {
-    log("Notifying Discord of session cycle...");
-    push({
-      type: "user",
-      message: {
-        role: "user",
-        content:
-          "Your daemon session was just cycled (fresh context). " +
-          "Send a brief message to the most recently active Discord channel " +
-          "letting them know you're back online. Keep it casual and short — " +
-          "something like 'Back online, fresh brain. What were we doing?' " +
-          "If no channel was active, skip this.",
-      },
-      parent_tool_use_id: null,
-    });
-  }
-}
-
-async function consumeSessionStream(state: MetaState): Promise<void> {
-  if (!state.session) return;
-
-  try {
-    for await (const message of state.session) {
-      handleSessionMessage(state, message);
-    }
-  } catch (error: unknown) {
-    if (error instanceof Error && error.name === "AbortError") {
-      log("Session aborted");
-    } else {
-      throw error;
-    }
-  }
-
-  log("Session stream closed");
-}
-
-export async function handleStreamError(
-  state: MetaState,
-  initialError: unknown
-): Promise<void> {
-  if (state.state === "CYCLING" || state.state === "DRAINING") {
-    verbose("Stream error during cycling/draining — ignoring");
-    return;
-  }
-
-  let error = initialError;
-  for (let attempt = 1; attempt <= MAX_ERROR_RETRIES; attempt++) {
-    const unrecoverable = isUnrecoverableAnthropicError(error);
-
-    log(
-      `Session stream failed: ${getErrorMessage(error)}` +
-        (unrecoverable ? "" : ` (attempt ${attempt}/${MAX_ERROR_RETRIES})`)
-    );
-
-    stopWorkerHealthMonitor(state);
-    try {
-      state.closeGenerator?.();
-      state.session?.close();
-    } catch {
-      // Best-effort cleanup.
-    }
-    state.session = null;
-    state.pushMessage = null;
-    state.closeGenerator = null;
-    state.resultWaiters = [];
-
-    // Bad credentials or exhausted billing will not fix themselves — retrying
-    // just burns MAX_ERROR_RETRIES rounds of backoff before failing anyway.
-    if (unrecoverable) {
-      log(
-        "Not retrying: this is an authentication or billing error. " +
-          "Re-authenticate Claude Code (`claude` login) or check your plan status, " +
-          "then restart the daemon."
-      );
-      return;
-    }
-
-    const delay = state.restartBackoff;
-    state.restartBackoff = Math.min(state.restartBackoff * 2, MAX_RESTART_BACKOFF);
-
-    log(`Restarting session in ${delay}ms...`);
-    await new Promise((resolve) => setTimeout(resolve, delay));
-
-    const handoffs = await loadHandoffs();
-    const lastSummary = getLastHandoffSummary(handoffs);
-
-    try {
-      await startSession(state, lastSummary);
-      log("Session restarted successfully after error");
-      return;
-    } catch (restartError: unknown) {
-      error = restartError;
-    }
-  }
-
-  log(`FATAL: Failed to restart session after ${MAX_ERROR_RETRIES} attempts. Exiting.`);
-  await cleanup(state);
-  process.exit(1);
-}
-
-export function handleSessionMessage(state: MetaState, message: SDKMessage): void {
+/**
+ * Fold one stream message into the session's state. `onChange` fires when
+ * something the state file reports changed (rate limits, model, session id).
+ */
+export function handleSessionMessage(state: MetaState, message: SDKMessage, onChange: () => void = () => {}): void {
   // Anything the session emits means it is not idle. A result closes the turn
   // (error results too, or a failed turn would block cycling forever); output
   // from the model means one is open, even if the SDK merged queued prompts.
@@ -337,7 +107,7 @@ export function handleSessionMessage(state: MetaState, message: SDKMessage): voi
       verbose(`rate_limit_event: ${JSON.stringify(info)}`);
 
       // Account-level, not session-level: deliberately *not* reset by
-      // startSession, so `/usage` still has an answer straight after a cycle.
+      // a compact, so `/usage` still has an answer straight after one.
       const snapshot = parseRateLimitInfo(info);
       if (snapshot) {
         const previous = state.rateLimit?.status;
@@ -349,7 +119,7 @@ export function handleSessionMessage(state: MetaState, message: SDKMessage): voi
             .join(", ");
           log(`Rate limit ${snapshot.status ?? "unknown"}: ${windows}`);
         }
-        void writeDaemonState(state);
+        onChange();
       }
       break;
     }
@@ -358,10 +128,10 @@ export function handleSessionMessage(state: MetaState, message: SDKMessage): voi
       if (isCompactBoundaryMessage(message)) {
         log("Context compaction occurred");
       } else if (message.subtype === "init") {
-        // The SDK session id is what `/chat resume` brings back later.
+        // The SDK session id is what `/resume` brings back later.
         if (message.session_id && state.chat.sdkSessionId !== message.session_id) {
           state.chat.sdkSessionId = message.session_id;
-          void writeDaemonState(state);
+          onChange();
         }
         // Sent at the start of every prompt, not once per session: only act
         // when it says something new.
@@ -378,7 +148,7 @@ export function handleSessionMessage(state: MetaState, message: SDKMessage): voi
         };
         log(`Session model: ${message.model} (bundled Claude Code ${message.claude_code_version})`);
         if (firstInit) void warnIfBundledCliStale(message.claude_code_version);
-        void writeDaemonState(state);
+        onChange();
       }
       break;
     }
@@ -421,73 +191,6 @@ export function resultInputTokens(state: MetaState, result: SDKResultMessage): n
   );
 }
 
-export function startContextMonitor(state: MetaState): void {
-  if (state.contextCheckTimer) {
-    clearInterval(state.contextCheckTimer);
-  }
-
-  state.contextCheckTimer = setInterval(async () => {
-    if (state.state !== "ACTIVE" || !state.session) return;
-
-    try {
-      const usage = await state.session.getContextUsage();
-      const tokens = usage.totalTokens;
-      const pct = usage.percentage;
-
-      state.contextCheckFailures = 0;
-      // Kept so the state file can report the number cycling actually watches.
-      // It reported `totalInputTokens` (cumulative across the session) against
-      // `tokenThreshold` (compared below against live context size) — two
-      // different quantities under one label, so /status and `--status` were
-      // both showing a figure that could never reach its own threshold.
-      state.context = {
-        tokens,
-        maxTokens: usage.maxTokens,
-        percentage: pct,
-        checkedAt: Date.now(),
-      };
-
-      log(
-        `Context: ${tokens}/${usage.maxTokens} tokens (${pct.toFixed(1)}%), ` +
-          `${state.turnCount}/${state.thresholds.turnThreshold} turns, ` +
-          `$${state.totalCostUsd.toFixed(4)}`
-      );
-
-      if (tokens >= hardCeiling(state)) {
-        // The one case that doesn't wait: past here the session is about to
-        // hit the real context limit, finished or not.
-        state.lastCycleReason = "token_ceiling";
-        log(`Hard ceiling reached (${tokens} >= ${hardCeiling(state)}) — forcing session cycle`);
-        await cycleSession(state, tokens);
-        return;
-      }
-
-      if (shouldCycle(state, tokens)) {
-        markCyclePending(
-          state,
-          state.turnCount >= state.thresholds.turnThreshold
-            ? "turn_threshold"
-            : "token_threshold"
-        );
-      }
-
-      void writeDaemonState(state);
-    } catch (error: unknown) {
-      state.contextCheckFailures++;
-      log(
-        `Context check failed (${state.contextCheckFailures}/${CONTEXT_CHECK_FAILURE_LIMIT}): ${getErrorMessage(error)}`
-      );
-
-      if (state.contextCheckFailures >= CONTEXT_CHECK_FAILURE_LIMIT) {
-        log("Context checks failing repeatedly — falling back to turn-count cycling");
-        if (shouldCycle(state)) {
-          markCyclePending(state, "turn_threshold_fallback");
-        }
-      }
-    }
-  }, CONTEXT_CHECK_INTERVAL);
-}
-
 export function shouldCycle(state: MetaState, contextTokens?: number): boolean {
   if (state.state !== "ACTIVE") return false;
   if (state.turnCount >= state.thresholds.turnThreshold) return true;
@@ -516,42 +219,11 @@ export function hardCeiling(state: MetaState): number {
 }
 
 /**
- * Record that a soft threshold was crossed. The cycle itself waits for
- * `isIdleForCycle` — cycling straight from the context timer is what used to
- * replace sessions halfway through a multi-step task.
+ * Idle enough to compact without cutting anything off: no turn in flight and
+ * quiet for the debounce period. Any prompt or stream message resets the clock.
  */
-export function markCyclePending(state: MetaState, reason: string): void {
-  if (state.pendingCycleReason) return;
-  state.pendingCycleReason = reason;
-  log(`Threshold reached (${reason}) — cycle pending until the session is idle`);
-}
-
-/**
- * Idle enough to cycle without cutting anything off: no turn in flight, no
- * inbound message waiting, and quiet for the debounce period.
- */
-export function isIdleForCycle(
-  state: MetaState,
-  incomingEmpty: boolean,
-  now = Date.now()
-): boolean {
-  return (
-    state.state === "ACTIVE" &&
-    !state.turnInFlight &&
-    incomingEmpty &&
-    now - state.lastActivityAt >= CYCLE_IDLE_DEBOUNCE_MS
-  );
-}
-
-/** Run the pending cycle, if there is one and the session has gone idle. */
-export async function runPendingCycleIfIdle(
-  state: MetaState,
-  incomingEmpty: boolean
-): Promise<void> {
-  if (!state.pendingCycleReason || !isIdleForCycle(state, incomingEmpty)) return;
-  state.lastCycleReason = state.pendingCycleReason;
-  log(`Session idle — running pending cycle (${state.pendingCycleReason})`);
-  await cycleSession(state, state.context.tokens ?? undefined);
+export function isIdleForCycle(state: MetaState, now = Date.now()): boolean {
+  return state.state === "ACTIVE" && !state.turnInFlight && now - state.lastActivityAt >= CYCLE_IDLE_DEBOUNCE_MS;
 }
 
 /**
@@ -652,272 +324,20 @@ export function waitForResult(
   });
 }
 
-export async function cycleSession(
-  state: MetaState,
-  tokenCount?: number,
-  options: CycleOptions = {}
-): Promise<void> {
-  if (state.state !== "ACTIVE") {
-    log("Cannot cycle: not in ACTIVE state");
-    return;
-  }
-
-  state.state = "DRAINING";
-  state.totalCycles++;
-  log(`Draining session... (cycle #${state.totalCycles}, reason: ${state.lastCycleReason || "threshold"})`);
-
-  stopWorkerHealthMonitor(state);
-  stopControlMonitor(state);
-  stopIncomingMonitor(state);
-  if (state.contextCheckTimer) {
-    clearInterval(state.contextCheckTimer);
-    state.contextCheckTimer = null;
-  }
-
-  // A `/clear` deliberately skips the summary — that is the whole difference
-  // between it and `/compact`. Asking the outgoing session for one anyway would
-  // burn a turn and 30s of timeout producing text nothing will read.
-  const summary = options.skipHandoff
-    ? undefined
-    : await captureHandoffSummary(state);
-
-  // Switching chats: the outgoing transcript stays on disk for a later resume,
-  // and the incoming chat brings back the summary its session started with.
-  // Recorded as this handoff too, so a daemon restart carries the new chat on.
-  let nextSummary = summary;
-  if (options.nextChat) {
-    state.chat.id = options.nextChat.id;
-    state.chat.cwd = options.nextChat.cwd;
-    nextSummary = options.resume ? state.chat.seeds[options.nextChat.id] : undefined;
-  }
-  const switched = options.requestedCommand === "resume";
-
-  // Recorded either way: handoffs.json is the log of what happened to sessions,
-  // and a cleared one is exactly the entry you want when the next session turns
-  // out to be missing context you expected it to have.
-  const handoff: HandoffEntry = {
-    sessionId: state.sessionId,
-    timestamp: new Date().toISOString(),
-    summary:
-      nextSummary ??
-      `${switched ? "Switched chats" : "Context cleared on request"} — nothing carried forward. ` +
-        `(${state.turnCount} turns, $${state.totalCostUsd.toFixed(4)})`,
-    tokenCount: tokenCount ?? state.context.tokens ?? state.totalInputTokens,
-    turnCount: state.turnCount,
-    costUsd: state.totalCostUsd,
+/**
+ * At most `max` events per rolling `windowMs`: returns a gate that says
+ * whether the next one may go ahead (and counts it if so). Keeps a recovery
+ * action from turning into a loop.
+ */
+export function rateBudget(max: number, windowMs: number, now = () => Date.now()): () => boolean {
+  const times: number[] = [];
+  return () => {
+    const t = now();
+    while (times.length && t - times[0] >= windowMs) times.shift();
+    if (times.length >= max) return false;
+    times.push(t);
+    return true;
   };
-  await saveHandoff(handoff);
-
-  state.state = "CYCLING";
-  log("Cycling session...");
-
-  try {
-    state.closeGenerator?.();
-    state.session?.close();
-  } catch (error: unknown) {
-    log(`Error closing session: ${getErrorMessage(error)}`);
-  }
-
-  state.session = null;
-  state.pushMessage = null;
-  state.closeGenerator = null;
-  state.resultWaiters = [];
-
-  await new Promise((resolve) => setTimeout(resolve, 2000));
-  await startSession(state, nextSummary, {
-    announceTo: options.announceTo,
-    requestedCommand: options.requestedCommand,
-    resume: options.resume,
-    chatTitle: options.chatTitle,
-  });
-}
-
-/** What the replacement session is told, so its "I'm back" line is accurate. */
-export function announcementFor(
-  options: StartSessionOptions,
-  handoffSummary: string | undefined,
-  cwd: string
-): string {
-  const where = cwd === PLUGIN_DIR ? "" : `You're now working in ${cwd}. `;
-  const title = options.chatTitle ? ` "${options.chatTitle}"` : "";
-  switch (options.requestedCommand) {
-    case "resume":
-      return (
-        `An earlier conversation${title} was just resumed from Discord with /resume — ` +
-        `the history above is that conversation, picked up where it left off. ${where}`
-      );
-    case "clear":
-      return (
-        "A /clear was just requested from Discord and your session has been replaced.\n" +
-        "Context was cleared — you have no memory of the previous conversation, " +
-        `though saved memories and reminders are untouched. ${where}`
-      );
-    default:
-      return (
-        "A /compact was just requested from Discord and your session has been replaced.\n" +
-        (handoffSummary
-          ? "Context was compacted — the handoff summary above is what carried over. "
-          : "Context was cleared — you have no memory of the previous conversation, " +
-            "though saved memories and reminders are untouched. ")
-      );
-  }
-}
-
-/** A cwd the daemon can actually start in; anything else falls back to the plugin dir. */
-function usableCwd(cwd: string | undefined): string {
-  if (cwd && existsSync(cwd)) return cwd;
-  if (cwd) log(`Requested cwd ${cwd} does not exist — using ${PLUGIN_DIR}`);
-  return PLUGIN_DIR;
-}
-
-/**
- * Poll for `/compact`, `/clear` and `/stop` requests written by the worker.
- *
- * A separate, faster timer than the health monitor: someone typed a command and
- * is watching Discord for a response, so 30s is far too long to wait.
- */
-export function startControlMonitor(state: MetaState): void {
-  stopControlMonitor(state);
-
-  state.controlTimer = setInterval(async () => {
-    // Only consume while ACTIVE. Mid-cycle the request would be dropped on the
-    // floor; left on disk it is picked up seconds later by the new session.
-    if (state.state !== "ACTIVE" || !state.session) return;
-
-    try {
-      const request = await takeControlRequest();
-      if (!request) return;
-
-      log(
-        `Control request: ${request.command}` +
-          (request.requestedBy ? ` from ${request.requestedBy}` : "")
-      );
-      if (request.command === "stop") {
-        // Keep the session; interrupt only the turn in flight, like Esc in
-        // Claude Code. The interrupted turn still ends in a result, which
-        // clears turnInFlight as usual.
-        if (!state.turnInFlight) {
-          log("Nothing to stop: no turn in flight");
-          return;
-        }
-        await state.session.interrupt();
-        log("Interrupted the turn in flight");
-        return;
-      }
-
-      state.lastCycleReason = `requested_${request.command}`;
-      if (request.command === "resume") {
-        // The outgoing session needs no summary: its transcript is kept, and
-        // resuming it later loads that directly.
-        await cycleSession(state, state.context.tokens ?? undefined, {
-          skipHandoff: true,
-          announceTo: request.chatId,
-          requestedCommand: "resume",
-          nextChat: { id: request.targetChat!, cwd: usableCwd(request.cwd) },
-          resume: request.sdkSessionId,
-          chatTitle: request.title,
-        });
-        return;
-      }
-      await cycleSession(state, state.context.tokens ?? undefined, {
-        skipHandoff: request.command === "clear",
-        announceTo: request.chatId,
-        requestedCommand: request.command,
-        // A cleared session is a new chat (same cwd unless asked); a compacted one carries on.
-        ...(request.command === "clear"
-          ? { nextChat: freshChat(request.cwd ? usableCwd(request.cwd) : state.chat.cwd) }
-          : {}),
-      });
-    } catch (error: unknown) {
-      log(`Control request failed: ${getErrorMessage(error)}`);
-    }
-  }, CONTROL_POLL_INTERVAL_MS);
-}
-
-export function stopControlMonitor(state: MetaState): void {
-  if (state.controlTimer) {
-    clearInterval(state.controlTimer);
-    state.controlTimer = null;
-  }
-}
-
-/**
- * Sweep the incoming queue and feed each waiting Discord message into the session.
- *
- * This is the daemon's delivery path for inbound messages, standing in for the
- * `claude/channel` capability an Agent SDK session cannot register. The worker
- * writes each message to `meta/incoming/`; this turns it into the same `<channel>`
- * prompt Claude Code builds in foreground mode and pushes it onto the queue.
- *
- * Only while ACTIVE: `pushMessage` belongs to the live session, and a message
- * pushed mid-cycle would go to a generator that is already closing. Leaving it
- * on disk means the replacement session picks it up a second later instead —
- * which is why messages sent during a cycle are no longer lost.
- */
-export function startIncomingMonitor(state: MetaState): void {
-  stopIncomingMonitor(state);
-
-  // A sweep that outlives its interval must not overlap the next one, or the
-  // same file could be read twice before either delete lands.
-  let sweeping = false;
-
-  state.incomingTimer = setInterval(async () => {
-    if (sweeping) return;
-    if (state.state !== "ACTIVE" || !state.session || !state.pushMessage) return;
-
-    sweeping = true;
-    try {
-      const messages = await takeInboundMessages();
-      if (messages.length === 0) {
-        // The queue is empty, so this is the one place that can tell whether a
-        // pending cycle may run. Delivered messages restart the idle clock.
-        await runPendingCycleIfIdle(state, true);
-        return;
-      }
-      for (const [index, message] of messages.entries()) {
-        // Re-checked per message: a batch can outlive the session it started
-        // under. `push` on a closed generator does not throw — it appends to a
-        // queue nothing is reading — so the message would vanish without a
-        // trace. These are already off disk, so say what was lost.
-        if (state.state !== "ACTIVE" || !state.pushMessage) {
-          log(
-            `Session went away mid-sweep — dropped ${messages.length - index} ` +
-              "already-consumed message(s)",
-          );
-          break;
-        }
-
-        verbose(
-          `Inbound message from ${message.meta.user ?? "unknown"} ` +
-            `in ${message.meta.chat_id ?? "unknown channel"}`
-        );
-        state.pushMessage({
-          type: "user",
-          message: {
-            role: "user",
-            content: formatChannelPrompt(message.content, message.meta),
-          },
-          parent_tool_use_id: null,
-        });
-      }
-    } catch (error: unknown) {
-      log(`Incoming sweep failed: ${getErrorMessage(error)}`);
-    } finally {
-      sweeping = false;
-    }
-  }, INCOMING_POLL_INTERVAL_MS);
-}
-
-export function stopIncomingMonitor(state: MetaState): void {
-  if (state.incomingTimer) {
-    clearInterval(state.incomingTimer);
-    state.incomingTimer = null;
-  }
-}
-
-export async function checkWorkerProcessAlive(): Promise<boolean> {
-  const supervisorPidPath = `${DATA_DIR}/choomfie.pid`;
-  return (await readLiveChoomfiePid(supervisorPidPath)) !== null;
 }
 
 /**
@@ -928,7 +348,7 @@ export async function checkWorkerProcessAlive(): Promise<boolean> {
  * gateway dropped or whose event loop is wedged passes it indefinitely. The
  * heartbeat distinguishes "running" from "working".
  */
-export async function assessWorkerHealth(): Promise<{
+export async function assessWorkerHealth(processAlive: boolean): Promise<{
   healthy: boolean;
   reason: string;
   /**
@@ -947,13 +367,12 @@ export async function assessWorkerHealth(): Promise<{
     heartbeat = null;
   }
 
-  // No heartbeat yet (worker still booting, or an older build): fall back to
-  // the process check so we never cycle a worker that is simply starting up.
+  // No heartbeat yet (worker still booting): fall back to the process check
+  // so we never restart a worker that is simply starting up.
   if (!heartbeat) {
-    const alive = await checkWorkerProcessAlive();
     return {
-      healthy: alive,
-      reason: alive ? "process alive (no heartbeat yet)" : "process not alive",
+      healthy: processAlive,
+      reason: processAlive ? "process alive (no heartbeat yet)" : "process not alive",
     };
   }
 
@@ -976,70 +395,4 @@ export async function assessWorkerHealth(): Promise<{
 
   const ping = heartbeat.wsPing === null ? "?" : `${heartbeat.wsPing}ms`;
   return { healthy: true, reason: `heartbeat fresh, gateway up (${ping})` };
-}
-
-export async function checkWorkerHealth(state: MetaState): Promise<void> {
-  if (state.state !== "ACTIVE" || !state.pushMessage) {
-    verbose("Skipping worker health check — session not active");
-    return;
-  }
-
-  const { healthy, reason, cycleWontHelp } = await assessWorkerHealth();
-  state.workerHealth.processAlive = healthy;
-
-  if (!healthy && cycleWontHelp) {
-    // Degraded, but respawning would just loop forever. Report it and hold.
-    state.workerHealth.consecutiveFailures = 0;
-    log(`Worker health: DEGRADED — ${reason} (not cycling; a restart cannot fix this)`);
-    return;
-  }
-
-  if (!healthy) {
-    state.workerHealth.consecutiveFailures++;
-    log(
-      `Worker health: UNHEALTHY — ${reason} ` +
-        `(failure ${state.workerHealth.consecutiveFailures}/${WORKER_MAX_CONSECUTIVE_FAILURES})`
-    );
-
-    if (
-      state.workerHealth.consecutiveFailures >= WORKER_MAX_CONSECUTIVE_FAILURES &&
-      state.state === "ACTIVE"
-    ) {
-      log(`Worker unhealthy (${reason}) — triggering session cycle to respawn`);
-      state.lastCycleReason = "worker_unhealthy";
-      stopWorkerHealthMonitor(state);
-      await cycleSession(state);
-    }
-    return;
-  }
-
-  state.workerHealth.consecutiveFailures = 0;
-  state.workerHealth.lastHealthyAt = Date.now();
-
-  verbose(`Worker health: ${reason}`);
-}
-
-export function startWorkerHealthMonitor(state: MetaState): void {
-  if (state.workerHealthTimer) {
-    clearInterval(state.workerHealthTimer);
-  }
-
-  setTimeout(() => {
-    void checkWorkerHealth(state);
-  }, 15_000);
-
-  state.workerHealthTimer = setInterval(async () => {
-    try {
-      await checkWorkerHealth(state);
-    } catch (error: unknown) {
-      log(`Worker health check error: ${getErrorMessage(error)}`);
-    }
-  }, WORKER_HEALTH_INTERVAL);
-}
-
-export function stopWorkerHealthMonitor(state: MetaState): void {
-  if (state.workerHealthTimer) {
-    clearInterval(state.workerHealthTimer);
-    state.workerHealthTimer = null;
-  }
 }

@@ -231,7 +231,7 @@ describe("/clear and /compact follow the channel's brain", () => {
   test("/clear in a brain channel starts a new chat for this channel only, keeping the old one", async () => {
     const { replies, resets, chats, before } = await run("clear", "testbrain");
     expect(resets).toEqual(["chan1"]);
-    expect(JSON.stringify(replies[0].embeds)).toContain("Fresh TestBrain conversation");
+    expect(JSON.stringify(replies[0].embeds)).toContain("New TestBrain chat");
     const now = chats.bound("chan1", "testbrain");
     expect(now?.id).not.toBe(before.id);
     expect(chats.get(before.id)).not.toBeNull();
@@ -239,7 +239,7 @@ describe("/clear and /compact follow the channel's brain", () => {
 
   test("/clear works for a brain without a reset hook", async () => {
     const { replies, chats, before } = await run("clear", "testbrain", false);
-    expect(JSON.stringify(replies[0].embeds)).toContain("Fresh TestBrain conversation");
+    expect(JSON.stringify(replies[0].embeds)).toContain("New TestBrain chat");
     expect(chats.bound("chan1", "testbrain")?.id).not.toBe(before.id);
   });
 

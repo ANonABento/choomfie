@@ -1,22 +1,19 @@
 /**
- * Chats: location → conversation bindings, the Claude chat the daemon holds,
- * Waymond's one-time import, and the daemon-side pieces behind /chat.
+ * Chats: location → conversation bindings, titles, the cwd allowlist,
+ * auto-thread, and the daemon-side pieces behind /clear and /resume.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CLAUDE_BRAIN, parseDaemonControlRequest, titleFrom, UNTITLED_CHAT } from "@choomfie/shared";
+import { CLAUDE_BRAIN, titleFrom, UNTITLED_CHAT } from "@choomfie/shared";
 import { ChatStore } from "../lib/chats/store.ts";
-import { applyClaudeHold, CLAUDE_GLOBAL } from "../lib/chats/claude.ts";
 import { resolveChatCwd, shortPath } from "../lib/chats/here.ts";
 import { isOwnThread, wantsThread } from "../lib/chats/auto-thread.ts";
 import { ConfigManager } from "../lib/config.ts";
 import { ChannelType } from "discord.js";
-import { parseChatState, withSeed } from "../daemon/chat-state.ts";
-import { announcementFor } from "../daemon/runtime.ts";
-import { PLUGIN_DIR } from "../daemon/constants.ts";
+import { parseSeeds, withSeed } from "../daemon/seeds.ts";
 
 const store = () => new ChatStore(new Database(":memory:"));
 
@@ -93,35 +90,6 @@ describe("titleFrom", () => {
   });
 });
 
-describe("Claude chat from the daemon's snapshot", () => {
-  test("creates the record bound to the shared slot, titled by the first message", () => {
-    const chats = store();
-    const chat = applyClaudeHold(chats, { id: "c1", cwd: "/p", sdkSessionId: null }, "plan the robot arm")!;
-    expect(chat.title).toBe("plan the robot arm");
-    expect(chat.brain).toBe(CLAUDE_BRAIN);
-    expect(chats.bound(CLAUDE_GLOBAL, CLAUDE_BRAIN)?.id).toBe("c1");
-  });
-
-  test("follows the live SDK session id and names an untitled chat once", () => {
-    const chats = store();
-    applyClaudeHold(chats, { id: "c1", cwd: "/p", sdkSessionId: null });
-    expect(chats.get("c1")!.title).toBe(UNTITLED_CHAT);
-    applyClaudeHold(chats, { id: "c1", cwd: "/p", sdkSessionId: "s1" }, "first words");
-    applyClaudeHold(chats, { id: "c1", cwd: "/p", sdkSessionId: "s2" }, "later words");
-    const got = chats.get("c1")!;
-    expect(got.title).toBe("first words");
-    expect(got.backendRef).toBe("s2");
-  });
-
-  test("a new held chat takes over the shared slot", () => {
-    const chats = store();
-    applyClaudeHold(chats, { id: "c1", cwd: "/p", sdkSessionId: "s1" });
-    applyClaudeHold(chats, { id: "c2", cwd: "/q", sdkSessionId: null });
-    expect(chats.bound(CLAUDE_GLOBAL, CLAUDE_BRAIN)?.id).toBe("c2");
-    expect(chats.get("c1")!.backendRef).toBe("s1");
-  });
-});
-
 describe("cwd allowlist", () => {
   test("allows a root and anything under it, refuses siblings and missing paths", () => {
     const root = tmp();
@@ -154,27 +122,35 @@ describe("cwd allowlist", () => {
   });
 });
 
-describe("daemon control: clear and resume", () => {
-  const base = { requestedAt: Date.now() };
-  test("resume carries the chat, session and cwd; clear can carry a cwd", () => {
-    const r = parseDaemonControlRequest({ ...base, command: "resume", targetChat: "c1", sdkSessionId: "s1", cwd: "/p", title: "t" });
-    expect(r).toMatchObject({ command: "resume", targetChat: "c1", sdkSessionId: "s1", cwd: "/p", title: "t" });
-    expect(parseDaemonControlRequest({ ...base, command: "clear", cwd: "/q" })?.cwd).toBe("/q");
-    expect(parseDaemonControlRequest({ ...base, command: "new", targetChat: "c2" })).toBeNull();
+describe("current(): the chat for a message", () => {
+  test("each location gets its own chat, titled from its first message", () => {
+    const chats = store();
+    const a = chats.current("t1", CLAUDE_BRAIN, "<@1> plan the gripper");
+    const b = chats.current("t2", CLAUDE_BRAIN, "robot wiring");
+    expect(a.title).toBe("plan the gripper");
+    expect(b.id).not.toBe(a.id);
+    expect(chats.current("t1", CLAUDE_BRAIN, "more").id).toBe(a.id);
+    expect(chats.get(a.id)!.title).toBe("plan the gripper");
   });
 
-  test("resume is refused without what the daemon needs to act", () => {
-    expect(parseDaemonControlRequest({ ...base, command: "resume", targetChat: "c1" })).toBeNull();
+  test("an untitled chat (from /clear) takes its title from the next message", () => {
+    const chats = store();
+    const fresh = chats.start("t1", CLAUDE_BRAIN);
+    expect(fresh.title).toBe(UNTITLED_CHAT);
+    expect(chats.current("t1", CLAUDE_BRAIN, "   ").title).toBe(UNTITLED_CHAT);
+    expect(chats.current("t1", CLAUDE_BRAIN, "wire the arm").title).toBe("wire the arm");
+  });
+
+  test("brains keep separate chats at one location", () => {
+    const chats = store();
+    expect(chats.current("c", CLAUDE_BRAIN, "x").id).not.toBe(chats.current("c", "waymond", "y").id);
   });
 });
 
-describe("daemon chat state", () => {
-  test("parses only a well-formed file", () => {
-    expect(parseChatState({ current: { id: "c", cwd: "/p" }, seeds: { c: "s", bad: 1 } })).toEqual({
-      current: { id: "c", cwd: "/p" },
-      seeds: { c: "s" },
-    });
-    expect(parseChatState({ current: { id: 1 } })).toBeNull();
+describe("seeds", () => {
+  test("only string summaries are read back", () => {
+    expect(parseSeeds({ c: "s", bad: 1 })).toEqual({ c: "s" });
+    expect(parseSeeds(null)).toEqual({});
   });
 
   test("seeds are replaced per chat and capped", () => {
@@ -184,13 +160,6 @@ describe("daemon chat state", () => {
     expect(seeds.c39).toBe("s39");
     expect(seeds.c0).toBeUndefined();
     expect(withSeed({ a: "1" }, "a", undefined)).toEqual({});
-  });
-
-  test("the replacement session is told what happened", () => {
-    expect(announcementFor({ requestedCommand: "resume", chatTitle: "arm" }, undefined, PLUGIN_DIR)).toContain('"arm" was just resumed');
-    expect(announcementFor({ requestedCommand: "clear" }, undefined, "/tmp/x")).toContain("working in /tmp/x");
-    expect(announcementFor({ requestedCommand: "clear" }, undefined, PLUGIN_DIR)).toContain("/clear");
-    expect(announcementFor({ requestedCommand: "compact" }, "sum", PLUGIN_DIR)).toContain("compacted");
   });
 });
 
@@ -231,32 +200,5 @@ describe("auto-thread", () => {
     cfg.setAutoThread("c1", true);
     expect(new ConfigManager(dir).getAutoThread("c1")).toBe(true);
     expect(new ConfigManager(dir).getConfig().inlineChannels).toBeUndefined();
-  });
-});
-
-describe("Claude chats per location (multi-session daemon)", () => {
-  test("each location gets its own chat, titled from its first message", async () => {
-    const { claudeChatAt, claudeIsPerLocation } = await import("../lib/chats/claude.ts");
-    const dir = mkdtempSync(join(tmpdir(), "perloc-"));
-    dirs.push(dir);
-    mkdirSync(join(dir, "meta"));
-    const { writeFileSync } = await import("node:fs");
-    const ctx = { DATA_DIR: dir, chats: store() } as never;
-    const prev = process.env.CHOOMFIE_DAEMON_PID;
-    process.env.CHOOMFIE_DAEMON_PID = "1"; // daemon-launched worker: reads the state file directly
-    try {
-      expect(await claudeIsPerLocation(ctx)).toBe(false);
-      writeFileSync(join(dir, "meta", "daemon-state.json"), JSON.stringify({ multiSession: true }));
-      expect(await claudeIsPerLocation(ctx)).toBe(true);
-      expect(await claudeChatAt(ctx, "t1")).toBeNull();
-      const a = await claudeChatAt(ctx, "t1", "plan the gripper");
-      const b = await claudeChatAt(ctx, "t2", "robot wiring");
-      expect(a!.title).toBe("plan the gripper");
-      expect(b!.id).not.toBe(a!.id);
-      expect((await claudeChatAt(ctx, "t1", "more"))!.id).toBe(a!.id);
-    } finally {
-      if (prev === undefined) delete process.env.CHOOMFIE_DAEMON_PID;
-      else process.env.CHOOMFIE_DAEMON_PID = prev;
-    }
   });
 });

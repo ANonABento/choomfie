@@ -18,15 +18,14 @@ import {
   handleSessionMessage,
   hardCeiling,
   isIdleForCycle,
-  markCyclePending,
-  runPendingCycleIfIdle,
+  rateBudget,
   shouldCycle,
   waitForResult,
 } from "../../daemon/runtime.ts";
 import type { MetaState } from "../../daemon/types.ts";
 
 function activeState(turnThreshold = 80, tokenThreshold = 120_000): MetaState {
-  const state = createInitialState({ turnThreshold, tokenThreshold });
+  const state = createInitialState({ turnThreshold, tokenThreshold, maxSessions: 3 }, { id: "c1", cwd: "/tmp" });
   state.state = "ACTIVE";
   return state;
 }
@@ -66,7 +65,7 @@ describe("shouldCycle", () => {
     const state = activeState(5, 1_000);
     state.turnCount = 99;
 
-    for (const phase of ["STARTING", "DRAINING", "CYCLING"] as const) {
+    for (const phase of ["STARTING", "CYCLING"] as const) {
       state.state = phase;
       expect(shouldCycle(state, 999_999)).toBe(false);
     }
@@ -89,25 +88,23 @@ describe("deferred cycling", () => {
     return state;
   }
 
-  test("idle only with no turn in flight, an empty queue, and the debounce elapsed", () => {
+  test("idle only with no turn in flight and the debounce elapsed", () => {
     const state = idleState();
-    expect(isIdleForCycle(state, true)).toBe(true);
-
-    expect(isIdleForCycle(state, false)).toBe(false);
+    expect(isIdleForCycle(state)).toBe(true);
 
     state.turnInFlight = true;
-    expect(isIdleForCycle(state, true)).toBe(false);
+    expect(isIdleForCycle(state)).toBe(false);
     state.turnInFlight = false;
 
     state.lastActivityAt = Date.now() - CYCLE_IDLE_DEBOUNCE_MS + 1_000;
-    expect(isIdleForCycle(state, true)).toBe(false);
+    expect(isIdleForCycle(state)).toBe(false);
   });
 
   test("never idle outside ACTIVE", () => {
     const state = idleState();
-    for (const phase of ["STARTING", "DRAINING", "CYCLING"] as const) {
+    for (const phase of ["STARTING", "CYCLING"] as const) {
       state.state = phase;
-      expect(isIdleForCycle(state, true)).toBe(false);
+      expect(isIdleForCycle(state)).toBe(false);
     }
   });
 
@@ -116,31 +113,13 @@ describe("deferred cycling", () => {
 
     handleSessionMessage(state, { type: "assistant", message: { content: [] } } as never);
     expect(state.turnInFlight).toBe(true);
-    expect(isIdleForCycle(state, true)).toBe(false);
+    expect(isIdleForCycle(state)).toBe(false);
 
     handleSessionMessage(state, { type: "result", subtype: "error_during_execution" } as never);
     expect(state.turnInFlight).toBe(false);
     // Closed, but the debounce restarts from the result.
-    expect(isIdleForCycle(state, true)).toBe(false);
-    expect(isIdleForCycle(state, true, Date.now() + CYCLE_IDLE_DEBOUNCE_MS)).toBe(true);
-  });
-
-  test("a threshold crossing only marks the cycle pending", async () => {
-    const state = activeState();
-    state.turnInFlight = true;
-    state.lastActivityAt = Date.now();
-
-    markCyclePending(state, "token_threshold");
-    expect(state.pendingCycleReason).toBe("token_threshold");
-
-    // Busy: runPendingCycleIfIdle must leave the session alone.
-    await runPendingCycleIfIdle(state, true);
-    expect(state.state).toBe("ACTIVE");
-    expect(state.totalCycles).toBe(0);
-
-    // A second crossing doesn't overwrite the first reason.
-    markCyclePending(state, "turn_threshold");
-    expect(state.pendingCycleReason).toBe("token_threshold");
+    expect(isIdleForCycle(state)).toBe(false);
+    expect(isIdleForCycle(state, Date.now() + CYCLE_IDLE_DEBOUNCE_MS)).toBe(true);
   });
 
   test("hard ceiling is 1.5x the threshold, capped below the real window", () => {
@@ -191,6 +170,18 @@ describe("deferred cycling", () => {
     } as never);
 
     expect(await summary).toBe("## Handoff Summary");
+  });
+});
+
+describe("rateBudget", () => {
+  test("allows max per window, then refuses until the oldest ages out", () => {
+    let t = 0;
+    const may = rateBudget(3, 1_000, () => t);
+    expect([may(), may(), may(), may()]).toEqual([true, true, true, false]);
+    t = 999;
+    expect(may()).toBe(false);
+    t = 1_000; // all three age out together
+    expect([may(), may(), may(), may()]).toEqual([true, true, true, false]);
   });
 });
 

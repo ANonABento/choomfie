@@ -1,27 +1,19 @@
 /**
- * One Claude chat's Agent SDK session in the hub's pool.
+ * One Claude chat's Agent SDK session in the daemon's pool.
  *
- * Reuses the single-session runtime's per-state pieces (usage and rate-limit
- * accounting, handoff summaries, cycle thresholds) on a MetaState of its own.
- * What differs: no plugin (tools come from the hub's endpoint), no monitors of
- * its own beyond context, and a cycle keeps the same chat — the summary seeds
- * the new session, and the chat's backendRef moves to the new SDK session.
+ * Tools come from the daemon's loopback endpoint; prompts are pushed by the
+ * daemon. When context gets heavy the session compacts: it writes a handoff
+ * summary, and the same chat carries on in a fresh SDK session seeded with it.
  */
 
 import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import {
-  CONTEXT_CHECK_INTERVAL,
-  CYCLE_IDLE_DEBOUNCE_MS,
-  INITIAL_RESTART_BACKOFF,
-  MAX_RESTART_BACKOFF,
-  PLUGIN_DIR,
-} from "../constants.ts";
-import { getErrorMessage } from "../error.ts";
-import { createInitialState } from "../lifecycle.ts";
-import { createMessageGenerator } from "../message-generator.ts";
-import { captureHandoffSummary, handleSessionMessage, hardCeiling, shouldCycle } from "../runtime.ts";
-import { createSession, isUnrecoverableAnthropicError } from "../session-core.ts";
-import type { DaemonSettings, MetaState } from "../types.ts";
+import { CHAT_HOME, CONTEXT_CHECK_INTERVAL, INITIAL_RESTART_BACKOFF, MAX_RESTART_BACKOFF } from "./constants.ts";
+import { getErrorMessage } from "./error.ts";
+import { createInitialState } from "./lifecycle.ts";
+import { createMessageGenerator } from "./message-generator.ts";
+import { captureHandoffSummary, handleSessionMessage, hardCeiling, isIdleForCycle, shouldCycle } from "./runtime.ts";
+import { createSession, isUnrecoverableAnthropicError } from "./session-core.ts";
+import type { DaemonSettings, MetaState } from "./types.ts";
 import type { LiveSession, PoolChat } from "./pool.ts";
 
 /** Give up on a session after this many stream failures in a row. */
@@ -34,15 +26,21 @@ export interface ChatSessionDeps {
   mcp: { url: string; token: string };
   /** Summary a chat's latest session started with (system prompt, not in the transcript). */
   seed(chatId: string): string | undefined;
-  setSeed(chatId: string, summary: string | undefined): void;
+  /** The chat compacted: its next session starts from `summary`. */
+  onCompacted(chatId: string, summary: string): void;
   /**
    * The SDK reported this chat's session id — store it as the chat's
-   * backendRef. Null after a compact: the next session starts from the seed.
+   * backendRef, along with the cwd it ran in (a resume must come back there).
+   * Null after a compact: the next session starts from the seed.
    */
-  onSessionId(chatId: string, sdkSessionId: string | null): void;
+  onSessionId(chatId: string, sdkSessionId: string | null, cwd: string): void;
   /** Input tokens this session just used, for the daemon's daily total. */
   onUsage(inputTokens: number): void;
+  /** Something the state file reports changed (rate limits, model). */
+  onChange(): void;
   log(message: string): void;
+  /** Replaces the Agent SDK (tests). */
+  createSession?: typeof createSession;
 }
 
 export class ChatSession implements LiveSession {
@@ -53,7 +51,7 @@ export class ChatSession implements LiveSession {
   private closed = false;
   private failed = false;
   private failures = 0;
-  private reportedSessionId: string | null = null;
+  private reportedSessionId: string | null;
   private contextTimer: ReturnType<typeof setInterval> | null = null;
   private compacting = false;
 
@@ -61,10 +59,7 @@ export class ChatSession implements LiveSession {
     this.chatId = deps.chat.id;
     this.location = deps.location;
     this.title = deps.chat.title;
-    this.state = createInitialState(deps.settings, {
-      current: { id: deps.chat.id, cwd: deps.chat.cwd ?? PLUGIN_DIR },
-      seeds: {},
-    });
+    this.state = createInitialState(deps.settings, { id: deps.chat.id, cwd: deps.chat.cwd ?? CHAT_HOME });
     this.reportedSessionId = deps.chat.backendRef;
   }
 
@@ -86,19 +81,26 @@ export class ChatSession implements LiveSession {
     s.lastAssistantText = null;
     s.resultWaiters = [];
     s.context = { tokens: null, maxTokens: null, percentage: null, checkedAt: null };
+    // Per-session, so it resets with the session. `rateLimit` deliberately
+    // does not — plan windows belong to the account.
     s.modelUsage = {};
     s.turnInFlight = false;
     s.lastActivityAt = Date.now();
     s.pendingCycleReason = null;
 
     const { generator, push: enqueue, close } = createMessageGenerator();
+    // Every prompt opens a turn and restarts the idle clock.
     s.pushMessage = (msg: SDKUserMessage) => {
       s.turnInFlight = true;
       s.lastActivityAt = Date.now();
       enqueue(msg);
     };
     s.closeGenerator = close;
-    const query = createSession(generator, summary, s.models, { cwd: s.chat.cwd, resume, mcp: this.deps.mcp });
+    const query = (this.deps.createSession ?? createSession)(generator, summary, s.models, {
+      cwd: s.chat.cwd,
+      resume,
+      mcp: this.deps.mcp,
+    });
     s.session = query;
     s.state = "ACTIVE";
     void this.consume(query);
@@ -107,14 +109,14 @@ export class ChatSession implements LiveSession {
   private async consume(query: NonNullable<MetaState["session"]>) {
     try {
       for await (const message of query) {
-        const before = this.usageToday();
-        handleSessionMessage(this.state, message);
-        const used = this.usageToday() - before;
+        const before = this.state.tokenUsageToday.inputTokens;
+        handleSessionMessage(this.state, message, this.deps.onChange);
+        const used = this.state.tokenUsageToday.inputTokens - before;
         if (used > 0) this.deps.onUsage(used);
         const sid = this.state.chat.sdkSessionId;
         if (sid && sid !== this.reportedSessionId) {
           this.reportedSessionId = sid;
-          this.deps.onSessionId(this.chatId, sid);
+          this.deps.onSessionId(this.chatId, sid, this.state.chat.cwd);
         }
         if (message.type === "result") this.failures = 0;
       }
@@ -122,10 +124,6 @@ export class ChatSession implements LiveSession {
       if (this.closed || this.state.session !== query) return;
       await this.recover(error);
     }
-  }
-
-  private usageToday(): number {
-    return this.state.tokenUsageToday.inputTokens;
   }
 
   /** The stream broke: reopen on the same SDK session, backing off; give up on auth/billing. */
@@ -161,12 +159,21 @@ export class ChatSession implements LiveSession {
     s.turnInFlight = false;
   }
 
-  private async checkContext() {
+  /**
+   * Every minute: read the context size. Past the hard ceiling, compact now;
+   * past a soft threshold, compact once the session has gone idle.
+   *
+   * Never before this session's first turn: a compact costs a paid turn, and
+   * a session still over the line straight after one would otherwise compact
+   * again every minute.
+   */
+  async checkContext(): Promise<void> {
     const s = this.state;
     if (s.state !== "ACTIVE" || !s.session || this.compacting) return;
     try {
       const usage = await s.session.getContextUsage();
       s.context = { tokens: usage.totalTokens, maxTokens: usage.maxTokens, percentage: usage.percentage, checkedAt: Date.now() };
+      if (s.turnCount === 0) return;
       if (usage.totalTokens >= hardCeiling(s)) {
         s.lastCycleReason = "token_ceiling";
         await this.compact();
@@ -174,13 +181,13 @@ export class ChatSession implements LiveSession {
       }
       if (!s.pendingCycleReason && shouldCycle(s, usage.totalTokens)) {
         s.pendingCycleReason = s.turnCount >= s.thresholds.turnThreshold ? "turn_threshold" : "token_threshold";
-        this.deps.log(`"${this.title}": ${s.pendingCycleReason} — cycling once idle`);
+        this.deps.log(`"${this.title}": ${s.pendingCycleReason} — compacting once idle`);
       }
     } catch (error: unknown) {
       if (!s.pendingCycleReason && shouldCycle(s)) s.pendingCycleReason = "turn_threshold_fallback";
       this.deps.log(`"${this.title}": context check failed: ${getErrorMessage(error)}`);
     }
-    if (s.pendingCycleReason && !s.turnInFlight && Date.now() - s.lastActivityAt >= CYCLE_IDLE_DEBOUNCE_MS) {
+    if (s.pendingCycleReason && isIdleForCycle(s)) {
       s.lastCycleReason = s.pendingCycleReason;
       await this.compact();
     }
@@ -225,8 +232,8 @@ export class ChatSession implements LiveSession {
       // The new SDK session gets its id on its first prompt. Until then a
       // resume must not reload the long transcript this compact just dropped.
       this.reportedSessionId = null;
-      this.deps.onSessionId(this.chatId, null);
-      this.deps.setSeed(this.chatId, summary);
+      this.deps.onSessionId(this.chatId, null, this.state.chat.cwd);
+      this.deps.onCompacted(this.chatId, summary);
       if (this.closed) return;
       this.open(undefined, summary);
       if (announceTo) {

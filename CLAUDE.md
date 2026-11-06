@@ -72,36 +72,36 @@ Shared state flows through a single `AppContext` (`packages/core/lib/types.ts`, 
 ### Daemon Mode (`choomfie --daemon`)
 
 ```
-daemon.ts (always running)
-  └→ Claude Session (Agent SDK, disposable)
-       └→ supervisor.ts (MCP stdio) → worker.ts (Discord)
+daemon.ts → daemon/hub.ts (always running)
+  ├→ WorkerHost → worker.ts (Discord, tools)        same lib/worker-host.ts as the supervisor
+  ├→ loopback MCP endpoint (every tool)
+  └→ SessionPool → ChatSession × N (Agent SDK)      one per thread / channel / DM, up to daemon.maxSessions
 ```
 
-`daemon.ts` is a thin CLI entry point; the runtime lives in `packages/core/daemon/`. With `daemon.multiSession` on it runs as a hub instead (`daemon/hub/`): it spawns the worker itself via `lib/worker-host.ts` (shared with the supervisor) and keeps one Agent SDK session per location, which reach the tools through a loopback MCP endpoint rather than the plugin — see [docs/daemon.md](docs/daemon.md). Sessions are cycled when context gets heavy (~120k tokens or 80 turns) — once the session is idle, unless a 180k hard ceiling forces it — capturing a handoff summary first. Full detail in [docs/daemon.md](docs/daemon.md).
-
-**Both launch paths must pass `--dangerously-load-development-channels server:choomfie`** — `extraArgs` in `createSession`, the flag itself in `bin/choomfie`. It puts the server on the session's channel allowlist. In foreground that is all it takes: without it every incoming Discord message is dropped and Choomfie never answers. In daemon mode it is necessary but not sufficient — see below.
+`daemon.ts` is a thin CLI entry point; the runtime lives in `packages/core/daemon/`. The daemon runs the worker itself and keeps one Agent SDK session per location. Sessions load **no plugin** (its supervisor would log in to Discord a second time) and reach the tools through the loopback endpoint, whose instructions are the worker's. A session compacts when context gets heavy (~120k tokens or 80 turns) — once it is idle, unless a 180k hard ceiling forces it — capturing a handoff summary and carrying on in a fresh session on the same chat. Full detail in [docs/daemon.md](docs/daemon.md).
 
 ### Inbound messages: two routes, one per process
 
-**A daemon session can never register Claude Code's `claude/channel` capability**, so the MCP notification that carries a Discord message in foreground mode is dropped. That is why daemon mode was deaf for so long: bot online, typing indicator on, zero turns. The automatic registration runs only on the **interactive** MCP-connect path, and the SDK-facing `Query.enableChannel()` refuses anything that isn't marketplace-sourced, which `{ type: 'local', path }` can never be.
+Foreground mode receives Discord messages as `claude/channel` MCP notifications, which needs `--dangerously-load-development-channels server:choomfie` in `bin/choomfie` — without it every message is dropped. **An Agent SDK session can never register that capability** (the automatic registration only runs on the interactive MCP-connect path; `Query.enableChannel()` refuses anything not marketplace-sourced). That is why daemon mode was once deaf: bot online, typing indicator on, zero turns.
 
-The capability was only a notification-to-prompt adapter, and the daemon already owns the prompt queue. So daemon-launched workers write each message to `meta/incoming/` and the daemon injects it itself (`packages/shared/daemon-incoming.ts` → `daemon/incoming.ts`). Full detail in [docs/daemon.md](docs/daemon.md).
+So a daemon-launched worker writes each message to `meta/incoming/` and the daemon pushes it into the location's session (`packages/shared/daemon-incoming.ts` → `daemon/incoming.ts`).
 
-- **Exactly one route per process**, chosen by `isDaemonOwnedProcess()`. A daemon-launched worker writes the file and sends **no** notification — that is what keeps the capability harmless if it ever starts registering.
+- **Exactly one route per process**, chosen by `isDaemonOwnedProcess()`. A daemon-launched worker writes the file and sends **no** notification.
 - The injected prompt is byte-identical to Claude Code's `<channel …>` block, pinned by a test. Changing that shape changes how the persona behaves, invisibly.
-- `enableChannelNotifications()` still runs and still fails; it is a tripwire, logged at `--verbose`. Do not remove it to quiet the log — silence is what made this take a day to find.
 
 ### Two launch paths, one behaviour
 
-`packages/core/daemon/session-core.ts` (`createSession`) and `bin/choomfie` start the same bot two different ways, and **anything that decides how a session behaves has to be set in both.** This has now drifted three times — the channels flag, `daemon.model` vs top-level `model`, and permission mode — each time producing a bot that looked fine and quietly wouldn't do its job.
+`packages/core/daemon/session-core.ts` (`createSession`) and `bin/choomfie` start the same bot two different ways, and **anything that decides how a session behaves has to be set in both.** This has drifted three times — the channels flag, `daemon.model` vs top-level `model`, and permission mode — each time producing a bot that looked fine and quietly wouldn't do its job.
 
 | | Daemon | Foreground |
 |---|---|---|
-| Channels flag | `extraArgs` in `createSession` | `--dangerously-load-development-channels` |
+| Inbound messages | pushed by the daemon from `meta/incoming/` | `--dangerously-load-development-channels` |
+| Tools + persona | loopback MCP endpoint (`mcpServers`) | the plugin (`--plugin-dir`) |
+| Settings, cwd | project settings only; cwd = the chat's, default `<data dir>/home` | yours; the terminal's cwd |
 | Model | `models.model` from config.json | `--model` via `scripts/resolve-model.ts` |
 | Permission mode | `bypassPermissions` | `--permission-mode auto` (override: `CHOOMFIE_PERMISSION_MODE`, or pass your own) |
 
-Permission mode differs **deliberately**: a terminal session has a human in front of it who can still be asked about genuinely destructive things; a daemon answering Discord at 3am does not. Everything else in that table must match.
+Permission mode differs **deliberately**: a terminal session has a human in front of it who can still be asked about genuinely destructive things; a daemon answering Discord at 3am does not. The model must match.
 
 ### Plugin System
 
@@ -134,16 +134,16 @@ Shapes and constraints that don't announce themselves. Getting one wrong compile
 **State on disk**
 - All JSON state (`config.json`, `access.json`, `meta/*.json`) is written atomically via `writeJsonAtomic` / `writeJsonAtomicSync` from `@choomfie/shared` — temp file + `rename(2)`. Never write these with a bare `writeFile`; a crash mid-write truncates them.
 - **All SQLite datetimes use space-separated format (`YYYY-MM-DD HH:MM:SS`), never ISO 8601 with `T`/`Z`.** Use `@choomfie/shared` time utilities (`toSQLiteDatetime`, `dateToSQLite`, `nowUTC`).
-- Single instance enforced via `choomfie.pid` (supervisor) and `meta/meta.pid` (daemon). Re-running `choomfie` replaces a stale foreground instance, but **refuses** when a daemon is supervising one — the daemon's own supervisor is exempt via `CHOOMFIE_DAEMON_PID`. Process identity comes from `@choomfie/shared`'s `pid-utils.ts`, not ad-hoc `ps` greps.
-- **Chats are routing, not access.** `chats` / `chat_bindings` (SQLite, `lib/chats/`) say which conversation is live at a (location, brain); `brainChannels` says which brain answers; access.json says who may talk at all. Three separate things — never let one stand in for another. Claude chats share one binding (`claude:global`) under the single-session daemon; with `daemon.multiSession` each location has its own, and the worker binds it before the hub sees the message.
+- Single instance enforced via `choomfie.pid` (supervisor) and `meta/meta.pid` (daemon). Re-running `choomfie` replaces a stale foreground instance, but **refuses** while the daemon runs — it owns the Discord worker. Process identity comes from `@choomfie/shared`'s `pid-utils.ts`, not ad-hoc `ps` greps.
+- **Chats are routing, not access.** `chats` / `chat_bindings` (SQLite, `lib/chats/`) say which conversation is live at a (location, brain); `brainChannels` says which brain answers; access.json says who may talk at all. Three separate things — never let one stand in for another. Every brain, Claude included, has one chat per location; for Claude the worker binds it before the daemon sees the message.
 - `Config` carries a `[key: string]: unknown` index signature, so a removed key survives `...saved` unless actively stripped. `REMOVED_CONFIG_KEYS` in `lib/config.ts` does that, and `ConfigManager` rewrites the file once on load when it finds one.
 
 **Process boundaries**
-- Optional `remoteMcp` HTTP endpoint (supervisor, loopback + bearer token, read-only tool allowlist) — see [docs/configuration.md](docs/configuration.md). Remote calls run with owner authority; the allowlist is the only boundary.
+- Optional `remoteMcp` HTTP endpoint (whichever process owns the worker, loopback + bearer token, read-only tool allowlist) — see [docs/configuration.md](docs/configuration.md). Remote calls run with owner authority; the allowlist is the only boundary.
 - **Console output goes to stderr — stdout is the MCP stdio transport.** Entry point is `packages/core/supervisor.ts`.
 - **Hot-reload boundary:** worker code in `packages/core/` and all plugin packages are hot-reloadable via worker restart. Supervisor code (`supervisor.ts`, IPC types, MCP server) requires a full session restart (exit + re-run `choomfie`). `packages/shared/` changes require a worker restart at minimum.
 - Auto-restart triggers: persona switch, plugin enable/disable, voice config change — all send `request_restart` IPC → supervisor restarts worker → confirmation to the Discord channel.
-- The worker sits two processes below the daemon, so there is no IPC between them. `meta/worker-health.json` carries the heartbeat up; `meta/incoming/` carries inbound Discord messages up; `meta/control.json` carries `/compact`, `/clear`, `/stop` and `/resume` requests down; `meta/daemon-state.json` carries daemon state down (read by `/status`, `/usage`, and the rate-limit alerter).
+- Daemon ↔ worker state goes through files, so the worker's handlers are the same in every mode. `meta/worker-health.json` carries the heartbeat up; `meta/incoming/` carries inbound Discord messages up; `meta/control.json` carries `/compact`, `/clear`, `/stop` and `/resume` requests down; `meta/daemon-state.json` carries daemon state down (read by `/status`, `/usage`, and the rate-limit alerter).
 
 **Settings**
 - `model` / `fallbackModel` are **top level, not under `daemon`** — they are not daemon-specific. Both the daemon (via the Agent SDK) and foreground/`--tmux` (via `bin/choomfie` → `scripts/resolve-model.ts`) read the same value. They used to live at `daemon.model`, which meant `/model` silently did nothing in foreground mode; `mergeConfig` migrates the old key forward and drops it.
@@ -167,7 +167,7 @@ Shapes and constraints that don't announce themselves. Getting one wrong compile
 - Attachments downloaded to `…/choomfie-inline/inbox/` (`file_path` = first, `file_paths` = all, semicolon-separated)
 - GitHub integration shells out to `gh` via `lib/handlers/github.ts` (15s timeout)
 - Servers: only responds when @mentioned or replied to; an @mention in a text channel opens a thread (auto-thread, `/brain threads:false` to opt out), and in its own threads it answers everything. DMs: always responds. @mentions stripped before forwarding
-- Rate limit + conversation timeout configurable in config.json (`rateLimitMs` default 5s, `convoTimeoutMs` default 5 min)
+- Rate limit + conversation timeout configurable in config.json (`rateLimitMs` default 5s per user — the owner is exempt, others get a ⏳ — `convoTimeoutMs` default 5 min)
 - Typing indicator: state machine in `lib/typing.ts`. `keep_typing: true` on `reply` holds it between multi-message workflows. Safety timeout 2 min; skipped for conversation_mode
 - Allowlist loaded at startup from access.json; `allow_user`/`remove_user` update in-memory + persist (no restart). Manual file edits require a restart
 - Personas stored in config.json, switchable from Discord (auto-restarts worker)

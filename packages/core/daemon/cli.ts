@@ -1,158 +1,7 @@
 import { readFile, unlink } from "node:fs/promises";
 import { PID_PATH } from "./constants.ts";
-import { loadHandoffs } from "./handoffs.ts";
-import { cleanup, createInitialState, setupShutdown } from "./lifecycle.ts";
-import { log } from "./log.ts";
-import { acquirePid } from "./pid.ts";
-import { cycleSession, startSession, waitForResult } from "./runtime.ts";
 import { DAEMON_STATE_PATH } from "./state-file.ts";
 import { getErrorMessage } from "./error.ts";
-import type { DaemonSettings, MetaState } from "./types.ts";
-
-async function withCliSession(
-  settings: DaemonSettings,
-  run: (state: MetaState) => Promise<number | void>
-): Promise<void> {
-  await acquirePid();
-  const state = createInitialState(settings);
-  setupShutdown(state);
-
-  try {
-    await startSession(state);
-    const exitCode = ((await run(state)) ?? 0) as number;
-    await cleanup(state);
-    process.exit(exitCode as number);
-  } catch (error: unknown) {
-    log(`CLI session failed: ${getErrorMessage(error)}`);
-    await cleanup(state);
-    process.exit(1);
-  }
-}
-
-export async function testCycle(settings: DaemonSettings): Promise<void> {
-  log("=== TEST: Session Cycling ===");
-  await withCliSession(settings, async (state) => {
-    log("Sending test message...");
-    state.pushMessage?.({
-      type: "user",
-      message: {
-        role: "user",
-        content: "Say hello and tell me your current persona name. Keep it brief.",
-      },
-      parent_tool_use_id: null,
-    });
-
-    log("Waiting for response...");
-    try {
-      const result = await waitForResult(state, 30_000);
-      log(`Got response: ${result.result?.slice(0, 200)}`);
-    } catch (error: unknown) {
-      log(`Response wait failed: ${getErrorMessage(error)}`);
-    }
-
-    log("Waiting 10s before triggering cycle...");
-    await new Promise((resolve) => setTimeout(resolve, 10_000));
-
-    log("Triggering manual cycle...");
-    const preCycleTurns = state.turnCount;
-    state.lastCycleReason = "manual_test";
-    await cycleSession(state, state.context.tokens ?? undefined);
-
-    if (state.state !== "ACTIVE") {
-      log("FAIL: Session did not reach ACTIVE state after cycle");
-      return 1;
-    }
-
-    const handoffs = await loadHandoffs();
-    const lastHandoff = handoffs[handoffs.length - 1];
-    if (!lastHandoff) {
-      log("FAIL: No handoff entry found");
-      return 1;
-    }
-
-    log(`Handoff summary (first 200 chars): ${lastHandoff.summary.slice(0, 200)}`);
-
-    const isGenericFallback = lastHandoff.summary.startsWith("Session cycled at");
-    if (isGenericFallback) {
-      log("WARN: Got generic fallback summary — handoff capture may not have worked");
-    } else {
-      log("OK: Got meaningful handoff summary");
-    }
-
-    log("Sending post-cycle message...");
-    state.pushMessage?.({
-      type: "user",
-      message: {
-        role: "user",
-        content:
-          "Do you have any handoff context from a previous session? Just say yes or no briefly.",
-      },
-      parent_tool_use_id: null,
-    });
-
-    try {
-      const result = await waitForResult(state, 30_000);
-      log(`Post-cycle response: ${result.result?.slice(0, 200)}`);
-    } catch (error: unknown) {
-      log(`Post-cycle response wait failed: ${getErrorMessage(error)}`);
-    }
-
-    log(`Turns before cycle: ${preCycleTurns}, after cycle reset to: ${state.turnCount}`);
-    log("=== TEST COMPLETE: Session Cycling ===");
-  });
-}
-
-export async function benchmark(settings: DaemonSettings): Promise<void> {
-  log("=== BENCHMARK: Latency Measurement ===");
-  await withCliSession(settings, async (state) => {
-    const NUM_MESSAGES = 5;
-    const latencies: number[] = [];
-
-    for (let i = 0; i < NUM_MESSAGES; i++) {
-      log(`Message ${i + 1}/${NUM_MESSAGES}...`);
-      const start = performance.now();
-
-      state.pushMessage?.({
-        type: "user",
-        message: {
-          role: "user",
-          content: "Respond with exactly the word 'ok' and nothing else.",
-        },
-        parent_tool_use_id: null,
-      });
-
-      try {
-        await waitForResult(state, 60_000);
-        const elapsed = performance.now() - start;
-        latencies.push(elapsed);
-        log(`  Latency: ${elapsed.toFixed(0)}ms`);
-      } catch (error: unknown) {
-        log(`  FAILED: ${getErrorMessage(error)}`);
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-
-    if (latencies.length === 0) {
-      log("FAIL: No successful responses");
-      return 1;
-    }
-
-    const sorted = [...latencies].sort((a, b) => a - b);
-    const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length;
-    const p50 = sorted[Math.floor(sorted.length * 0.5)];
-    const p95 = sorted[Math.floor(sorted.length * 0.95)];
-
-    log("=== BENCHMARK RESULTS ===");
-    log(`  Messages:  ${latencies.length}/${NUM_MESSAGES} successful`);
-    log(`  Average:   ${avg.toFixed(0)}ms`);
-    log(`  P50:       ${p50.toFixed(0)}ms`);
-    log(`  P95:       ${p95.toFixed(0)}ms`);
-    log(`  Min:       ${sorted[0].toFixed(0)}ms`);
-    log(`  Max:       ${sorted[sorted.length - 1].toFixed(0)}ms`);
-    log("=========================");
-  });
-}
 
 export async function stopDaemon(): Promise<void> {
   try {
@@ -238,8 +87,6 @@ export async function showStatus(): Promise<void> {
   try {
     const stateData = await readFile(DAEMON_STATE_PATH, "utf-8");
     const state = JSON.parse(stateData);
-    console.error(`  State: ${state.state}`);
-    console.error(`  Session: ${state.sessionId}`);
     console.error(`  Uptime: ${state.sessionUptimeSeconds}s`);
     console.error(
       `  Model: ${state.model ?? "Claude Code default"}` +
@@ -251,17 +98,16 @@ export async function showStatus(): Promise<void> {
     if (state.claudeCodeVersion) {
       console.error(`  Claude Code (bundled): ${state.claudeCodeVersion}`);
     }
-    console.error(`  Turns: ${state.turns?.current}/${state.turns?.threshold}`);
-    const context = state.context;
-    console.error(
-      `  Context: ` +
-        (context?.tokens === null || context?.tokens === undefined
-          ? "not measured yet"
-          : `${context.tokens.toLocaleString()}/${context.threshold?.toLocaleString()} tokens` +
-            (context.percentage === null
-              ? ""
-              : ` (${context.percentage.toFixed(1)}% of window)`)),
-    );
+    const sessions: { location: string; title: string; turns: number; contextTokens: number | null; busy: boolean }[] =
+      state.sessions ?? [];
+    console.error(`  Sessions: ${sessions.length}/${state.maxSessions}`);
+    for (const s of sessions) {
+      console.error(
+        `    ${s.location} "${s.title}" · ${s.turns} turns` +
+          (s.contextTokens ? ` · ${Math.round(s.contextTokens / 1000)}k context` : "") +
+          (s.busy ? " · busy" : "")
+      );
+    }
     console.error(`  Cost: $${state.costUsd?.toFixed(4)}`);
     console.error(`  Cycles: ${state.totalCycles}`);
     console.error(`  Worker: ${state.workerHealth?.processAlive ? "alive" : "dead"}`);

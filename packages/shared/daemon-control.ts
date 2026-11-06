@@ -31,14 +31,15 @@ export const CONTROL_REQUEST_STALE_MS = 2 * 60_000;
 export const STOP_REQUEST_STALE_MS = 20_000;
 
 /**
- * `compact` keeps a handoff summary (Claude Code's `/compact`); `clear` starts
- * the next session with nothing (Claude Code's `/clear`). Neither touches
- * memories, reminders or personas — those live in SQLite. `stop` interrupts
- * the turn in progress (Esc in Claude Code) and keeps the session.
+ * What happens to one location's session:
  *
- * A cleared session is a new *chat*, optionally in another working directory
- * (`cwd`); the old one stays resumable. `resume` puts an earlier chat back by
- * its SDK session id (`/resume`, Claude Code's `--resume`).
+ * - `compact` summarises it and carries on fresh with the summary (Claude Code's `/compact`)
+ * - `stop` interrupts the turn in progress and keeps the session (Esc)
+ * - `clear` / `resume` — the worker bound another chat here (a new one, or an
+ *   earlier one); the daemon closes the old session and the next message opens
+ *   the bound chat's (Claude Code's `/clear`, `--resume`)
+ *
+ * None touches memories, reminders or personas — those live in SQLite.
  */
 export type DaemonControlCommand = "compact" | "clear" | "stop" | "resume";
 
@@ -50,21 +51,13 @@ export type DaemonControlRequest = {
   requestedAt: number;
   /** Discord user who asked, for the daemon log. */
   requestedBy?: string;
-  /** Discord channel to report back in once the new session is up. */
+  /** `compact`: Discord channel to report back in once the new session is up. */
   chatId?: string;
-  /** `resume`: the Choomfie chat the next session holds. */
-  targetChat?: string;
-  /** `resume`: the SDK session to load. */
-  sdkSessionId?: string;
-  /** `clear` / `resume`: working directory for the next session. */
-  cwd?: string;
-  /** `resume`: the chat's title, for the "I'm back" line. */
-  title?: string;
   /**
-   * Multi-session daemon: the location (thread, channel, DM, group DM) whose
-   * session this is about. The chat bound there is already in SQLite.
+   * The location (thread, channel, DM, group DM) whose session this is about.
+   * For `clear` / `resume` the worker has already bound the new chat there.
    */
-  location?: string;
+  location: string;
 };
 
 export function daemonControlPath(dataDir: string): string {
@@ -85,21 +78,17 @@ export function parseDaemonControlRequest(
   if (!COMMANDS.includes(raw.command as DaemonControlCommand)) return null;
   if (typeof raw.requestedAt !== "number") return null;
   const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+  // Every command acts on one location's session.
+  const location = str(raw.location);
+  if (!location) return null;
 
   const request: DaemonControlRequest = {
     command: raw.command as DaemonControlCommand,
     requestedAt: raw.requestedAt,
     requestedBy: str(raw.requestedBy),
     chatId: str(raw.chatId),
-    targetChat: str(raw.targetChat),
-    sdkSessionId: str(raw.sdkSessionId),
-    cwd: str(raw.cwd),
-    title: str(raw.title),
-    location: str(raw.location),
+    location,
   };
-  // Without these the daemon wouldn't know which chat to hold. A multi-session
-  // daemon reads the chat from the location's binding instead.
-  if (request.command === "resume" && !request.location && (!request.targetChat || !request.sdkSessionId)) return null;
   return request;
 }
 
