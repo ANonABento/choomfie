@@ -153,14 +153,26 @@ export function isUnrecoverableAnthropicError(error: unknown): boolean {
   );
 }
 
+/** Where the session runs and what it continues. */
+export type SessionPlacement = {
+  /** Working directory. Defaults to the plugin dir. */
+  cwd?: string;
+  /** SDK session id to load (Claude Code's `--resume`). Must have been created in `cwd`. */
+  resume?: string;
+};
+
 export function createSession(
   prompt: AsyncGenerator<SDKUserMessage>,
   handoffSummary?: string,
-  models: ModelSettings = {}
+  models: ModelSettings = {},
+  placement: SessionPlacement = {}
 ): Query {
   return query({
     prompt,
     options: {
+      // The SDK finds a session's transcript by the directory it ran in, so a
+      // resume has to come back with the cwd it was created under.
+      ...(placement.resume ? { resume: placement.resume } : {}),
       // Omitted rather than passed as undefined: the SDK treats an absent
       // `model` as "use Claude Code's configured default", which is the
       // behaviour daemon sessions had before this was configurable.
@@ -184,7 +196,9 @@ export function createSession(
       persistSession: true,
       includePartialMessages: false,
       settingSources: ["user", "project"],
-      cwd: PLUGIN_DIR,
+      // Another project's cwd loads *its* CLAUDE.md and .claude settings; the
+      // Choomfie plugin (persona, tools) still comes from `plugins` above.
+      cwd: placement.cwd ?? PLUGIN_DIR,
       // Marks the supervisor spawned beneath this session as daemon-owned, so
       // its single-instance guard doesn't refuse to start. A supervisor
       // launched any other way while this daemon is alive will refuse.

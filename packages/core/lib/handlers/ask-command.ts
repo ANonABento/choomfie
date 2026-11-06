@@ -132,7 +132,7 @@ export async function runAsk(interaction: AskInteraction, ctx: AppContext, input
   }
 
   meta.chat_id = openAskRelay(interaction.id, relay, chatKey);
-  await forwardToClaude(ctx, `${ASK_NOTE}\n${content}`, meta);
+  await forwardToClaude(ctx, `${ASK_NOTE}\n${content}`, meta, content);
 }
 
 /** The prompt for a right-clicked message: who said it, what, and what to do with it. */

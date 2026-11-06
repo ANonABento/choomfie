@@ -3,6 +3,7 @@ import { INITIAL_RESTART_BACKOFF } from "./constants.ts";
 import { log } from "./log.ts";
 import { releasePid } from "./pid.ts";
 import { generateSessionId } from "./session-core.ts";
+import { loadChatState, type ChatStateFile } from "./chat-state.ts";
 import { DAEMON_STATE_PATH } from "./state-file.ts";
 import type { DaemonSettings, MetaState } from "./types.ts";
 
@@ -11,7 +12,10 @@ export function todayKey(): string {
   return new Date().toLocaleDateString("en-CA");
 }
 
-export function createInitialState(settings: DaemonSettings): MetaState {
+export function createInitialState(
+  settings: DaemonSettings,
+  chatState: ChatStateFile = loadChatState()
+): MetaState {
   const { tokenThreshold, turnThreshold, model, fallbackModel } = settings;
   return {
     state: "STARTING",
@@ -48,6 +52,7 @@ export function createInitialState(settings: DaemonSettings): MetaState {
     thresholds: { tokenThreshold, turnThreshold },
     models: { model, fallbackModel },
     resolved: { model: null, claudeCodeVersion: null },
+    chat: { ...chatState.current, sdkSessionId: null, seeds: chatState.seeds },
   };
 }
 

@@ -36,6 +36,8 @@ export interface AppContext extends PluginContext {
   /** MCP Server (supervisor) or McpProxy (worker). */
   mcp: Server | McpProxy;
   memory: MemoryStore;
+  /** Same object as `memory.chats`; on the context so plugins reach it via PluginContext. */
+  chats: import("./chats/store.ts").ChatStore;
   config: ConfigManager;
   plugins: import("@choomfie/shared").Plugin[];
   allowedUsers: Set<string>;

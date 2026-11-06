@@ -166,6 +166,7 @@ export function registerAllHandlers(): Promise<void> {
     await import("./handlers/access-commands.ts");
     await import("./handlers/usage-command.ts");
     await import("./handlers/brain-command.ts");
+    await import("./handlers/chat-command.ts");
     await import("./handlers/ask-command.ts");
   })();
   return handlersLoaded;

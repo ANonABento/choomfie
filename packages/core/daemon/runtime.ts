@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import type {
   ModelUsage,
@@ -20,6 +21,7 @@ import {
   HANDOFF_TURN_DRAIN_TIMEOUT,
   INITIAL_RESTART_BACKOFF,
   MAX_ERROR_RETRIES,
+  PLUGIN_DIR,
   MAX_RESTART_BACKOFF,
   WORKER_HEALTH_INTERVAL,
   WORKER_MAX_CONSECUTIVE_FAILURES,
@@ -38,6 +40,7 @@ import { formatChannelPrompt, takeInboundMessages } from "./incoming.ts";
 import { parseRateLimitInfo } from "./rate-limit.ts";
 import { loadHandoffs, getLastHandoffSummary, saveHandoff } from "./handoffs.ts";
 import { cleanup, todayKey } from "./lifecycle.ts";
+import { freshChat, saveChatState, withSeed } from "./chat-state.ts";
 import { log, setSessionId, verbose } from "./log.ts";
 import { createMessageGenerator } from "./message-generator.ts";
 import { getErrorMessage } from "./error.ts";
@@ -80,6 +83,9 @@ export async function startSession(
   // does not — plan windows belong to the account and outlive any session.
   state.modelUsage = {};
   state.resolved = { model: null, claudeCodeVersion: null };
+  state.chat.sdkSessionId = null;
+  state.chat.seeds = withSeed(state.chat.seeds, state.chat.id, handoffSummary);
+  void saveChatState({ current: { id: state.chat.id, cwd: state.chat.cwd }, seeds: state.chat.seeds });
   state.turnInFlight = false;
   state.lastActivityAt = Date.now();
   state.pendingCycleReason = null;
@@ -101,7 +107,10 @@ export async function startSession(
   state.pushMessage = push;
   state.closeGenerator = close;
 
-  state.session = createSession(generator, handoffSummary, state.models);
+  state.session = createSession(generator, handoffSummary, state.models, {
+    cwd: state.chat.cwd,
+    resume: options.resume,
+  });
 
   void consumeSessionStream(state).catch((error: unknown) => {
     log(`Session stream error: ${getErrorMessage(error)}`);
@@ -153,12 +162,7 @@ export async function startSession(
       message: {
         role: "user",
         content:
-          `A ${options.requestedCommand === "clear" ? "/clear" : "/compact"} was just ` +
-          `requested from Discord and your session has been replaced.\n` +
-          (handoffSummary
-            ? "Context was compacted — the handoff summary above is what carried over. "
-            : "Context was cleared — you have no memory of the previous conversation, " +
-              "though saved memories and reminders are untouched. ") +
+          announcementFor(options, handoffSummary, state.chat.cwd) +
           `Post a brief, casual message in channel ${options.announceTo} confirming you're back. ` +
           "Use the reply tool with that channel_id. Keep it to one line.",
       },
@@ -354,6 +358,11 @@ export function handleSessionMessage(state: MetaState, message: SDKMessage): voi
       if (isCompactBoundaryMessage(message)) {
         log("Context compaction occurred");
       } else if (message.subtype === "init") {
+        // The SDK session id is what `/chat resume` brings back later.
+        if (message.session_id && state.chat.sdkSessionId !== message.session_id) {
+          state.chat.sdkSessionId = message.session_id;
+          void writeDaemonState(state);
+        }
         // Sent at the start of every prompt, not once per session: only act
         // when it says something new.
         if (
@@ -672,6 +681,17 @@ export async function cycleSession(
     ? undefined
     : await captureHandoffSummary(state);
 
+  // Switching chats: the outgoing transcript stays on disk for a later resume,
+  // and the incoming chat brings back the summary its session started with.
+  // Recorded as this handoff too, so a daemon restart carries the new chat on.
+  let nextSummary = summary;
+  if (options.nextChat) {
+    state.chat.id = options.nextChat.id;
+    state.chat.cwd = options.nextChat.cwd;
+    nextSummary = options.resume ? state.chat.seeds[options.nextChat.id] : undefined;
+  }
+  const switched = options.requestedCommand === "new" || options.requestedCommand === "resume";
+
   // Recorded either way: handoffs.json is the log of what happened to sessions,
   // and a cleared one is exactly the entry you want when the next session turns
   // out to be missing context you expected it to have.
@@ -679,8 +699,8 @@ export async function cycleSession(
     sessionId: state.sessionId,
     timestamp: new Date().toISOString(),
     summary:
-      summary ??
-      `Context cleared on request — nothing carried forward. ` +
+      nextSummary ??
+      `${switched ? "Switched chats" : "Context cleared on request"} — nothing carried forward. ` +
         `(${state.turnCount} turns, $${state.totalCostUsd.toFixed(4)})`,
     tokenCount: tokenCount ?? state.context.tokens ?? state.totalInputTokens,
     turnCount: state.turnCount,
@@ -704,10 +724,55 @@ export async function cycleSession(
   state.resultWaiters = [];
 
   await new Promise((resolve) => setTimeout(resolve, 2000));
-  await startSession(state, summary, {
+  await startSession(state, nextSummary, {
     announceTo: options.announceTo,
     requestedCommand: options.requestedCommand,
+    resume: options.resume,
+    chatTitle: options.chatTitle,
   });
+}
+
+/** What the replacement session is told, so its "I'm back" line is accurate. */
+export function announcementFor(
+  options: StartSessionOptions,
+  handoffSummary: string | undefined,
+  cwd: string
+): string {
+  const where = cwd === PLUGIN_DIR ? "" : `You're now working in ${cwd}. `;
+  const title = options.chatTitle ? ` "${options.chatTitle}"` : "";
+  switch (options.requestedCommand) {
+    case "resume":
+      return (
+        `An earlier conversation${title} was just resumed from Discord with /chat resume — ` +
+        `the history above is that conversation, picked up where it left off. ${where}`
+      );
+    case "new":
+      return (
+        `A new conversation${title} was just started from Discord with /chat new — you have no ` +
+        `memory of the previous one, though saved memories and reminders are untouched. ${where}`
+      );
+    case "clear":
+      return (
+        "A /clear was just requested from Discord and your session has been replaced.\n" +
+        "Context was cleared — you have no memory of the previous conversation, " +
+        "though saved memories and reminders are untouched. "
+      );
+    default:
+      return (
+        "A /compact was just requested from Discord and your session has been replaced.\n" +
+        (handoffSummary
+          ? "Context was compacted — the handoff summary above is what carried over. "
+          : "Context was cleared — you have no memory of the previous conversation, " +
+            "though saved memories and reminders are untouched. ")
+      );
+  }
+}
+
+/** A cwd the daemon can actually start in; anything else falls back to the plugin dir. */
+function usableCwd(cwd: string | undefined): string {
+  if (cwd && existsSync(cwd)) return cwd;
+  if (cwd) log(`Requested cwd ${cwd} does not exist — using ${PLUGIN_DIR}`);
+  return PLUGIN_DIR;
 }
 
 /**
@@ -746,10 +811,25 @@ export function startControlMonitor(state: MetaState): void {
       }
 
       state.lastCycleReason = `requested_${request.command}`;
+      if (request.command === "new" || request.command === "resume") {
+        // The outgoing session needs no summary: its transcript is kept, and
+        // resuming it later loads that directly.
+        await cycleSession(state, state.context.tokens ?? undefined, {
+          skipHandoff: true,
+          announceTo: request.chatId,
+          requestedCommand: request.command,
+          nextChat: { id: request.targetChat!, cwd: usableCwd(request.cwd) },
+          resume: request.command === "resume" ? request.sdkSessionId : undefined,
+          chatTitle: request.title,
+        });
+        return;
+      }
       await cycleSession(state, state.context.tokens ?? undefined, {
         skipHandoff: request.command === "clear",
         announceTo: request.chatId,
         requestedCommand: request.command,
+        // A cleared session is a new chat (same cwd); a compacted one carries on.
+        ...(request.command === "clear" ? { nextChat: freshChat(state.chat.cwd) } : {}),
       });
     } catch (error: unknown) {
       log(`Control request failed: ${getErrorMessage(error)}`);

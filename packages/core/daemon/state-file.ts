@@ -54,6 +54,12 @@ export async function writeDaemonState(state: MetaState): Promise<void> {
       lastHealthyAt: state.workerHealth.lastHealthyAt || null,
       consecutiveFailures: state.workerHealth.consecutiveFailures,
     },
+    /** The Choomfie chat this session holds — the worker keeps the record, keyed by `id`. */
+    chat: {
+      id: state.chat.id,
+      cwd: state.chat.cwd,
+      sdkSessionId: state.chat.sdkSessionId,
+    },
     updatedAt: new Date().toISOString(),
   };
 

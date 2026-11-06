@@ -79,6 +79,7 @@ export async function createContext(): Promise<{
     discord: null as unknown as AppContext["discord"],
     mcp: null as unknown as AppContext["mcp"],
     memory,
+    chats: memory.chats,
     config,
     plugins: [],
     allowedUsers,

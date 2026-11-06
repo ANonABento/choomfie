@@ -11,6 +11,7 @@
 
 import { Database } from "bun:sqlite";
 import { spawnSync } from "node:child_process";
+import { ChatStore } from "./chats/store.ts";
 import { normalizeTimeZone, toSQLiteDatetime } from "./time.ts";
 import {
   buildOllamaEmbeddingRequest,
@@ -190,6 +191,8 @@ function parseEmbedding(value: string): number[] | null {
 export class MemoryStore {
   private db: Database;
   private embeddingProvider: EmbeddingProvider | null;
+  /** Chats and their location bindings (same database, own tables). */
+  readonly chats: ChatStore;
 
   constructor(dbPath: string, options: MemoryStoreOptions = {}) {
     this.db = new Database(dbPath, { create: true });
@@ -200,6 +203,7 @@ export class MemoryStore {
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA foreign_keys = ON");
     this.init();
+    this.chats = new ChatStore(this.db);
   }
 
   private init() {

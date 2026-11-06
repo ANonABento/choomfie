@@ -90,6 +90,12 @@ export interface Config {
   brainChannels?: Record<string, string>;
   /** Who a non-Claude brain answers: the owner only, or everyone on the allowlist. */
   brainAccess?: BrainAccess;
+  /**
+   * Directories a Claude chat may be started in (`/chat new cwd:`), and
+   * everything under them. `~` expands. Empty = only the default (the plugin dir).
+   * Edited in config.json: it widens what a bypassPermissions session can reach.
+   */
+  chatRoots?: string[];
   [key: string]: unknown;
 }
 
@@ -364,6 +370,16 @@ export class ConfigManager {
   }
 
   // --- Brains ---
+
+  /** Roots a Claude chat may run under, `~` expanded. */
+  getChatRoots(): string[] {
+    const roots = this.config.chatRoots;
+    if (!Array.isArray(roots)) return [];
+    const home = process.env.HOME ?? "";
+    return roots
+      .filter((r): r is string => typeof r === "string" && r.trim() !== "")
+      .map((r) => (r.startsWith("~") ? home + r.slice(1) : r));
+  }
 
   /** The brain set directly on this channel/thread, if any. */
   getChannelBrain(channelId: string): string | undefined {

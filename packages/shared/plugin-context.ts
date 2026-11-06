@@ -6,6 +6,7 @@
  */
 
 import type { Client } from "discord.js";
+import type { ChatsApi } from "./chat.ts";
 
 export interface SocialsPlatformConfig {
   [key: string]: string | number | boolean | undefined;
@@ -59,4 +60,6 @@ export interface PluginContext {
   discord?: Client;
   /** Owner user ID (for permission checks) */
   ownerUserId?: string | null;
+  /** Chat bindings (location → conversation). Only inside Choomfie. */
+  chats?: ChatsApi;
 }

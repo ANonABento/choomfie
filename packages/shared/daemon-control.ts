@@ -35,8 +35,14 @@ export const STOP_REQUEST_STALE_MS = 20_000;
  * the next session with nothing (Claude Code's `/clear`). Neither touches
  * memories, reminders or personas — those live in SQLite. `stop` interrupts
  * the turn in progress (Esc in Claude Code) and keeps the session.
+ *
+ * `new` and `resume` swap which *chat* the session holds (`/chat`): `new`
+ * starts a fresh one, optionally in another working directory; `resume` puts
+ * an earlier one back by its SDK session id (Claude Code's `--resume`).
  */
-export type DaemonControlCommand = "compact" | "clear" | "stop";
+export type DaemonControlCommand = "compact" | "clear" | "stop" | "new" | "resume";
+
+const COMMANDS: readonly DaemonControlCommand[] = ["compact", "clear", "stop", "new", "resume"];
 
 export type DaemonControlRequest = {
   command: DaemonControlCommand;
@@ -46,6 +52,14 @@ export type DaemonControlRequest = {
   requestedBy?: string;
   /** Discord channel to report back in once the new session is up. */
   chatId?: string;
+  /** `new` / `resume`: the Choomfie chat the next session holds. */
+  targetChat?: string;
+  /** `resume`: the SDK session to load. */
+  sdkSessionId?: string;
+  /** `new` / `resume`: working directory for the next session. */
+  cwd?: string;
+  /** `new` / `resume`: the chat's title, for the "I'm back" line. */
+  title?: string;
 };
 
 export function daemonControlPath(dataDir: string): string {
@@ -63,15 +77,24 @@ export function parseDaemonControlRequest(
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
 
-  if (raw.command !== "compact" && raw.command !== "clear" && raw.command !== "stop") return null;
+  if (!COMMANDS.includes(raw.command as DaemonControlCommand)) return null;
   if (typeof raw.requestedAt !== "number") return null;
+  const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
 
-  return {
-    command: raw.command,
+  const request: DaemonControlRequest = {
+    command: raw.command as DaemonControlCommand,
     requestedAt: raw.requestedAt,
-    requestedBy: typeof raw.requestedBy === "string" ? raw.requestedBy : undefined,
-    chatId: typeof raw.chatId === "string" ? raw.chatId : undefined,
+    requestedBy: str(raw.requestedBy),
+    chatId: str(raw.chatId),
+    targetChat: str(raw.targetChat),
+    sdkSessionId: str(raw.sdkSessionId),
+    cwd: str(raw.cwd),
+    title: str(raw.title),
   };
+  // Without these the daemon wouldn't know which chat to hold.
+  if (request.command === "new" && !request.targetChat) return null;
+  if (request.command === "resume" && (!request.targetChat || !request.sdkSessionId)) return null;
+  return request;
 }
 
 /** True when the request is too old to act on. */

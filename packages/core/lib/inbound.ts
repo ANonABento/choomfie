@@ -12,6 +12,7 @@ import {
   type McpTransport,
 } from "@choomfie/shared";
 import { deliverInboundMessage } from "./daemon-status.ts";
+import { syncClaudeChat } from "./chats/claude.ts";
 import type { AppContext } from "./types.ts";
 
 export function sanitizeAttachmentName(name?: string | null): string {
@@ -85,9 +86,16 @@ export async function downloadAttachments(
 export async function forwardToClaude(
   ctx: AppContext,
   content: string,
-  meta: Record<string, string>
+  meta: Record<string, string>,
+  /** What the user actually typed, for the chat's title (content may carry a preamble). */
+  titleHint: string = content
 ): Promise<void> {
   if (isDaemonOwnedProcess()) {
+    // Keep the Claude chat record current: title from the first message,
+    // backend ref from the daemon's live SDK session. Never blocks delivery.
+    await syncClaudeChat(ctx, titleHint).catch((error: unknown) =>
+      console.error(`[choomfie] chat sync failed: ${errorMessage(error)}`)
+    );
     try {
       await deliverInboundMessage(ctx.DATA_DIR, content, meta);
     } catch (error: unknown) {

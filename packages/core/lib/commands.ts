@@ -17,11 +17,12 @@ import {
   type ChatInputCommandInteraction,
 } from "discord.js";
 import type { AppContext } from "./types.ts";
-import { AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain } from "@choomfie/shared";
+import { AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, relativeTime } from "@choomfie/shared";
+import { liveChat, shortPath } from "./chats/here.ts";
 import { parentChannelId, resolveBrainId } from "./brain-router.ts";
 import { VERSION } from "./version.ts";
 import { registerCommand, registerButtonHandler } from "./register.ts";
-import { formatContextUsage, readDaemonStatus } from "./daemon-status.ts";
+import { formatContextUsage, isDaemonMode, readDaemonStatus } from "./daemon-status.ts";
 import { McpProxy } from "./mcp-proxy.ts";
 import { formatDuration, fromSQLiteDatetime } from "./time.ts";
 import { isOwner, requireOwner } from "./handlers/shared.ts";
@@ -394,9 +395,24 @@ function brainHere(interaction: ChatInputCommandInteraction, ctx: AppContext): s
   const id = resolveBrainId(interaction.channelId, parentId, (c) => ctx.config.getChannelBrain(c));
   if (id === CLAUDE_BRAIN) return "**Claude**";
   const brain = getBrain(id);
-  const own = ctx.config.getChannelBrain(interaction.channelId) ? "" : " (from parent channel)";
+  const own = ctx.config.getChannelBrain(interaction.channelId) || !parentId ? "" : " (from parent channel)";
   const who = ctx.config.getBrainAccess() === "owner" ? "owner only" : "allowlist";
   return brain ? `**${brain.label}**${own} · ${who}` : `\`${id}\` ⚠️ not loaded`;
+}
+
+/** The brain answering here, plus the chat it holds: title, cwd, when it started. */
+async function chatHere(interaction: ChatInputCommandInteraction, ctx: AppContext): Promise<string> {
+  const lines = [brainHere(interaction, ctx)];
+  const { brain, chat } = await liveChat(interaction, ctx);
+  if (chat) {
+    lines.push(`Chat: **${chat.title}** · since ${relativeTime(chat.createdAt)}`);
+    if (chat.cwd) lines.push(`cwd: \`${shortPath(chat.cwd)}\``);
+  } else if (brain === CLAUDE_BRAIN && !(await isDaemonMode(ctx.DATA_DIR))) {
+    lines.push("Chat: the terminal session");
+  } else {
+    lines.push("Chat: none yet");
+  }
+  return lines.join("\n");
 }
 
 // /status
@@ -440,7 +456,7 @@ registerCommand("status", {
         { name: "Reminders", value: `${stats.reminderCount} active`, inline: true },
         { name: "Access", value: `${ctx.allowedUsers.size} users`, inline: true },
         { name: "Plugins", value: pluginStatus, inline: true },
-        { name: "Brain here", value: brainHere(interaction, ctx), inline: true },
+        { name: "Here", value: await chatHere(interaction, ctx), inline: true },
       );
 
     // Daemon block — only when a daemon is actually supervising. In foreground
