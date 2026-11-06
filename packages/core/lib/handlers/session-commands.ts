@@ -39,6 +39,7 @@ import { isDaemonMode, requestDaemonControl } from "../daemon-status.ts";
 import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain } from "@choomfie/shared";
 import { randomUUID } from "node:crypto";
 import { resolveChatCwd, shortPath } from "../chats/here.ts";
+import { claudeIsPerLocation } from "../chats/claude.ts";
 import { botIsAbsent } from "../ask-relay.ts";
 import { requireOwner } from "./shared.ts";
 import { parentChannelId, resolveBrainId } from "../brain-router.ts";
@@ -115,6 +116,8 @@ async function submit(
     requestedBy: interaction.user.id,
     // The fresh session says hello here, unless this is a chat the bot can't post in.
     chatId: botIsAbsent(interaction) ? undefined : (interaction.channelId ?? undefined),
+    // A multi-session daemon acts on this location's session only.
+    location: interaction.channelId ?? undefined,
     cwd,
   });
 
@@ -219,6 +222,31 @@ registerCommand("clear", {
       cwd = resolved.cwd;
       token = randomUUID().slice(0, 8);
       pendingCwds.set(token, cwd);
+    }
+
+    // One session per location: only this channel's chat changes, and the old
+    // one stays resumable — nothing to confirm.
+    if (await claudeIsPerLocation(ctx)) {
+      if (token) pendingCwds.delete(token);
+      const chat = ctx.chats.start(interaction.channelId, CLAUDE_BRAIN);
+      if (cwd) ctx.chats.setCwd(chat.id, cwd);
+      await requestDaemonControl(ctx.DATA_DIR, "clear", {
+        requestedBy: interaction.user.id,
+        location: interaction.channelId,
+      });
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x57f287)
+            .setTitle("New chat")
+            .setDescription(
+              "Your next message here starts a new Claude chat" +
+                (cwd ? `, working in \`${shortPath(cwd)}\`` : "") +
+                ". `/resume` brings the old one back. Other channels are untouched.",
+            ),
+        ],
+      });
+      return;
     }
 
     const embed = new EmbedBuilder()

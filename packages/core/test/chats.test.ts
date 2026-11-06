@@ -233,3 +233,30 @@ describe("auto-thread", () => {
     expect(new ConfigManager(dir).getConfig().inlineChannels).toBeUndefined();
   });
 });
+
+describe("Claude chats per location (multi-session daemon)", () => {
+  test("each location gets its own chat, titled from its first message", async () => {
+    const { claudeChatAt, claudeIsPerLocation } = await import("../lib/chats/claude.ts");
+    const dir = mkdtempSync(join(tmpdir(), "perloc-"));
+    dirs.push(dir);
+    mkdirSync(join(dir, "meta"));
+    const { writeFileSync } = await import("node:fs");
+    const ctx = { DATA_DIR: dir, chats: store() } as never;
+    const prev = process.env.CHOOMFIE_DAEMON_PID;
+    process.env.CHOOMFIE_DAEMON_PID = "1"; // daemon-launched worker: reads the state file directly
+    try {
+      expect(await claudeIsPerLocation(ctx)).toBe(false);
+      writeFileSync(join(dir, "meta", "daemon-state.json"), JSON.stringify({ multiSession: true }));
+      expect(await claudeIsPerLocation(ctx)).toBe(true);
+      expect(await claudeChatAt(ctx, "t1")).toBeNull();
+      const a = await claudeChatAt(ctx, "t1", "plan the gripper");
+      const b = await claudeChatAt(ctx, "t2", "robot wiring");
+      expect(a!.title).toBe("plan the gripper");
+      expect(b!.id).not.toBe(a!.id);
+      expect((await claudeChatAt(ctx, "t1", "more"))!.id).toBe(a!.id);
+    } finally {
+      if (prev === undefined) delete process.env.CHOOMFIE_DAEMON_PID;
+      else process.env.CHOOMFIE_DAEMON_PID = prev;
+    }
+  });
+});

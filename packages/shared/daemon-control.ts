@@ -60,6 +60,11 @@ export type DaemonControlRequest = {
   cwd?: string;
   /** `resume`: the chat's title, for the "I'm back" line. */
   title?: string;
+  /**
+   * Multi-session daemon: the location (thread, channel, DM, group DM) whose
+   * session this is about. The chat bound there is already in SQLite.
+   */
+  location?: string;
 };
 
 export function daemonControlPath(dataDir: string): string {
@@ -90,9 +95,11 @@ export function parseDaemonControlRequest(
     sdkSessionId: str(raw.sdkSessionId),
     cwd: str(raw.cwd),
     title: str(raw.title),
+    location: str(raw.location),
   };
-  // Without these the daemon wouldn't know which chat to hold.
-  if (request.command === "resume" && (!request.targetChat || !request.sdkSessionId)) return null;
+  // Without these the daemon wouldn't know which chat to hold. A multi-session
+  // daemon reads the chat from the location's binding instead.
+  if (request.command === "resume" && !request.location && (!request.targetChat || !request.sdkSessionId)) return null;
   return request;
 }
 

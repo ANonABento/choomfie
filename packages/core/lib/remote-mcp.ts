@@ -102,22 +102,20 @@ export interface RemoteMcpDeps {
   callTool: (name: string, args: Record<string, unknown>) => Promise<unknown>;
 }
 
-function buildServer(cfg: RemoteMcpConfig, deps: RemoteMcpDeps): Server {
-  const allowed = new Set(cfg.tools);
+const REMOTE_INSTRUCTIONS = "Choomfie remote tools: read the owner's Choomfie memories, reminders and bot status.";
+
+/** `allowed` null = every tool (the daemon hub's own sessions). */
+function buildServer(allowed: Set<string> | null, instructions: string, deps: RemoteMcpDeps): Server {
   const server = new Server(
     { name: deps.name, version: deps.version },
-    {
-      capabilities: { tools: {} },
-      instructions:
-        "Choomfie remote tools: read the owner's Choomfie memories, reminders and bot status.",
-    }
+    { capabilities: { tools: {} }, instructions }
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: deps.listTools().filter((t) => allowed.has(t.name)),
+    tools: deps.listTools().filter((t) => !allowed || allowed.has(t.name)),
   }));
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const name = req.params.name;
-    if (!allowed.has(name)) {
+    if (allowed && !allowed.has(name)) {
       return {
         content: [{ type: "text", text: `Tool not available remotely: ${name}` }],
         isError: true,
@@ -138,12 +136,16 @@ function buildServer(cfg: RemoteMcpConfig, deps: RemoteMcpDeps): Server {
   return server;
 }
 
-export async function handleRemoteMcpRequest(
+export function handleRemoteMcpRequest(
   req: Request,
   cfg: RemoteMcpConfig,
   token: string,
   deps: RemoteMcpDeps
 ): Promise<Response> {
+  return handleMcpRequest(req, token, () => buildServer(new Set(cfg.tools), REMOTE_INSTRUCTIONS, deps));
+}
+
+async function handleMcpRequest(req: Request, token: string, build: () => Server): Promise<Response> {
   const url = new URL(req.url);
   if (url.pathname !== "/mcp") return new Response("Not found", { status: 404 });
   if (!tokenMatches(req.headers.get("authorization"), token)) {
@@ -156,7 +158,7 @@ export async function handleRemoteMcpRequest(
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405, headers: { Allow: "POST" } });
   }
-  const server = buildServer(cfg, deps);
+  const server = build();
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
@@ -180,4 +182,21 @@ export function startRemoteMcp(
     port: cfg.port,
     fetch: (req) => handleRemoteMcpRequest(req, cfg, token, deps),
   });
+}
+
+/**
+ * The daemon hub's endpoint for its own sessions: loopback, an ephemeral port,
+ * a token that lives only in the daemon's memory, every tool, and the worker's
+ * instructions (persona, security rules) as the server instructions.
+ */
+export function startLocalMcp(
+  deps: RemoteMcpDeps & { instructions: () => string }
+): { url: string; token: string; stop: () => void } {
+  const token = randomBytes(32).toString("base64url");
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (req) => handleMcpRequest(req, token, () => buildServer(null, deps.instructions() || "Choomfie is starting up...", deps)),
+  });
+  return { url: `http://127.0.0.1:${server.port}/mcp`, token, stop: () => server.stop(true) };
 }

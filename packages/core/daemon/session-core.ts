@@ -159,6 +159,11 @@ export type SessionPlacement = {
   cwd?: string;
   /** SDK session id to load (Claude Code's `--resume`). Must have been created in `cwd`. */
   resume?: string;
+  /**
+   * Hub mode: reach Choomfie's tools at this loopback endpoint instead of
+   * loading the plugin, whose supervisor would start a second Discord worker.
+   */
+  mcp?: { url: string; token: string };
 };
 
 export function createSession(
@@ -180,14 +185,25 @@ export function createSession(
       ...(models.fallbackModel ? { fallbackModel: models.fallbackModel } : {}),
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
-      plugins: [{ type: "local", path: PLUGIN_DIR }],
+      ...(placement.mcp
+        ? {
+            mcpServers: {
+              choomfie: {
+                type: "http" as const,
+                url: placement.mcp.url,
+                headers: { Authorization: `Bearer ${placement.mcp.token}` },
+              },
+            },
+          }
+        : { plugins: [{ type: "local" as const, path: PLUGIN_DIR }] }),
       // Puts the server on the session's channel allowlist. Foreground mode
       // needs this — without it Claude Code skips registration with "server
       // choomfie not in --channels list for this session" and every Discord
       // message is dropped. Here it is necessary but not sufficient (see
       // `enableChannelNotifications` above), and kept so both launch paths
       // stay identical in what they ask for.
-      extraArgs: { [CHANNELS_FLAG]: CHANNEL_TARGET },
+      // Not in hub mode: there is no channel server, and the hub injects messages.
+      ...(placement.mcp ? {} : { extraArgs: { [CHANNELS_FLAG]: CHANNEL_TARGET } }),
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
@@ -205,6 +221,8 @@ export function createSession(
       env: {
         ...process.env,
         CHOOMFIE_DAEMON_PID: String(process.pid),
+        // A supervisor started inside a hub session refuses to run (supervisor.ts).
+        ...(placement.mcp ? { CHOOMFIE_HUB_SESSION: "1" } : {}),
         // claude.ai connectors (Notion, Drive, Docs, ...) put their server
         // instructions and tool names into every session's context. The
         // persona never uses them, and that context is re-read on every turn.

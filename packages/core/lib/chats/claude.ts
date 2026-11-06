@@ -52,3 +52,29 @@ export async function syncClaudeChat(ctx: AppContext, firstText?: string): Promi
   if (!snapshot?.chat) return null;
   return applyClaudeHold(ctx.chats, snapshot.chat, firstText);
 }
+
+/**
+ * Is the daemon running one Claude session per location? Read from its state
+ * file — a daemon-launched worker skips the `ps` liveness check, since this
+ * runs on every message to Claude.
+ */
+export async function claudeIsPerLocation(ctx: AppContext): Promise<boolean> {
+  const snapshot = isDaemonOwnedProcess() ? await readDaemonStateFile(ctx.DATA_DIR) : await readDaemonStatus(ctx.DATA_DIR);
+  return snapshot?.multiSession === true;
+}
+
+/**
+ * The Claude chat at a location. Multi-session: its own chat, created (titled
+ * from `firstText`) when there is none yet and a message is on its way.
+ * Otherwise the one shared chat the daemon holds.
+ */
+export async function claudeChatAt(ctx: AppContext, location: string, firstText?: string): Promise<ChatRecord | null> {
+  if (!(await claudeIsPerLocation(ctx))) return syncClaudeChat(ctx, firstText);
+  const chat = ctx.chats.bound(location, CLAUDE_BRAIN);
+  if (!chat) return firstText === undefined ? null : ctx.chats.start(location, CLAUDE_BRAIN, titleFrom(firstText));
+  if (firstText !== undefined) {
+    if (chat.title === UNTITLED_CHAT && firstText.trim()) ctx.chats.rename(chat.id, titleFrom(firstText));
+    else ctx.chats.touch(chat.id);
+  }
+  return ctx.chats.get(chat.id);
+}

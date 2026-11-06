@@ -25,6 +25,7 @@ import { createInitialState, setupShutdown } from "./daemon/lifecycle.ts";
 import { log } from "./daemon/log.ts";
 import { acquirePid } from "./daemon/pid.ts";
 import { startSession } from "./daemon/runtime.ts";
+import { runHub } from "./daemon/hub/hub.ts";
 import {
   benchmark,
   showStatus,
@@ -71,6 +72,13 @@ async function main(): Promise<void> {
 
   await acquirePid();
   log(`PID ${process.pid} acquired`);
+
+  const daemonConfig = config.getDaemonConfig();
+  if (daemonConfig.multiSession) {
+    // One Claude session per location; the daemon runs Discord itself.
+    await runHub({ ...settings, maxSessions: daemonConfig.maxSessions });
+    await new Promise(() => {});
+  }
 
   const handoffs = await loadHandoffs();
   const lastSummary = getLastHandoffSummary(handoffs);

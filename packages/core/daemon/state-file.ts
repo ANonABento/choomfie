@@ -6,7 +6,28 @@ import type { MetaState } from "./types.ts";
 
 export const DAEMON_STATE_PATH = `${META_DIR}/daemon-state.json`;
 
+/** The hub replaces the writer: one state file describing every live session. */
+let writer: ((state: MetaState) => Promise<void>) | null = null;
+
+export function setDaemonStateWriter(fn: ((state: MetaState) => Promise<void>) | null): void {
+  writer = fn;
+}
+
 export async function writeDaemonState(state: MetaState): Promise<void> {
+  if (writer) return writer(state);
+  await writeStateFile(daemonStateData(state));
+}
+
+export async function writeStateFile(data: Record<string, unknown>): Promise<void> {
+  try {
+    await writeJsonAtomic(DAEMON_STATE_PATH, data);
+  } catch (error: unknown) {
+    log(`Failed to write daemon state: ${getErrorMessage(error)}`);
+  }
+}
+
+/** One session's state, in daemon-state.json's shape. */
+export function daemonStateData(state: MetaState): Record<string, unknown> {
   const uptime =
     state.sessionStartTime > 0
       ? Math.round((Date.now() - state.sessionStartTime) / 1000)
@@ -62,10 +83,5 @@ export async function writeDaemonState(state: MetaState): Promise<void> {
     },
     updatedAt: new Date().toISOString(),
   };
-
-  try {
-    await writeJsonAtomic(DAEMON_STATE_PATH, data);
-  } catch (error: unknown) {
-    log(`Failed to write daemon state: ${getErrorMessage(error)}`);
-  }
+  return data;
 }

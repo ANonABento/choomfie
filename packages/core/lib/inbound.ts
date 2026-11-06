@@ -8,11 +8,12 @@ import { mkdir } from "node:fs/promises";
 import { basename } from "node:path";
 import {
   errorMessage,
+  INBOUND_LOCATION_KEY,
   isDaemonOwnedProcess,
   type McpTransport,
 } from "@choomfie/shared";
 import { deliverInboundMessage } from "./daemon-status.ts";
-import { syncClaudeChat } from "./chats/claude.ts";
+import { claudeChatAt } from "./chats/claude.ts";
 import type { AppContext } from "./types.ts";
 
 export function sanitizeAttachmentName(name?: string | null): string {
@@ -88,14 +89,18 @@ export async function forwardToClaude(
   content: string,
   meta: Record<string, string>,
   /** What the user actually typed, for the chat's title (content may carry a preamble). */
-  titleHint: string = content
+  titleHint: string = content,
+  /** Thread, channel, DM or group DM — differs from `chat_id` for an `ask:` relay. */
+  location: string = meta.chat_id
 ): Promise<void> {
   if (isDaemonOwnedProcess()) {
-    // Keep the Claude chat record current: title from the first message,
-    // backend ref from the daemon's live SDK session. Never blocks delivery.
-    await syncClaudeChat(ctx, titleHint).catch((error: unknown) =>
+    // Keep the Claude chat record current: title from the first message. A
+    // multi-session daemon opens whichever chat is bound at the location, so
+    // that binding exists before the message does. Never blocks delivery.
+    await claudeChatAt(ctx, location, titleHint).catch((error: unknown) =>
       console.error(`[choomfie] chat sync failed: ${errorMessage(error)}`)
     );
+    if (location) meta = { ...meta, [INBOUND_LOCATION_KEY]: location };
     try {
       await deliverInboundMessage(ctx.DATA_DIR, content, meta);
     } catch (error: unknown) {
