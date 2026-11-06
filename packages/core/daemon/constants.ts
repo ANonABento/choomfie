@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { findMonorepoRoot, resolveDataDir } from "@choomfie/shared";
+import { chatHomeDir, findMonorepoRoot, resolveDataDir } from "@choomfie/shared";
 
 export const CONTEXT_CHECK_INTERVAL = 60_000;
 export const HANDOFF_SUMMARY_TIMEOUT = 30_000;
@@ -26,6 +26,8 @@ export const WORKER_MAX_CONSECUTIVE_FAILURES = 3;
 export const DATA_DIR = resolveDataDir();
 export const META_DIR = `${DATA_DIR}/meta`;
 export const PID_PATH = `${META_DIR}/meta.pid`;
+/** Default cwd for a Claude chat (see `chatHomeDir`). */
+export const CHAT_HOME = chatHomeDir(DATA_DIR);
 
 // Resolve from packages/core to preserve the original root search start point.
 export const PLUGIN_DIR = findMonorepoRoot(join(import.meta.dir, ".."));

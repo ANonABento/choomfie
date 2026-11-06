@@ -12,7 +12,7 @@
  */
 
 import { Database } from "bun:sqlite";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import {
   CLAUDE_BRAIN,
@@ -25,7 +25,14 @@ import { ChatStore } from "../lib/chats/store.ts";
 import { startConfiguredRemoteMcp, startLocalMcp } from "../lib/remote-mcp.ts";
 import { VERSION } from "../lib/version.ts";
 import { WorkerHost } from "../lib/worker-host.ts";
-import { DATA_DIR, META_DIR, WORKER_HEALTH_INTERVAL, WORKER_MAX_CONSECUTIVE_FAILURES } from "./constants.ts";
+import {
+  CHAT_HOME,
+  DATA_DIR,
+  META_DIR,
+  PLUGIN_DIR,
+  WORKER_HEALTH_INTERVAL,
+  WORKER_MAX_CONSECUTIVE_FAILURES,
+} from "./constants.ts";
 import { takeControlRequest } from "./control.ts";
 import { getErrorMessage } from "./error.ts";
 import { formatChannelPrompt, takeInboundMessages } from "./incoming.ts";
@@ -47,18 +54,20 @@ const STATE_INTERVAL_MS = 30_000;
 const MAX_HEALTH_RESTARTS_PER_HOUR = 3;
 
 /**
- * Before one session per location there was one shared Claude chat, bound at
- * "claude:global", with its seeds in meta/claude-chat.json. Fold the seeds in
- * and drop the binding; the chats themselves stay resumable with `/resume`.
+ * Older layouts, brought forward once:
+ * - one shared Claude chat bound at "claude:global", with its seeds in
+ *   meta/claude-chat.json: fold the seeds in and drop the binding (the chats
+ *   stay resumable with `/resume`);
+ * - chats with a session but no recorded cwd ran in the plugin dir, back when
+ *   that was the default: record it, or they'd resume in the wrong place.
  */
-function migrateSharedChat(db: Database, seeds: Seeds): Seeds {
-  const legacy = `${META_DIR}/claude-chat.json`;
+export function migrateLegacy(db: Database, seeds: Seeds, legacy = `${META_DIR}/claude-chat.json`): Seeds {
   db.query("DELETE FROM chat_bindings WHERE location_id = 'claude:global'").run();
+  db.query(`UPDATE chats SET cwd = ? WHERE brain = '${CLAUDE_BRAIN}' AND cwd IS NULL AND backend_ref IS NOT NULL`).run(PLUGIN_DIR);
   if (!existsSync(legacy)) return seeds;
   try {
     const old = parseSeeds(JSON.parse(readFileSync(legacy, "utf-8"))?.seeds);
     for (const [chatId, summary] of Object.entries(old)) if (!seeds[chatId]) seeds = withSeed(seeds, chatId, summary);
-    void saveSeeds(seeds);
   } catch {
     // Unreadable: nothing worth carrying over.
   }
@@ -94,7 +103,9 @@ export async function runDaemon(settings: DaemonSettings): Promise<void> {
   db.exec("PRAGMA busy_timeout = 5000");
   const chats = new ChatStore(db);
 
-  let seeds = migrateSharedChat(db, loadSeeds());
+  let seeds = migrateLegacy(db, loadSeeds());
+  await saveSeeds(seeds);
+  mkdirSync(CHAT_HOME, { recursive: true });
   let usageToday = { date: todayKey(), inputTokens: 0 };
   let totalCycles = 0;
   let rateLimit: RateLimitSnapshot | null = null;
@@ -122,9 +133,10 @@ export async function runDaemon(settings: DaemonSettings): Promise<void> {
           void saveSeeds(seeds);
           void writeState();
         },
-        onSessionId: (chatId, sid) => {
+        onSessionId: (chatId, sid, cwd) => {
           try {
             chats.setBackendRef(chatId, sid);
+            if (sid) chats.setCwd(chatId, cwd);
           } catch (e: unknown) {
             log(`Couldn't record session ${sid ?? "(none)"} on chat ${chatId}: ${getErrorMessage(e)}`);
           }

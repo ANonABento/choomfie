@@ -129,9 +129,11 @@ export function createSession(
       },
       persistSession: true,
       includePartialMessages: false,
-      settingSources: ["user", "project"],
-      // Another project's cwd loads *its* CLAUDE.md and .claude settings;
-      // persona and tools still come from the endpoint above.
+      // Project only: the owner's own Claude Code setup (skills, plugins,
+      // global CLAUDE.md) is theirs, not the bot's, and every session paid for
+      // it. A chat started in a project (`/clear cwd:`) loads that project's
+      // CLAUDE.md and settings; the default chat home has none.
+      settingSources: ["project"],
       cwd: placement.cwd,
       env: {
         ...process.env,

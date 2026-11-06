@@ -30,6 +30,16 @@ export function findMonorepoRoot(from: string): string {
 export const DEFAULT_DATA_DIR_SUFFIX = ".claude/plugins/data/choomfie-inline";
 
 /**
+ * Where a Claude chat runs when nobody picked a project (`/clear cwd:`): an
+ * empty folder in the data dir, so a session loads no project's CLAUDE.md,
+ * settings or auto-memory it doesn't need — a chat in the Choomfie repo
+ * paid ~8k tokens of developer docs per session.
+ */
+export function chatHomeDir(dataDir: string): string {
+  return join(dataDir, "home");
+}
+
+/**
  * Resolve the runtime data directory.
  *
  * Single source of truth for every entry point — supervisor, worker, daemon,

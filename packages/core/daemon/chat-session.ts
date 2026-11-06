@@ -7,7 +7,7 @@
  */
 
 import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { CONTEXT_CHECK_INTERVAL, INITIAL_RESTART_BACKOFF, MAX_RESTART_BACKOFF, PLUGIN_DIR } from "./constants.ts";
+import { CHAT_HOME, CONTEXT_CHECK_INTERVAL, INITIAL_RESTART_BACKOFF, MAX_RESTART_BACKOFF } from "./constants.ts";
 import { getErrorMessage } from "./error.ts";
 import { createInitialState } from "./lifecycle.ts";
 import { createMessageGenerator } from "./message-generator.ts";
@@ -30,9 +30,10 @@ export interface ChatSessionDeps {
   onCompacted(chatId: string, summary: string): void;
   /**
    * The SDK reported this chat's session id — store it as the chat's
-   * backendRef. Null after a compact: the next session starts from the seed.
+   * backendRef, along with the cwd it ran in (a resume must come back there).
+   * Null after a compact: the next session starts from the seed.
    */
-  onSessionId(chatId: string, sdkSessionId: string | null): void;
+  onSessionId(chatId: string, sdkSessionId: string | null, cwd: string): void;
   /** Input tokens this session just used, for the daemon's daily total. */
   onUsage(inputTokens: number): void;
   /** Something the state file reports changed (rate limits, model). */
@@ -58,7 +59,7 @@ export class ChatSession implements LiveSession {
     this.chatId = deps.chat.id;
     this.location = deps.location;
     this.title = deps.chat.title;
-    this.state = createInitialState(deps.settings, { id: deps.chat.id, cwd: deps.chat.cwd ?? PLUGIN_DIR });
+    this.state = createInitialState(deps.settings, { id: deps.chat.id, cwd: deps.chat.cwd ?? CHAT_HOME });
     this.reportedSessionId = deps.chat.backendRef;
   }
 
@@ -115,7 +116,7 @@ export class ChatSession implements LiveSession {
         const sid = this.state.chat.sdkSessionId;
         if (sid && sid !== this.reportedSessionId) {
           this.reportedSessionId = sid;
-          this.deps.onSessionId(this.chatId, sid);
+          this.deps.onSessionId(this.chatId, sid, this.state.chat.cwd);
         }
         if (message.type === "result") this.failures = 0;
       }
@@ -231,7 +232,7 @@ export class ChatSession implements LiveSession {
       // The new SDK session gets its id on its first prompt. Until then a
       // resume must not reload the long transcript this compact just dropped.
       this.reportedSessionId = null;
-      this.deps.onSessionId(this.chatId, null);
+      this.deps.onSessionId(this.chatId, null, this.state.chat.cwd);
       this.deps.onCompacted(this.chatId, summary);
       if (this.closed) return;
       this.open(undefined, summary);

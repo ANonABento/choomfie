@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { ChatSession, type ChatSessionDeps } from "../daemon/chat-session.ts";
-import { CYCLE_IDLE_DEBOUNCE_MS } from "../daemon/constants.ts";
+import { CHAT_HOME, CYCLE_IDLE_DEBOUNCE_MS } from "../daemon/constants.ts";
 import type { SessionPlacement } from "../daemon/session-core.ts";
 
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
@@ -72,17 +72,22 @@ class FakeQuery {
   }
 }
 
-function setup(opts: { backendRef?: string | null; seed?: string; answer?: (text: string) => string | null } = {}) {
+function setup(
+  opts: { backendRef?: string | null; cwd?: string | null; seed?: string; answer?: (text: string) => string | null } = {}
+) {
   const queries: FakeQuery[] = [];
-  const events = { sessionIds: [] as (string | null)[], compacted: [] as string[], logs: [] as string[] };
+  const events = { sessionIds: [] as (string | null)[], cwds: [] as string[], compacted: [] as string[], logs: [] as string[] };
   const deps: ChatSessionDeps = {
     location: "t1",
-    chat: { id: "chat1", backendRef: opts.backendRef ?? null, cwd: "/tmp", title: "arm" },
+    chat: { id: "chat1", backendRef: opts.backendRef ?? null, cwd: opts.cwd === undefined ? "/tmp" : opts.cwd, title: "arm" },
     settings: { tokenThreshold: 120_000, turnThreshold: 2, maxSessions: 3 },
     mcp: { url: "http://127.0.0.1:1/mcp", token: "t" },
     seed: () => opts.seed,
     onCompacted: (_id, summary) => events.compacted.push(summary),
-    onSessionId: (_id, sid) => events.sessionIds.push(sid),
+    onSessionId: (_id, sid, cwd) => {
+      events.sessionIds.push(sid);
+      events.cwds.push(cwd);
+    },
     onUsage: () => {},
     onChange: () => {},
     log: (m) => events.logs.push(m),
@@ -102,6 +107,16 @@ describe("ChatSession", () => {
     session.start();
     expect(queries[0].placement).toMatchObject({ resume: "sdk-1", cwd: "/tmp", mcp: { token: "t" } });
     expect(queries[0].summary).toBe("earlier summary");
+    void session.close();
+  });
+
+  test("a chat with no project runs in the chat home, and its first session pins that cwd", async () => {
+    const { session, queries, events } = setup({ cwd: null });
+    session.start();
+    expect(queries[0].placement.cwd).toBe(CHAT_HOME);
+    queries[0].emit({ type: "system", subtype: "init", session_id: "sdk-2", model: "m", claude_code_version: "999.0.0" } as never);
+    await tick();
+    expect(events.cwds).toEqual([CHAT_HOME]);
     void session.close();
   });
 

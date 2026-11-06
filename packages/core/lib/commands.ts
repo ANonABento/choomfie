@@ -18,7 +18,7 @@ import {
 } from "discord.js";
 import type { AppContext } from "./types.ts";
 import { AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, relativeTime } from "@choomfie/shared";
-import { liveChat, shortPath } from "./chats/here.ts";
+import { cwdLabel, liveChat } from "./chats/here.ts";
 import { parentChannelId, resolveBrainId } from "./brain-router.ts";
 import { VERSION } from "./version.ts";
 import { registerCommand, registerButtonHandler } from "./register.ts";
@@ -407,7 +407,8 @@ async function chatHere(interaction: ChatInputCommandInteraction, ctx: AppContex
   const { brain, chat } = await liveChat(interaction, ctx);
   if (chat) {
     lines.push(`Chat: **${chat.title}** · since ${relativeTime(chat.createdAt)}`);
-    if (chat.cwd) lines.push(`cwd: \`${shortPath(chat.cwd)}\``);
+    const cwd = cwdLabel(ctx, chat.cwd);
+    if (cwd) lines.push(`cwd: \`${cwd}\``);
   } else if (brain === CLAUDE_BRAIN && !(await isDaemonMode(ctx.DATA_DIR))) {
     lines.push("Chat: the terminal session");
   } else {

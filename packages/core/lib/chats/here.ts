@@ -6,7 +6,7 @@
 import { realpathSync } from "node:fs";
 import { sep } from "node:path";
 import type { ButtonInteraction, ChatInputCommandInteraction } from "discord.js";
-import { CLAUDE_BRAIN, type ChatRecord } from "@choomfie/shared";
+import { chatHomeDir, CLAUDE_BRAIN, type ChatRecord } from "@choomfie/shared";
 import { parentChannelId, resolveBrainId } from "../brain-router.ts";
 import { isDaemonMode } from "../daemon-status.ts";
 import type { AppContext } from "../types.ts";
@@ -32,6 +32,11 @@ export async function liveChat(
 }
 
 export const home = () => process.env.HOME ?? "";
+
+/** A chat's cwd for display, or "" for the default chat home (nothing to say). */
+export function cwdLabel(ctx: Pick<AppContext, "DATA_DIR">, cwd: string | null): string {
+  return !cwd || cwd === chatHomeDir(ctx.DATA_DIR) ? "" : shortPath(cwd);
+}
 
 /** `/Users/me/x` → `~/x`, for display. */
 export function shortPath(p: string | null): string {

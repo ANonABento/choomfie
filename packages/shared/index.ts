@@ -90,6 +90,7 @@ export {
   findMonorepoRoot,
   resolveDataDir,
   DEFAULT_DATA_DIR_SUFFIX,
+  chatHomeDir,
 } from "./paths.ts";
 
 // Secret-file helpers

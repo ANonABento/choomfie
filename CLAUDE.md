@@ -97,6 +97,7 @@ So a daemon-launched worker writes each message to `meta/incoming/` and the daem
 |---|---|---|
 | Inbound messages | pushed by the daemon from `meta/incoming/` | `--dangerously-load-development-channels` |
 | Tools + persona | loopback MCP endpoint (`mcpServers`) | the plugin (`--plugin-dir`) |
+| Settings, cwd | project settings only; cwd = the chat's, default `<data dir>/home` | yours; the terminal's cwd |
 | Model | `models.model` from config.json | `--model` via `scripts/resolve-model.ts` |
 | Permission mode | `bypassPermissions` | `--permission-mode auto` (override: `CHOOMFIE_PERMISSION_MODE`, or pass your own) |
 

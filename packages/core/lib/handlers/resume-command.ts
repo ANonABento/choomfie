@@ -39,7 +39,7 @@ import { registerButtonHandler, registerCommand, registerModalHandler } from "..
 import { parentChannelId, resolveBrainId } from "../brain-router.ts";
 import { isDaemonMode, requestDaemonControl } from "../daemon-status.ts";
 import { isOwner } from "../access.ts";
-import { brainAt, liveChat, shortPath, type AnyInteraction } from "../chats/here.ts";
+import { brainAt, cwdLabel, liveChat, type AnyInteraction } from "../chats/here.ts";
 import type { AppContext } from "../types.ts";
 import { requireOwner } from "./shared.ts";
 
@@ -56,7 +56,8 @@ function brainLabel(id: string): string {
 
 function chatLine(chat: ChatRecord, ctx: AppContext): string {
   const bits = [`**${chat.title}**`, relativeTime(chat.lastActiveAt)];
-  if (chat.cwd) bits.push(`\`${shortPath(chat.cwd)}\``);
+  const cwd = cwdLabel(ctx, chat.cwd);
+  if (cwd) bits.push(`\`${cwd}\``);
   const at = ctx.chats.locationOf(chat.id);
   if (at) bits.push(`live in <#${at}>`);
   return `• ${bits.join(" · ")}`;
@@ -99,7 +100,7 @@ async function show(interaction: ChatInputCommandInteraction, ctx: AppContext) {
     .slice(0, LIST_LIMIT);
 
   const here = current
-    ? `**${current.title}** · since ${relativeTime(current.createdAt)}${current.cwd ? ` · \`${shortPath(current.cwd)}\`` : ""}`
+    ? `**${current.title}** · since ${relativeTime(current.createdAt)}${cwdLabel(ctx, current.cwd) ? ` · \`${cwdLabel(ctx, current.cwd)}\`` : ""}`
     : brain === CLAUDE_BRAIN && !(await isDaemonMode(ctx.DATA_DIR))
       ? "the terminal session"
       : "nothing yet — say something";
@@ -147,7 +148,7 @@ export async function resumeChat(interaction: AnyInteraction, ctx: AppContext, c
 
   const content =
     `Resumed **${chat.title}** with ${brainLabel(chat.brain)} here` +
-    (chat.cwd ? ` in \`${shortPath(chat.cwd)}\`` : "") +
+    (cwdLabel(ctx, chat.cwd) ? ` in \`${cwdLabel(ctx, chat.cwd)}\`` : "") +
     " — your next message picks it up." +
     (movedFrom && movedFrom !== location ? ` (Moved from <#${movedFrom}>, which starts fresh next time.)` : "");
   if (interaction.isButton()) await interaction.update({ content, embeds: [], components: [] });
