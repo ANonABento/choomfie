@@ -36,6 +36,28 @@ export async function pageFetch(
 }
 
 /**
+ * GET a file from inside the logged-in page, as bytes. Null when it fails or
+ * is larger than `maxBytes` (checked before it crosses into Node) — a file is
+ * an extra, never a reason to fail the answer it came with.
+ */
+export async function pageFetchBytes(page: Page, url: string, maxBytes: number): Promise<Uint8Array | null> {
+  const b64 = (await page.evaluate(
+    async ([u, max]: [string, number]) => {
+      const r = await fetch(u, { credentials: "include" }).catch(() => null);
+      if (!r?.ok) return null;
+      const blob = await r.blob();
+      if (blob.size > max) return null;
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      return btoa(bin);
+    },
+    [url, maxBytes] as [string, number]
+  )) as string | null;
+  return b64 === null ? null : new Uint8Array(Buffer.from(b64, "base64"));
+}
+
+/**
  * `pageFetch` for an endpoint that must succeed: 401/403 means the site wants
  * a login (`LoginRequiredError`), any other failure throws with the status and
  * the start of the body. Returns the parsed JSON.

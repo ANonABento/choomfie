@@ -10,7 +10,7 @@
 
 import type { EngineName } from "./engine/launch.ts";
 import type { Locator, Page } from "patchright";
-import type { BrainApproval } from "@choomfie/shared";
+import type { BrainApproval, BrainFile } from "@choomfie/shared";
 
 export type { Locator, Page };
 
@@ -49,6 +49,8 @@ export interface Human {
 
 export interface TurnResult {
   text: string;
+  /** Files the answer links to (images, PDFs it made), posted as attachments. */
+  files?: BrainFile[];
   /** The conversation this turn happened in. */
   ref: string;
   choices?: string[];
@@ -67,6 +69,7 @@ export interface TurnResult {
 
 export interface LateResult {
   text: string;
+  files?: BrainFile[];
   choices?: string[];
   approvals?: BrainApproval[];
   /** Message ids this covers. */

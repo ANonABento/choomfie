@@ -8,7 +8,13 @@ import {
   parseMessages,
   parseTurn,
   replyFor,
+  absoluteLinks,
+  parseWorkspaceFile,
+  workspaceFileUrl,
+  workspaceLinks,
 } from "../../../plugins/waymond/api.ts";
+import { withFiles } from "../../../plugins/waymond/adapter.ts";
+import type { Page } from "@choomfie/webbrain";
 import { framePrompt, originalName, toApproval } from "../../../plugins/waymond/index.ts";
 
 // Shapes as observed from app.ambition.inc on 2026-11-04.
@@ -211,5 +217,61 @@ describe("settling (race observed 2026-11-04)", () => {
       },
     ]);
     expect(answerState(late, base, false, false)).toMatchObject({ done: true, settled: true, options: ["Cats", "Dogs"] });
+  });
+});
+
+describe("workspace files (link shape observed 2026-11-06)", () => {
+  const OWNER = "00000000-0000-0000-0000-000000000001";
+  const link = (path: string) => `/chat?workspace=${encodeURIComponent(path)}&owner=${OWNER}`;
+  const text =
+    `**[Card v12, preview](${link("cards/v12/card.png")})** · **[Print PDF](${link("cards/v12/card.pdf")})**\n` +
+    `Again: [preview](${link("cards/v12/card.png")}), elsewhere: [site](https://example.com/a)`;
+
+  test("finds each workspace file once, in order; leaves other links alone", () => {
+    expect(workspaceLinks(text)).toEqual([
+      { path: "cards/v12/card.png", owner: OWNER },
+      { path: "cards/v12/card.pdf", owner: OWNER },
+    ]);
+    expect(workspaceFileUrl({ path: "a b/c.png", owner: null })).toBe(
+      "https://api-production.ambition.inc/api/waymond/workspace/file?path=a%20b%2Fc.png"
+    );
+  });
+
+  test("app-relative links become absolute; absolute ones are untouched", () => {
+    const out = absoluteLinks(text);
+    expect(out).toContain(`(https://app.ambition.inc${link("cards/v12/card.png")})`);
+    expect(out).toContain("(https://example.com/a)");
+    expect(out).not.toMatch(/\]\(\//);
+  });
+
+  test("workspace/file: bytes only from the app's own download route, else inline text", () => {
+    expect(parseWorkspaceFile({ download_url: "/api/waymond/workspace/download?t=1", mime_type: "image/png" })).toEqual({
+      downloadUrl: "https://api-production.ambition.inc/api/waymond/workspace/download?t=1",
+    });
+    expect(parseWorkspaceFile({ download_url: "https://evil.example/x" })).toBeNull();
+    expect(parseWorkspaceFile({ content: "print(1)", mime_type: "text/x-python" })).toEqual({ content: "print(1)" });
+    expect(parseWorkspaceFile(null)).toBeNull();
+  });
+
+  test("withFiles: fetches what it can, attaches under the file's name, never fails the answer", async () => {
+    const files: Record<string, unknown> = {
+      "cards/v12/card.png": { download_url: "/api/waymond/workspace/download?f=png" },
+      "cards/v12/card.pdf": { download_url: "/api/waymond/workspace/download?f=pdf" },
+      "cards/make.py": { content: "print(1)" },
+    };
+    // pageFetch passes [url, init]; pageFetchBytes passes [url, maxBytes].
+    const page = {
+      evaluate: async (_fn: unknown, [url, arg]: [string, unknown]) => {
+        if (typeof arg === "number") return url.endsWith("f=png") ? Buffer.from([9, 9]).toString("base64") : null;
+        const path = new URL(url).searchParams.get("path")!;
+        return path in files ? { status: 200, json: files[path] } : { status: 404, errorText: "nope" };
+      },
+    } as unknown as Page;
+    const out = await withFiles(page, `${text}\n[script](${link("cards/make.py")}) [gone](${link("missing.png")})`);
+    expect(out.files.map((f) => [f.name, [...f.data]])).toEqual([
+      ["card.png", [9, 9]],
+      ["make.py", [...new TextEncoder().encode("print(1)")]],
+    ]);
+    expect(out.text).toContain("(https://app.ambition.inc/chat?workspace=");
   });
 });

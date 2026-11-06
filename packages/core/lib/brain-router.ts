@@ -94,7 +94,7 @@ export function chunkForDiscord(text: string, limit = DISCORD_LIMIT): string[] {
 export interface SendableChannel {
   send(options: {
     content?: string;
-    files?: string[];
+    files?: { attachment: Buffer; name: string }[];
     reply?: { messageReference: string };
     components?: unknown[];
     embeds?: unknown[];
@@ -193,15 +193,18 @@ export async function postBrainReply(
   replyTo?: string
 ): Promise<void> {
   const choices = (reply.choices ?? []).filter(Boolean).slice(0, MAX_CHOICES);
-  const fallback = choices.length ? "(pick one)" : reply.approvals?.length ? "" : "(no reply)";
+  const fallback = choices.length ? "(pick one)" : reply.approvals?.length || reply.files?.length ? "" : "(no reply)";
   const chunks = chunkForDiscord(reply.text || fallback);
+  if (!chunks.length && reply.files?.length) chunks.push(""); // files alone still need a message
   for (let i = 0; i < chunks.length; i++) {
     const last = i === chunks.length - 1;
     const sent = await channel.send({
       allowedMentions: NO_MENTIONS,
       content: chunks[i],
       ...(i === 0 && replyTo ? { reply: { messageReference: replyTo } } : {}),
-      ...(last && reply.files?.length ? { files: reply.files } : {}),
+      ...(last && reply.files?.length
+        ? { files: reply.files.map((f) => ({ attachment: Buffer.from(f.data), name: f.name })) }
+        : {}),
       ...(last && choices.length ? { components: choiceRows(choices) } : {}),
     });
     const id = (sent as { id?: unknown } | undefined)?.id;

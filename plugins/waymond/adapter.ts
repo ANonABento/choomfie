@@ -8,10 +8,18 @@
  */
 
 import { basename } from "node:path";
-import type { BrainApproval } from "@choomfie/shared";
-import { LayoutChangedError, LoginRequiredError, pageFetchOk, type Page, type SiteAdapter } from "@choomfie/webbrain";
+import { errorMessage, type BrainApproval, type BrainFile } from "@choomfie/shared";
+import {
+  LayoutChangedError,
+  LoginRequiredError,
+  pageFetchBytes,
+  pageFetchOk,
+  type Page,
+  type SiteAdapter,
+} from "@choomfie/webbrain";
 import {
   APP_ORIGIN,
+  absoluteLinks,
   CONVERSATION_PATH_RE,
   answerState,
   chatUrl,
@@ -22,9 +30,12 @@ import {
   openOffers,
   parseMessages,
   parseTurn,
+  parseWorkspaceFile,
   stopUrl,
   turnUrl,
   waitingCardsUrl,
+  workspaceFileUrl,
+  workspaceLinks,
   type Offer,
   type TurnState,
 } from "./api.ts";
@@ -80,6 +91,36 @@ async function clearDraftAttachments(page: Page): Promise<void> {
     if (!removed) return;
     await page.waitForTimeout(150);
   }
+}
+
+/** Discord's upload cap for a bot (10 attachments, ~10 MB on an unboosted server). */
+const MAX_FILES = 10;
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+/**
+ * The answer with its workspace links made absolute, plus the files they
+ * point at. A file that can't be fetched or doesn't fit keeps only its link.
+ */
+export async function withFiles(page: Page, text: string): Promise<{ text: string; files: BrainFile[] }> {
+  const files: BrainFile[] = [];
+  let room = MAX_UPLOAD_BYTES;
+  for (const link of workspaceLinks(text).slice(0, MAX_FILES)) {
+    try {
+      const where = parseWorkspaceFile(await getJson(page, workspaceFileUrl(link)));
+      const data = !where
+        ? null
+        : "content" in where
+          ? new TextEncoder().encode(where.content)
+          : await pageFetchBytes(page, where.downloadUrl, room);
+      if (data && data.length <= room) {
+        files.push({ name: basename(link.path), data });
+        room -= data.length;
+      }
+    } catch (e) {
+      console.error(`[waymond] couldn't fetch workspace file ${link.path}: ${errorMessage(e)}`);
+    }
+  }
+  return { text: absoluteLinks(text), files };
 }
 
 /** Put files on the composer's hidden file input and wait until each shows as attached. */
@@ -146,8 +187,9 @@ export const waymondAdapter: SiteAdapter = {
           }
         }
         if (state.done || t.stopRequested()) {
+          const answer = await withFiles(page, state.reply);
           return {
-            text: state.reply,
+            ...answer,
             ref,
             choices: state.options,
             approvals: state.offers.map(toApproval),
@@ -180,7 +222,7 @@ export const waymondAdapter: SiteAdapter = {
     const late = lateMessages(parseMessages(await getJson(page, messagesUrl(ref))), afterId, posted);
     if (!late.length) return null;
     return {
-      text: late.map((m) => m.content.trim()).filter(Boolean).join("\n\n"),
+      ...(await withFiles(page, late.map((m) => m.content.trim()).filter(Boolean).join("\n\n"))),
       choices: [...late].reverse().find((m) => m.options.length)?.options ?? [],
       approvals: openOffers(late).map(toApproval),
       ids: late.map((m) => m.id),

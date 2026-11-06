@@ -14,7 +14,7 @@ export default defineWebBrain(myAdapter);
 
 `SiteAdapter` (`packages/webbrain/adapter.ts`) has one required method:
 
-- **`turn(page, { text, files }, t)`** — send one message in conversation `t.ref` (undefined → start a new one) and return `{ text, ref, choices?, approvals?, stopped?, background?, lastMessageId?, messageIds? }`. Call `t.started(ref)` as soon as the conversation id is known. Use `t.human.type()` / `t.human.submit()` for input, `t.progress(line)` for long turns, `t.notice(line)` for something the owner must act on, and check `t.stopRequested()` while waiting. Throw `LoginRequiredError` when the site wants a login, `LayoutChangedError` when a control is missing.
+- **`turn(page, { text, files }, t)`** — send one message in conversation `t.ref` (undefined → start a new one) and return `{ text, ref, files?, choices?, approvals?, stopped?, background?, lastMessageId?, messageIds? }`. `files` (`{ name, data }`) are posted as attachments: use them for images or documents the answer links inside the site, since those links are dead in Discord (`pageFetchBytes` fetches one through the logged-in page). Call `t.started(ref)` as soon as the conversation id is known. Use `t.human.type()` / `t.human.submit()` for input, `t.progress(line)` for long turns, `t.notice(line)` for something the owner must act on, and check `t.stopRequested()` while waiting. Throw `LoginRequiredError` when the site wants a login, `LayoutChangedError` when a control is missing.
 
 Optional: `stop(page, ref)` (called on the same tab while `turn` runs), `readLate(page, ref, afterId, posted)` for background results, `resolveApproval(page, ref, id, approve)`, `framePrompt(content, meta)`.
 

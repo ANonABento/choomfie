@@ -138,6 +138,7 @@ export {
   type Brain,
   type BrainMessage,
   type BrainReply,
+  type BrainFile,
   type BrainApproval,
 } from "./brains.ts";
 

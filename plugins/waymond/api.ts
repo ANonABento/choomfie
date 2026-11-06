@@ -230,3 +230,43 @@ export function hasWaitingCard(raw: unknown, conversationId: string): boolean {
 }
 
 export const CONVERSATION_PATH_RE = /\/chat\/([0-9a-f-]{36})(?:[/?#]|$)/;
+
+/**
+ * Files Waymond made in its workspace (images, PDFs, scripts) are linked as
+ * `[label](/chat?workspace=<path>&owner=<id>)` — a path inside its own app,
+ * which is a dead link anywhere else. The app reads them through
+ * `workspace/file`: JSON with the text inline, or a `download_url` for bytes.
+ */
+export interface WorkspaceLink {
+  path: string;
+  owner: string | null;
+}
+
+const APP_LINK_RE = /\]\((\/[^)\s]*)\)/g;
+
+/** Every distinct workspace file the text links to, in order. */
+export function workspaceLinks(text: string): WorkspaceLink[] {
+  const seen = new Map<string, WorkspaceLink>();
+  for (const [, href] of text.matchAll(APP_LINK_RE)) {
+    if (!href.startsWith("/chat?workspace=")) continue;
+    const q = new URLSearchParams(href.slice(href.indexOf("?")));
+    const path = q.get("workspace");
+    if (path) seen.set(`${path}\n${q.get("owner")}`, { path, owner: q.get("owner") });
+  }
+  return [...seen.values()];
+}
+
+/** App-relative links (`](/chat?…)`) made absolute, so they open Ambition from Discord. */
+export const absoluteLinks = (text: string) => text.replace(APP_LINK_RE, (_, href: string) => `](${APP_ORIGIN}${href})`);
+
+export const workspaceFileUrl = ({ path, owner }: WorkspaceLink) =>
+  `${API_ORIGIN}/api/waymond/workspace/file?path=${encodeURIComponent(path)}${owner ? `&owner=${encodeURIComponent(owner)}` : ""}`;
+
+/** `workspace/file` → where its bytes are. Only the app's own download route is followed. */
+export function parseWorkspaceFile(raw: unknown): { downloadUrl: string } | { content: string } | null {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  if (typeof r.download_url === "string") {
+    return r.download_url.startsWith("/api/waymond/workspace/download?") ? { downloadUrl: `${API_ORIGIN}${r.download_url}` } : null;
+  }
+  return typeof r.content === "string" ? { content: r.content } : null;
+}

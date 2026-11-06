@@ -117,7 +117,8 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
     const lateWatch = (watch = new LateWatch(
       (chatKey, ref, afterId, posted) =>
         adapter.readLate ? onTab(chatKey, (page) => adapter.readLate!(page, ref, afterId, posted)) : Promise.resolve(null),
-      (chatKey, late) => pushBrainReply(adapter.id, chatKey, { text: late.text, choices: late.choices, approvals: late.approvals })
+      (chatKey, late) =>
+        pushBrainReply(adapter.id, chatKey, { text: late.text, files: late.files, choices: late.choices, approvals: late.approvals })
     ));
 
     return {
@@ -215,7 +216,12 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
           chats.setBackendRef(chat.id, result.ref);
           lateWatch.delivered(message.chatKey, result.messageIds ?? []);
           if (result.background && result.lastMessageId) lateWatch.start(message.chatKey, result.ref, result.lastMessageId);
-          return { text: answerText(result, adapter.label), choices: result.choices, approvals: result.approvals };
+          return {
+            text: answerText(result, adapter.label),
+            files: result.files,
+            choices: result.choices,
+            approvals: result.approvals,
+          };
         } finally {
           if (active.get(message.chatKey) === turn) active.delete(message.chatKey);
           await (status as { delete(): Promise<unknown> } | null)?.delete().catch(() => {});
