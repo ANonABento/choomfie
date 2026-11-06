@@ -118,7 +118,7 @@ export async function runDaemon(settings: DaemonSettings): Promise<void> {
     log: (m) => log(m),
     boundChat: (location): PoolChat | null => {
       const chat = chats.bound(location, CLAUDE_BRAIN);
-      return chat ? { id: chat.id, backendRef: chat.backendRef, cwd: chat.cwd, title: chat.title } : null;
+      return chat ? { id: chat.id, backendRef: chat.backendRef, cwd: chat.cwd, model: chat.model, title: chat.title } : null;
     },
     open: (location, chat) =>
       new ChatSession({

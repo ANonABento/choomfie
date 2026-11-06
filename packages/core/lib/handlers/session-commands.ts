@@ -21,6 +21,7 @@ import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain } from "@choomfie/
 import { registerCommand } from "../register.ts";
 import { isDaemonMode, requestDaemonControl } from "../daemon-status.ts";
 import { brainAt, resolveChatCwd, shortPath } from "../chats/here.ts";
+import { parseModel } from "../settings.ts";
 import { botIsAbsent } from "../ask-relay.ts";
 import { requireOwner } from "./shared.ts";
 
@@ -81,11 +82,14 @@ registerCommand("clear", {
       .addStringOption((o) =>
         o.setName("cwd").setDescription("Claude only: work in this directory (one of chatRoots)").setAutocomplete(true)
       )
+      .addStringOption((o) =>
+        o.setName("model").setDescription("Claude only: run the new chat on this model (e.g. sonnet)")
+      )
       .toJSON(),
     // In a group DM answered by another brain, this is the only way to start it fresh.
     ...ANYWHERE,
   },
-  // Config only — well inside Discord's 3s.
+  // Config only — well inside Discord's 3s. (Only `cwd` autocompletes.)
   autocomplete: async (interaction, ctx) => {
     const typed = interaction.options.getFocused().toLowerCase();
     await interaction.respond(
@@ -101,8 +105,10 @@ registerCommand("clear", {
     const location = interaction.channelId;
     const brain = brainAt(interaction, ctx);
     const requested = interaction.options.getString("cwd")?.trim();
+    const requestedModel = interaction.options.getString("model")?.trim();
 
     let cwd: string | undefined;
+    let model: string | undefined;
     if (brain === CLAUDE_BRAIN) {
       if (!(await isDaemonMode(ctx.DATA_DIR))) return ephemeral(interaction, FOREGROUND_NOTICE);
       if (requested) {
@@ -110,13 +116,19 @@ registerCommand("clear", {
         if ("error" in resolved) return ephemeral(interaction, resolved.error);
         cwd = resolved.cwd;
       }
-    } else if (requested) {
-      return ephemeral(interaction, `\`cwd\` only applies to Claude chats; **${brainName(brain)}** runs in its own app.`);
+      if (requestedModel) {
+        const parsed = parseModel(requestedModel);
+        if ("error" in parsed) return ephemeral(interaction, parsed.error);
+        model = parsed.value;
+      }
+    } else if (requested || requestedModel) {
+      return ephemeral(interaction, `\`cwd\` and \`model\` only apply to Claude chats; **${brainName(brain)}** runs in its own app.`);
     }
 
     // A new chat bound here; the old one stays listable for `/resume`.
     const chat = ctx.chats.start(location, brain);
     if (cwd) ctx.chats.setCwd(chat.id, cwd);
+    if (model) ctx.chats.setModel(chat.id, model);
     if (brain === CLAUDE_BRAIN) {
       await requestDaemonControl(ctx.DATA_DIR, "clear", { requestedBy: interaction.user.id, location });
     } else {
@@ -129,7 +141,8 @@ registerCommand("clear", {
           .setColor(0x57f287)
           .setTitle(`New ${brainName(brain)} chat`)
           .setDescription(
-            `Your next message here starts a new chat${cwd ? `, working in \`${shortPath(cwd)}\`` : ""}. ` +
+            `Your next message here starts a new chat${cwd ? `, working in \`${shortPath(cwd)}\`` : ""}` +
+              `${model ? ` on **${model}**` : ""}. ` +
               "`/resume` brings the old one back. Other channels are untouched."
           ),
       ],

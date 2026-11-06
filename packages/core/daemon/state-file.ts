@@ -76,6 +76,7 @@ export function buildDaemonState(input: DaemonStateInput): Record<string, unknow
       chatId: s.state.chat.id,
       title: s.title,
       cwd: s.state.chat.cwd,
+      model: s.state.models.model ?? null,
       sdkSessionId: s.state.chat.sdkSessionId,
       busy: s.busy,
       turns: s.state.turnCount,

@@ -17,6 +17,7 @@ import {
   SETTINGS,
   findSetting,
   suggestValues,
+  parseModel,
 } from "../lib/settings.ts";
 
 const dirs: string[] = [];
@@ -113,6 +114,13 @@ describe("duration settings", () => {
 });
 
 describe("model settings", () => {
+  test("parseModel: a single token, or `default` for none", () => {
+    expect(parseModel("sonnet")).toEqual({ ok: true, value: "sonnet" });
+    expect(parseModel(" default ")).toEqual({ ok: true, value: undefined });
+    expect(parseModel("two words").ok).toBe(false);
+  });
+
+
   test("stores an alias or a full model id", () => {
     const { config } = newConfig();
     const model = findSetting("model")!;

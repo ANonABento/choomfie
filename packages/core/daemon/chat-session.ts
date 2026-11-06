@@ -45,6 +45,7 @@ export interface ChatSessionDeps {
 
 export class ChatSession implements LiveSession {
   readonly chatId: string;
+  readonly model: string | null;
   readonly state: MetaState;
   readonly location: string;
   readonly title: string;
@@ -59,7 +60,11 @@ export class ChatSession implements LiveSession {
     this.chatId = deps.chat.id;
     this.location = deps.location;
     this.title = deps.chat.title;
-    this.state = createInitialState(deps.settings, { id: deps.chat.id, cwd: deps.chat.cwd ?? CHAT_HOME });
+    this.model = deps.chat.model;
+    this.state = createInitialState(
+      { ...deps.settings, ...(deps.chat.model ? { model: deps.chat.model } : {}) },
+      { id: deps.chat.id, cwd: deps.chat.cwd ?? CHAT_HOME }
+    );
     this.reportedSessionId = deps.chat.backendRef;
   }
 

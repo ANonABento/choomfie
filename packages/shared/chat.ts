@@ -25,6 +25,8 @@ export interface ChatRecord {
   title: string;
   /** Working directory (Claude chats only). */
   cwd: string | null;
+  /** Model for this chat (Claude chats only); null = the configured default. */
+  model: string | null;
   /** Location the chat was started in. */
   locationId: string;
   /** SQLite datetimes (`YYYY-MM-DD HH:MM:SS`, UTC). */

@@ -245,7 +245,7 @@ describe("/clear and /compact follow the channel's brain", () => {
 
   test("/clear cwd: is refused in a brain channel, changing nothing", async () => {
     const { replies, resets, chats, before } = await run("clear", "testbrain", true, "~/x");
-    expect(replies[0].content).toContain("only applies to Claude");
+    expect(replies[0].content).toContain("only apply to Claude chats");
     expect(resets).toEqual([]);
     expect(chats.bound("chan1", "testbrain")?.id).toBe(before.id);
   });

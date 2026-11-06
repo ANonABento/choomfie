@@ -122,6 +122,28 @@ describe("cwd allowlist", () => {
   });
 });
 
+describe("per-chat model", () => {
+  test("stored on the chat; null means the default", () => {
+    const chats = store();
+    const c = chats.current("t1", CLAUDE_BRAIN, "hi");
+    expect(c.model).toBeNull();
+    chats.setModel(c.id, "sonnet");
+    expect(chats.bound("t1", CLAUDE_BRAIN)!.model).toBe("sonnet");
+    chats.setModel(c.id, null);
+    expect(chats.get(c.id)!.model).toBeNull();
+  });
+
+  test("a database from before the column gets it on open, rows intact", () => {
+    const db = new Database(":memory:");
+    db.exec(`CREATE TABLE chats (id TEXT PRIMARY KEY, brain TEXT NOT NULL, backend_ref TEXT, title TEXT NOT NULL,
+      cwd TEXT, location_id TEXT NOT NULL, created_at TEXT NOT NULL, last_active_at TEXT NOT NULL)`);
+    db.exec(`INSERT INTO chats VALUES ('c1', 'claude', 's1', 'old', NULL, 't1', '2026-01-01 00:00:00', '2026-01-01 00:00:00')`);
+    const chats = new ChatStore(db);
+    expect(chats.get("c1")).toMatchObject({ title: "old", backendRef: "s1", model: null });
+    new ChatStore(db); // idempotent
+  });
+});
+
 describe("current(): the chat for a message", () => {
   test("each location gets its own chat, titled from its first message", () => {
     const chats = store();
