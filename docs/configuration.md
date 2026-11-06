@@ -56,7 +56,7 @@ A brain channel only answers messages addressed to it (DM, @mention, reply). Amb
 
 ## Remote MCP endpoint (`remoteMcp`)
 
-Lets a cloud agent — built for Ambition's Waymond, which only accepts remote MCP servers by URL — call a small allowlisted set of Choomfie tools over streamable HTTP. Code: `packages/core/lib/remote-mcp.ts`, started by the supervisor after stdio connects. Off by default.
+Lets a cloud agent — built for Ambition's Waymond, which only accepts remote MCP servers by URL — call a small allowlisted set of Choomfie tools over streamable HTTP. Code: `packages/core/lib/remote-mcp.ts`, started by the supervisor after stdio connects (by the daemon hub in multi-session mode). Off by default.
 
 ```json
 "remoteMcp": {

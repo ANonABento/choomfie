@@ -9,7 +9,7 @@
  */
 
 import type { SiteAdapter, TurnContext } from "./adapter.ts";
-import { launchContext } from "./engine/launch.ts";
+import { engineFor, launchContext } from "./engine/launch.ts";
 import { createHuman, Pacer } from "./engine/human.ts";
 import { profileDir, profileInUse } from "./paths.ts";
 
@@ -28,12 +28,13 @@ export function looksLikePong(text: string): boolean {
 }
 
 export async function doctor(dataDir: string, adapter: SiteAdapter, opts: { headless?: boolean; timeoutMs?: number } = {}): Promise<DoctorReport> {
-  const profile = profileDir(dataDir, adapter.id);
+  const engine = engineFor(dataDir, adapter);
+  const profile = profileDir(dataDir, adapter.id, engine);
   if (profileInUse(profile)) {
     return { ok: false, ms: 0, error: `${adapter.label}'s profile is open in another browser (Choomfie mid-conversation?). Try again when it's idle.` };
   }
   const started = Date.now();
-  const context = await launchContext(profile, { headless: opts.headless ?? true });
+  const context = await launchContext(profile, { headless: opts.headless ?? true, engine });
   try {
     const page = context.pages()[0] ?? (await context.newPage());
     let ref: string | undefined;

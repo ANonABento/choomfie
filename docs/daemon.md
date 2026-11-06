@@ -78,6 +78,7 @@ daemon.ts (hub, always running)
 - **Per-session cycling:** each session checks its own context every minute with the same thresholds; past one, it waits for idle, captures a summary, and starts a fresh SDK session on the same chat seeded with it. `/compact` does the same on demand and announces back. A stream failure reopens the same SDK session with backoff; auth/billing failures and 5 failures in a row mark it dead, and the next message replaces it
 - **State:** `daemon-state.json` gains `multiSession: true`, `maxSessions` and `sessions[]` (location, chat, title, cwd, turns, context, busy). `/status` lists them; the top-level turn/context figures are the most recently active session's, cost and tokens are summed, rate limits are the account's (newest snapshot from any session)
 - **Health:** the hub reads the worker heartbeat and restarts the **worker** after 3 failures (the single-session daemon has to cycle the whole session for that)
+- **`remoteMcp`** (if enabled) is started by the hub, since there is no supervisor
 - Foreground mode and the single-session daemon are unchanged
 
 ### Daemon Control Channel

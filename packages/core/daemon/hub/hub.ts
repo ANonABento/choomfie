@@ -24,7 +24,7 @@ import {
   type DaemonControlRequest,
 } from "@choomfie/shared";
 import { ChatStore } from "../../lib/chats/store.ts";
-import { startLocalMcp } from "../../lib/remote-mcp.ts";
+import { ensureRemoteMcpToken, loadRemoteMcpConfig, startLocalMcp, startRemoteMcp } from "../../lib/remote-mcp.ts";
 import { VERSION } from "../../lib/version.ts";
 import { WorkerHost } from "../../lib/worker-host.ts";
 import { DATA_DIR, META_DIR, WORKER_HEALTH_INTERVAL, WORKER_MAX_CONSECUTIVE_FAILURES } from "../constants.ts";
@@ -79,6 +79,24 @@ export async function runHub(settings: HubSettings): Promise<void> {
     instructions: () => host.instructions,
   });
   log(`Tool endpoint on ${endpoint.url}`);
+
+  // The owner's optional remote endpoint (remoteMcp in config.json). The
+  // supervisor starts it in the other modes; here there is no supervisor.
+  let remote: ReturnType<typeof startRemoteMcp> | null = null;
+  try {
+    const cfg = loadRemoteMcpConfig(DATA_DIR);
+    if (cfg.enabled) {
+      remote = startRemoteMcp(cfg, ensureRemoteMcpToken(DATA_DIR), {
+        name: "choomfie",
+        version: VERSION,
+        listTools: () => host.listTools(),
+        callTool: (name, args) => host.callTool(name, args),
+      });
+      log(`Remote MCP on http://${cfg.host}:${cfg.port}/mcp (${cfg.tools.length} tools allowed)`);
+    }
+  } catch (e: unknown) {
+    log(`Remote MCP not started: ${getErrorMessage(e)}`);
+  }
 
   // The worker's database; WAL lets both processes use it. The worker owns
   // bindings, the hub only records each chat's SDK session id.
@@ -262,6 +280,7 @@ export async function runHub(settings: HubSettings): Promise<void> {
     await pool.closeAll();
     await host.stop();
     endpoint.stop();
+    remote?.stop(true);
     db.close();
     await unlink(DAEMON_STATE_PATH).catch(() => {});
     await releasePid();

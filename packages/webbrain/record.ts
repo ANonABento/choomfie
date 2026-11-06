@@ -23,7 +23,7 @@
 import { mkdirSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BrowserContext, Page, Request, Response } from "patchright";
-import { launchContext } from "./engine/launch.ts";
+import { engineFor, launchContext } from "./engine/launch.ts";
 import { profileDir, profileInUse, siteDir } from "./paths.ts";
 
 const BODY_LIMIT = 20_000;
@@ -84,7 +84,9 @@ async function waitForEnter(prompt: string): Promise<void> {
 }
 
 export async function record(dataDir: string, id: string, url: string): Promise<string> {
-  const profile = profileDir(dataDir, id);
+  // No adapter yet, so only config.json can pick the engine.
+  const engine = engineFor(dataDir, { id });
+  const profile = profileDir(dataDir, id, engine);
   if (profileInUse(profile)) throw new Error(`${id}'s profile is open in another browser; close it (or wait for Choomfie to go idle) first.`);
   const dir = join(siteDir(dataDir, id), "recording");
   rmSync(dir, { recursive: true, force: true });
@@ -92,7 +94,7 @@ export async function record(dataDir: string, id: string, url: string): Promise<
   const net = join(dir, "network.jsonl");
   writeFileSync(net, "");
 
-  const context: BrowserContext = await launchContext(profile, { headless: false });
+  const context: BrowserContext = await launchContext(profile, { headless: false, engine });
   const page = context.pages()[0] ?? (await context.newPage());
   const t0 = Date.now();
   let phase: NetworkEntry["phase"] = "before-mark";

@@ -8,6 +8,7 @@
  * site's logged-in profile; nothing else touches that tab while `turn()` runs.
  */
 
+import type { EngineName } from "./engine/launch.ts";
 import type { Locator, Page } from "patchright";
 import type { BrainApproval } from "@choomfie/shared";
 
@@ -81,6 +82,8 @@ export interface SiteAdapter {
   label: string;
   /** Where `webbrain login <id>` opens. */
   loginUrl: string;
+  /** Default browser engine; config.json `webbrain.<id>.engine` overrides. */
+  engine?: EngineName;
   /** Link to a conversation, for messages that point the owner at the site. */
   chatUrl(ref?: string): string;
 
