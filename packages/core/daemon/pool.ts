@@ -20,12 +20,16 @@ export interface PoolChat {
   /** SDK session id to resume, if the chat has had a session. */
   backendRef: string | null;
   cwd: string | null;
+  /** Model override; null = the configured default. */
+  model: string | null;
   title: string;
 }
 
 /** What the pool needs from a running session. */
 export interface LiveSession {
   readonly chatId: string;
+  /** The model override it was opened with — a changed one means reopening. */
+  readonly model: string | null;
   /** A turn is in flight. */
   busy(): boolean;
   /** Gave up (unrecoverable error) — replace it on the next message. */
@@ -45,6 +49,13 @@ export interface PoolDeps<S extends LiveSession> {
   idleMs: number;
   log(message: string): void;
   now?: () => number;
+}
+
+/** Why `session` no longer matches the chat bound at its location, or null if it does. */
+function staleFor(session: LiveSession, chat: PoolChat | null): string | null {
+  if (!chat || session.chatId !== chat.id) return "another chat is bound here now";
+  if (session.model !== chat.model) return `model changed to ${chat.model ?? "the default"}`;
+  return null;
 }
 
 export class SessionPool<S extends LiveSession = LiveSession> {
@@ -72,9 +83,8 @@ export class SessionPool<S extends LiveSession = LiveSession> {
     }
 
     const live = this.sessions.get(location);
-    if (live && (live.chatId !== chat.id || live.dead())) {
-      await this.closeAt(location, live.dead() ? "dead" : "another chat is bound here now");
-    }
+    const stale = live && staleFor(live, chat);
+    if (live && (stale || live.dead())) await this.closeAt(location, live.dead() ? "dead" : stale!);
 
     let session = this.sessions.get(location);
     if (!session) {
@@ -118,8 +128,8 @@ export class SessionPool<S extends LiveSession = LiveSession> {
   /** The chat here changed (`/clear`, `/resume`): close now; the next message opens the bound one. */
   async release(location: string): Promise<void> {
     const s = this.sessions.get(location);
-    const chat = this.deps.boundChat(location);
-    if (s && s.chatId !== chat?.id) await this.closeAt(location, "chat changed");
+    const why = s && staleFor(s, this.deps.boundChat(location));
+    if (why) await this.closeAt(location, why);
   }
 
   async evictIdle(): Promise<void> {

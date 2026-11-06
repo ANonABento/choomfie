@@ -73,14 +73,21 @@ class FakeQuery {
 }
 
 function setup(
-  opts: { backendRef?: string | null; cwd?: string | null; seed?: string; answer?: (text: string) => string | null } = {}
+  opts: {
+    backendRef?: string | null;
+    cwd?: string | null;
+    model?: string | null;
+    seed?: string;
+    answer?: (text: string) => string | null;
+  } = {}
 ) {
   const queries: FakeQuery[] = [];
+  const models: unknown[] = [];
   const events = { sessionIds: [] as (string | null)[], cwds: [] as string[], compacted: [] as string[], logs: [] as string[] };
   const deps: ChatSessionDeps = {
     location: "t1",
-    chat: { id: "chat1", backendRef: opts.backendRef ?? null, cwd: opts.cwd === undefined ? "/tmp" : opts.cwd, title: "arm" },
-    settings: { tokenThreshold: 120_000, turnThreshold: 2, maxSessions: 3 },
+    chat: { id: "chat1", backendRef: opts.backendRef ?? null, cwd: opts.cwd === undefined ? "/tmp" : opts.cwd, model: opts.model ?? null, title: "arm" },
+    settings: { tokenThreshold: 120_000, turnThreshold: 2, maxSessions: 3, model: "opus" },
     mcp: { url: "http://127.0.0.1:1/mcp", token: "t" },
     seed: () => opts.seed,
     onCompacted: (_id, summary) => events.compacted.push(summary),
@@ -91,14 +98,15 @@ function setup(
     onUsage: () => {},
     onChange: () => {},
     log: (m) => events.logs.push(m),
-    createSession: ((prompt: AsyncGenerator<SDKUserMessage>, summary: string | undefined, _models: unknown, placement: SessionPlacement) => {
+    createSession: ((prompt: AsyncGenerator<SDKUserMessage>, summary: string | undefined, m: unknown, placement: SessionPlacement) => {
+      models.push(m);
       const q = new FakeQuery(prompt, summary, placement, opts.answer ?? ((t) => (t.includes("handoff summary") ? "SUMMARY" : "ok")));
       queries.push(q);
       return q;
     }) as never,
   };
   const session = new ChatSession(deps);
-  return { session, queries, events };
+  return { session, queries, events, models };
 }
 
 describe("ChatSession", () => {
@@ -118,6 +126,18 @@ describe("ChatSession", () => {
     await tick();
     expect(events.cwds).toEqual([CHAT_HOME]);
     void session.close();
+  });
+
+  test("the chat's own model wins over the default; none means the default", () => {
+    const own = setup({ model: "sonnet" });
+    own.session.start();
+    expect(own.models[0]).toMatchObject({ model: "sonnet" });
+    expect(own.session.model).toBe("sonnet");
+    void own.session.close();
+    const plain = setup();
+    plain.session.start();
+    expect(plain.models[0]).toMatchObject({ model: "opus" });
+    void plain.session.close();
   });
 
   test("a new chat starts fresh and reports its SDK session id once", async () => {

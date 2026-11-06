@@ -194,6 +194,19 @@ export const MODEL_SUGGESTIONS = ["default", "opus", "sonnet", "haiku"];
 /** The setting `/model` is a shortcut for. Must name a Setting in SETTINGS. */
 export const MODEL_SETTING_KEY = "model";
 
+/** A model name as typed: `default` (and other reset words) → undefined. */
+export function parseModel(raw: string): { ok: true; value: string | undefined } | { ok: false; error: string } {
+  if (isReset(raw)) return { ok: true, value: undefined };
+  const model = raw.trim();
+  // Not validated against a list: model ids change faster than this file
+  // does, and the SDK reports an unknown one clearly at session start.
+  // Length and whitespace are the only things worth rejecting.
+  if (!model || /\s/.test(model) || model.length > 100) {
+    return { ok: false, error: "Model must be a single token, e.g. `opus` or `claude-opus-5`." };
+  }
+  return { ok: true, value: model };
+}
+
 function modelSetting(options: {
   key: string;
   description: string;
@@ -208,22 +221,10 @@ function modelSetting(options: {
     scope: "next start",
     read: (config) => options.read(config) ?? "Claude Code default",
     write: (config, raw) => {
-      if (isReset(raw)) {
-        options.write(config, undefined);
-        return { ok: true, value: "Claude Code default" };
-      }
-      const model = raw.trim();
-      // Not validated against a list: model ids change faster than this file
-      // does, and the SDK reports an unknown one clearly at session start.
-      // Length and whitespace are the only things worth rejecting.
-      if (!model || /\s/.test(model) || model.length > 100) {
-        return {
-          ok: false,
-          error: "Model must be a single token, e.g. `opus` or `claude-opus-5`.",
-        };
-      }
-      options.write(config, model);
-      return { ok: true, value: model };
+      const parsed = parseModel(raw);
+      if (!parsed.ok) return parsed;
+      options.write(config, parsed.value);
+      return { ok: true, value: parsed.value ?? "Claude Code default" };
     },
   };
 }

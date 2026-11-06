@@ -38,7 +38,7 @@ They used to live at `daemon.model`, which meant `/model` silently did nothing i
 
 ### Changing settings
 
-`/config` (owner only) lists every adjustable setting with its current value; `/config setting:<key> value:<v>` changes one, and `value:default` restores the built-in. `/model [model]` is a shortcut for `model`, the setting changed most often — it routes through the same `Setting` object, so the two can't disagree about validation.
+`/config` (owner only) lists every adjustable setting with its current value; `/config setting:<key> value:<v>` changes one, and `value:default` restores the built-in. `/model [model] everywhere:true` is a shortcut for `model`, the setting changed most often — it routes through the same `Setting` object (`parseModel`), so the two can't disagree about validation. Without `everywhere`, in daemon mode `/model` sets one chat's model instead ([commands.md](commands.md)).
 
 Settings are declared once in `packages/core/lib/settings.ts` with their parser, bounds, suggestions, and when the change takes effect — add a setting there and `/config` picks it up automatically (Discord caps both the choice list and autocomplete suggestions at 25).
 

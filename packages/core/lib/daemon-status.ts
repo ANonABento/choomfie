@@ -57,6 +57,7 @@ export interface SessionSnapshot {
   chatId: string;
   title: string;
   cwd: string;
+  model?: string | null;
   sdkSessionId: string | null;
   busy: boolean;
   turns: number;

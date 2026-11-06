@@ -22,7 +22,11 @@ class FakeSession implements LiveSession {
   isDead = false;
   compacted = 0;
   interrupted = 0;
-  constructor(readonly chatId: string, public last: number) {}
+  constructor(
+    readonly chatId: string,
+    public last: number,
+    readonly model: string | null = null
+  ) {}
   busy() {
     return this.isBusy;
   }
@@ -58,17 +62,31 @@ function setup(max = 2) {
     now: () => clock,
     boundChat: (l) => bound.get(l) ?? null,
     open: (location, chat) => {
-      const session = new FakeSession(chat.id, clock);
+      const session = new FakeSession(chat.id, clock, chat.model);
       opened.push({ location, chat, session });
       return session;
     },
   });
-  const bind = (location: string, id: string, backendRef: string | null = null) =>
-    bound.set(location, { id, backendRef, cwd: null, title: id });
+  const bind = (location: string, id: string, backendRef: string | null = null, model: string | null = null) =>
+    bound.set(location, { id, backendRef, cwd: null, model, title: id });
   return { pool, bind, opened, tick: (ms: number) => (clock += ms), bound };
 }
 
 describe("SessionPool", () => {
+  test("a chat's model changed: its session reopens on the new one, same chat and transcript", async () => {
+    const { pool, bind, opened } = setup();
+    bind("t1", "chatA", "sdk-1");
+    await pool.deliver("t1", "a");
+    bind("t1", "chatA", "sdk-1", "sonnet");
+    await pool.release("t1"); // nothing else bound here: only the model differs
+    expect(opened[0].session.closed).toBe(true);
+    await pool.deliver("t1", "b");
+    expect(opened).toHaveLength(2);
+    expect(opened[1].chat).toMatchObject({ id: "chatA", backendRef: "sdk-1", model: "sonnet" });
+    expect(opened[1].session.pushed).toEqual(["b"]);
+  });
+
+
   test("one session per location, reused for later messages", async () => {
     const { pool, bind, opened } = setup();
     bind("t1", "chatA");

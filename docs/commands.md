@@ -40,7 +40,7 @@ Defined in `packages/core/lib/commands.ts`, deployed via `packages/core/scripts/
 - `/resume [chat]` — no argument: the chat live here, recent ones with Resume buttons, and a Rename button (modal). `chat:` (autocomplete, titles across all brains) resumes it directly. Owner only; works in group DMs. See **Chats** below
 - `/plugins [action] [name]` — list, enable, or disable plugins (owner only, restart needed)
 - `/config [setting] [value]` — list settings with current values, or change one (owner only, ephemeral). `value` autocompletes from the selected setting's suggestions
-- `/model [model]` — view or change the model Choomfie runs on, in every mode (owner only, autocompletes)
+- `/model [model] [everywhere]` — view or change the model (owner only, autocompletes). In a Claude chat in daemon mode it sets **this chat's** model (stored on the chat; `default` clears it) and the session reopens on it at the next message, history kept. `everywhere:true` — and foreground mode, or a channel answered by another brain — changes the default instead. `/clear model:` starts a new chat on a model
 - `/voice` — voice provider setup wizard with auto-detection and interactive buttons (owner only)
 - `/lesson` — start or continue a structured lesson (button-driven, no Claude roundtrip)
 - `/progress` — show learning progress with unit bars and completion stats (ephemeral)

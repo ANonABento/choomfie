@@ -18,7 +18,7 @@ import {
 } from "discord.js";
 import type { AppContext } from "./types.ts";
 import { AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, relativeTime } from "@choomfie/shared";
-import { cwdLabel, liveChat } from "./chats/here.ts";
+import { brainAt, cwdLabel, liveChat } from "./chats/here.ts";
 import { parentChannelId, resolveBrainId } from "./brain-router.ts";
 import { VERSION } from "./version.ts";
 import { registerCommand, registerButtonHandler } from "./register.ts";
@@ -32,6 +32,7 @@ import {
   MODEL_SETTING_KEY,
   SETTINGS,
   findSetting,
+  parseModel,
   suggestValues,
 } from "./settings.ts";
 import {
@@ -409,6 +410,7 @@ async function chatHere(interaction: ChatInputCommandInteraction, ctx: AppContex
     lines.push(`Chat: **${chat.title}** · since ${relativeTime(chat.createdAt)}`);
     const cwd = cwdLabel(ctx, chat.cwd);
     if (cwd) lines.push(`cwd: \`${cwd}\``);
+    if (chat.model) lines.push(`Model: **${chat.model}**`);
   } else if (brain === CLAUDE_BRAIN && !(await isDaemonMode(ctx.DATA_DIR))) {
     lines.push("Chat: the terminal session");
   } else {
@@ -697,15 +699,24 @@ registerCommand("config", {
 // Everything here routes through the `model` Setting rather than touching
 // config directly, so /config and /model cannot disagree about validation,
 // bounds, or what "default" means.
+// /model — this chat's model, or the default for every chat (owner only).
+//
+// In daemon mode each thread / channel / DM is its own Claude session, so a
+// model can be set per chat (stored on the chat record; the daemon reopens
+// that session on it at the next message). `everywhere:true`, foreground mode
+// and channels answered by another brain change the default instead.
 registerCommand("model", {
   data: new SlashCommandBuilder()
     .setName("model")
-    .setDescription("View or change the model Choomfie runs on (owner only)")
+    .setDescription("View or change the model for this chat, or every chat (owner only)")
     .addStringOption((o) =>
       o
         .setName("model")
-        .setDescription("Model alias or id — or `default` for Claude Code's own")
+        .setDescription("Model alias or id — or `default`")
         .setAutocomplete(true)
+    )
+    .addBooleanOption((o) =>
+      o.setName("everywhere").setDescription("Change the default for every chat instead of this one")
     )
     .toJSON(),
   autocomplete: async (interaction) => {
@@ -722,32 +733,53 @@ registerCommand("model", {
 
     const setting = findSetting(MODEL_SETTING_KEY)!;
     const requested = interaction.options.getString("model");
+    const fallback = setting.read(ctx.config);
+    const reply = (content: string) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
+
+    // A Claude chat with its own session here?
+    const perChat =
+      !interaction.options.getBoolean("everywhere") &&
+      brainAt(interaction, ctx) === CLAUDE_BRAIN &&
+      (await isDaemonMode(ctx.DATA_DIR));
 
     if (requested === null) {
-      await interaction.reply({
-        content:
-          `Choomfie runs on **${setting.read(ctx.config)}**.\n` +
-          "Applies to every mode. Takes effect the next time Choomfie starts.",
-        flags: MessageFlags.Ephemeral,
-      });
+      const chat = perChat ? ctx.chats.bound(interaction.channelId, CLAUDE_BRAIN) : null;
+      await reply(
+        (chat?.model ? `This chat runs on **${chat.model}** (default: ${fallback}).` : `Choomfie runs on **${fallback}**.`) +
+          (perChat
+            ? "\n`/model <name>` changes it for this chat; add `everywhere:true` for the default."
+            : "\nApplies to every mode. Takes effect the next time Choomfie starts.")
+      );
       return;
     }
 
-    const previous = setting.read(ctx.config);
+    if (perChat) {
+      const parsed = parseModel(requested);
+      if ("error" in parsed) {
+        await reply(`Couldn't set the model: ${parsed.error}`);
+        return;
+      }
+      // An untitled chat if nobody has spoken here yet; the first message names it.
+      const chat = ctx.chats.current(interaction.channelId, CLAUDE_BRAIN);
+      ctx.chats.setModel(chat.id, parsed.value ?? null);
+      await reply(
+        parsed.value
+          ? `This chat now runs on **${parsed.value}** — from your next message, with its history kept.`
+          : `This chat is back on the default (**${fallback}**) from your next message.`
+      );
+      return;
+    }
+
     const result = setting.write(ctx.config, requested);
     if (!result.ok) {
-      await interaction.reply({
-        content: `Couldn't set the model: ${result.error}`,
-        flags: MessageFlags.Ephemeral,
-      });
+      await reply(`Couldn't set the model: ${result.error}`);
       return;
     }
-
     const embed = new EmbedBuilder()
       .setColor(0x57f287)
-      .setTitle("Model updated")
-      .setDescription(`**${previous}** → **${result.value}**`)
-      .setFooter({ text: `Takes effect on ${setting.scope}.` });
+      .setTitle("Default model updated")
+      .setDescription(`**${fallback}** → **${result.value}**`)
+      .setFooter({ text: `Chats with their own model keep it. Takes effect on ${setting.scope}.` });
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   },
 });
