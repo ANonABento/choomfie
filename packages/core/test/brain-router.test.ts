@@ -152,6 +152,22 @@ describe("quick-reply buttons", () => {
   });
 });
 
+describe("files", () => {
+  test("ride on the last chunk as attachments; files alone still get a message", async () => {
+    const sent: { content?: string; files?: { attachment: Buffer; name: string }[] }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: "m" }) };
+    const file = { name: "card.png", data: new Uint8Array([1, 2, 3]) };
+    await postBrainReply(channel, "waymond", "c1", { text: "a\n\n" + "x".repeat(2500), files: [file] });
+    expect(sent.map((m) => m.files?.length ?? 0)).toEqual([0, 1]);
+    expect(sent[1].files![0]).toEqual({ attachment: Buffer.from([1, 2, 3]), name: "card.png" });
+
+    sent.length = 0;
+    await postBrainReply(channel, "waymond", "c1", { text: "", files: [file] });
+    expect(sent).toHaveLength(1);
+    expect(sent[0].content).toBe("");
+  });
+});
+
 describe("approval cards", () => {
   test("each approval is its own message with approve/decline buttons, tracked until resolved", async () => {
     const sent: { content?: string; embeds?: unknown[]; components?: unknown[] }[] = [];

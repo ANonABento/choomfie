@@ -29,9 +29,15 @@ export interface BrainMessage {
   progress?: (line: string) => Promise<void>;
 }
 
+/** A file a brain hands back (an image it made, a PDF), posted as a Discord attachment. */
+export interface BrainFile {
+  name: string;
+  data: Uint8Array;
+}
+
 export interface BrainReply {
   text: string;
-  files?: string[];
+  files?: BrainFile[];
   /** Quick replies; shown as buttons, and clicking one sends that text to the brain. */
   choices?: string[];
   /** Actions the brain wants the owner to approve (send a post, an email, …). */

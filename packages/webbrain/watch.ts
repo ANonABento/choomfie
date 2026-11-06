@@ -75,7 +75,7 @@ export class LateWatch {
       const late = await this.poll(chatKey, w.ref, w.afterId, w.posted);
       if (!late || !late.ids.length) return;
       for (const id of late.ids) w.posted.add(id);
-      if (late.text || late.choices?.length || late.approvals?.length) await this.post(chatKey, late);
+      if (late.text || late.files?.length || late.choices?.length || late.approvals?.length) await this.post(chatKey, late);
       // Keep watching only if the results themselves kicked off more work.
       if (!late.more) this.stop(chatKey);
     } catch (e) {
