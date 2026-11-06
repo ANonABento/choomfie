@@ -158,10 +158,22 @@ describe("ChatSession", () => {
   test("past the hard ceiling it compacts even mid-turn", async () => {
     const { session, queries, events } = setup();
     session.start();
+    session.state.turnCount = 1;
     queries[0].contextTokens = 190_000;
     await session.checkContext();
     expect(events.compacted).toEqual(["SUMMARY"]);
     expect(session.state.lastCycleReason).toBe("token_ceiling");
+    void session.close();
+  });
+
+  test("never compacts before the session's first turn, so it can't compact in a loop", async () => {
+    const { session, queries, events } = setup();
+    session.start();
+    queries[0].contextTokens = 190_000; // still over the line straight after a compact
+    await session.checkContext();
+    await session.checkContext();
+    expect(events.compacted).toEqual([]);
+    expect(queries).toHaveLength(1);
     void session.close();
   });
 

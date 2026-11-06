@@ -33,7 +33,7 @@ import { todayKey } from "./lifecycle.ts";
 import { log } from "./log.ts";
 import { releasePid } from "./pid.ts";
 import type { RateLimitSnapshot } from "./rate-limit.ts";
-import { assessWorkerHealth } from "./runtime.ts";
+import { assessWorkerHealth, rateBudget } from "./runtime.ts";
 import { loadSeeds, parseSeeds, saveSeeds, withSeed, type Seeds } from "./seeds.ts";
 import { buildDaemonState, DAEMON_STATE_PATH, writeDaemonState } from "./state-file.ts";
 import type { DaemonSettings } from "./types.ts";
@@ -43,6 +43,8 @@ import { SessionPool, type PoolChat } from "./pool.ts";
 const IDLE_CLOSE_MS = 20 * 60_000;
 const EVICT_INTERVAL_MS = 60_000;
 const STATE_INTERVAL_MS = 30_000;
+/** Health-triggered worker restarts allowed per hour; past that, stop and say so. */
+const MAX_HEALTH_RESTARTS_PER_HOUR = 3;
 
 /**
  * Before one session per location there was one shared Claude chat, bound at
@@ -97,6 +99,7 @@ export async function runDaemon(settings: DaemonSettings): Promise<void> {
   let totalCycles = 0;
   let rateLimit: RateLimitSnapshot | null = null;
   let healthFailures = 0;
+  const mayRestartWorker = rateBudget(MAX_HEALTH_RESTARTS_PER_HOUR, 60 * 60_000);
 
   const pool: SessionPool<ChatSession> = new SessionPool<ChatSession>({
     max: settings.maxSessions,
@@ -215,6 +218,10 @@ export async function runDaemon(settings: DaemonSettings): Promise<void> {
       log(`Worker health: UNHEALTHY — ${h.reason} (${healthFailures}/${WORKER_MAX_CONSECUTIVE_FAILURES})`);
       if (healthFailures >= WORKER_MAX_CONSECUTIVE_FAILURES) {
         healthFailures = 0;
+        if (!mayRestartWorker()) {
+          log(`Worker still unhealthy after ${MAX_HEALTH_RESTARTS_PER_HOUR} restarts this hour — not restarting again; check the log above`);
+          return;
+        }
         await host.restart(`unhealthy: ${h.reason}`);
       }
     } catch (e: unknown) {

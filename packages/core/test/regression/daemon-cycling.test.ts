@@ -18,6 +18,7 @@ import {
   handleSessionMessage,
   hardCeiling,
   isIdleForCycle,
+  rateBudget,
   shouldCycle,
   waitForResult,
 } from "../../daemon/runtime.ts";
@@ -169,6 +170,18 @@ describe("deferred cycling", () => {
     } as never);
 
     expect(await summary).toBe("## Handoff Summary");
+  });
+});
+
+describe("rateBudget", () => {
+  test("allows max per window, then refuses until the oldest ages out", () => {
+    let t = 0;
+    const may = rateBudget(3, 1_000, () => t);
+    expect([may(), may(), may(), may()]).toEqual([true, true, true, false]);
+    t = 999;
+    expect(may()).toBe(false);
+    t = 1_000; // all three age out together
+    expect([may(), may(), may(), may()]).toEqual([true, true, true, false]);
   });
 });
 

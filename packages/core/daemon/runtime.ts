@@ -325,6 +325,22 @@ export function waitForResult(
 }
 
 /**
+ * At most `max` events per rolling `windowMs`: returns a gate that says
+ * whether the next one may go ahead (and counts it if so). Keeps a recovery
+ * action from turning into a loop.
+ */
+export function rateBudget(max: number, windowMs: number, now = () => Date.now()): () => boolean {
+  const times: number[] = [];
+  return () => {
+    const t = now();
+    while (times.length && t - times[0] >= windowMs) times.shift();
+    if (times.length >= max) return false;
+    times.push(t);
+    return true;
+  };
+}
+
+/**
  * Assess worker health from its heartbeat file, falling back to the process
  * check when no heartbeat exists yet.
  *

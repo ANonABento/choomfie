@@ -161,6 +161,10 @@ export class ChatSession implements LiveSession {
   /**
    * Every minute: read the context size. Past the hard ceiling, compact now;
    * past a soft threshold, compact once the session has gone idle.
+   *
+   * Never before this session's first turn: a compact costs a paid turn, and
+   * a session still over the line straight after one would otherwise compact
+   * again every minute.
    */
   async checkContext(): Promise<void> {
     const s = this.state;
@@ -168,6 +172,7 @@ export class ChatSession implements LiveSession {
     try {
       const usage = await s.session.getContextUsage();
       s.context = { tokens: usage.totalTokens, maxTokens: usage.maxTokens, percentage: usage.percentage, checkedAt: Date.now() };
+      if (s.turnCount === 0) return;
       if (usage.totalTokens >= hardCeiling(s)) {
         s.lastCycleReason = "token_ceiling";
         await this.compact();
