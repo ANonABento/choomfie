@@ -24,6 +24,7 @@ How to create a Discord bot and connect it to Choomfie.
    - View Channels
    - Send Messages
    - Send Messages in Threads
+   - Create Public Threads
    - Read Message History
    - Attach Files
    - Add Reactions

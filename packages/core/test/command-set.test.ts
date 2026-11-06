@@ -81,6 +81,7 @@ function fakeInteraction(over: Record<string, unknown> = {}) {
     options: {
       getSubcommand: () => opts.sub,
       getString: (k: string) => (opts[k] as string | undefined) ?? null,
+      getBoolean: (k: string) => (opts[k] as boolean | undefined) ?? null,
       getUser: (k: string) => opts[k] ?? null,
       getInteger: (k: string) => opts[k] ?? null,
     },

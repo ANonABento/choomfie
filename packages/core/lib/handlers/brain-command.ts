@@ -3,6 +3,7 @@
  *
  *   /brain           show what answers here, for whom, and what's loaded
  *   /brain <name>    this channel/thread now answers with <name>; `claude` clears it
+ *   /brain threads:  whether an @mention in this server channel opens a thread
  *   /stop            interrupt the reply in progress here, whoever is answering
  *
  * Starting over is `/clear`, which also follows the channel's brain, and the
@@ -19,6 +20,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelType,
   EmbedBuilder,
   MessageFlags,
   SlashCommandBuilder,
@@ -56,6 +58,11 @@ registerCommand("brain", {
           .setDescription("claude, or a loaded brain — omit to see what answers here")
           .setAutocomplete(true)
       )
+      .addBooleanOption((o) =>
+        o
+          .setName("threads")
+          .setDescription("Server channels: open a thread for each @mention (default on)")
+      )
       .toJSON(),
     // Usable in group DMs (user install), so /choomfie there can be pointed at a brain.
     ...ANYWHERE,
@@ -77,6 +84,23 @@ registerCommand("brain", {
     const current = resolveBrainId(channelId, parentId, (id) => ctx.config.getChannelBrain(id));
     const reply = (content: string) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
     const wantedRaw = interaction.options.getString("name");
+    const threads = interaction.options.getBoolean("threads");
+
+    if (threads !== null) {
+      if (!interaction.guildId || interaction.channel?.type !== ChannelType.GuildText) {
+        await reply("Threads are for server text channels — DMs and threads are already one chat each.");
+        return;
+      }
+      ctx.config.setAutoThread(channelId, threads);
+      if (!wantedRaw) {
+        await reply(
+          threads
+            ? "An @mention here now opens a thread, with its own chat."
+            : "I'll answer @mentions here inline, without opening a thread."
+        );
+        return;
+      }
+    }
 
     if (!wantedRaw) {
       const own = ctx.config.getChannelBrain(channelId);
@@ -85,8 +109,15 @@ registerCommand("brain", {
         : parentId && ctx.config.getChannelBrain(parentId)
           ? "inherited from the parent channel"
           : "default";
+      const threadNote =
+        interaction.guildId && interaction.channel?.type === ChannelType.GuildText
+          ? ctx.config.getAutoThread(channelId)
+            ? "@mentions here open a thread (`/brain threads:false` to answer inline)."
+            : "@mentions here are answered inline (`/brain threads:true` for threads)."
+          : "";
       const lines = [
         `**${label(current)}** answers here (${source}).`,
+        threadNote,
         current === CLAUDE_BRAIN
           ? ""
           : ctx.config.getBrainAccess() === "owner"

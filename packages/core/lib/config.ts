@@ -88,6 +88,11 @@ export interface Config {
    * Only routing — who may use Choomfie at all stays in access.json.
    */
   brainChannels?: Record<string, string>;
+  /**
+   * Server channels where an @mention is answered inline instead of in a new
+   * thread (`/brain threads:false`). Absent = every text channel threads.
+   */
+  inlineChannels?: string[];
   /** Who a non-Claude brain answers: the owner only, or everyone on the allowlist. */
   brainAccess?: BrainAccess;
   /**
@@ -394,6 +399,22 @@ export class ConfigManager {
     else delete map[channelId];
     if (Object.keys(map).length) this.config.brainChannels = map;
     else delete this.config.brainChannels;
+    this.save();
+  }
+
+  /** Whether an @mention in this server channel opens a thread (default yes). */
+  getAutoThread(channelId: string): boolean {
+    const list = this.config.inlineChannels;
+    return !(Array.isArray(list) && list.includes(channelId));
+  }
+
+  setAutoThread(channelId: string, on: boolean) {
+    const list = (Array.isArray(this.config.inlineChannels) ? this.config.inlineChannels : []).filter(
+      (id) => id !== channelId
+    );
+    if (!on) list.push(channelId);
+    if (list.length) this.config.inlineChannels = list;
+    else delete this.config.inlineChannels;
     this.save();
   }
 

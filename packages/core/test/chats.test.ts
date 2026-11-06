@@ -11,6 +11,9 @@ import { CLAUDE_BRAIN, parseDaemonControlRequest, titleFrom, UNTITLED_CHAT } fro
 import { ChatStore } from "../lib/chats/store.ts";
 import { applyClaudeHold, CLAUDE_GLOBAL } from "../lib/chats/claude.ts";
 import { resolveChatCwd, shortPath } from "../lib/chats/here.ts";
+import { isOwnThread, wantsThread } from "../lib/chats/auto-thread.ts";
+import { ConfigManager } from "../lib/config.ts";
+import { ChannelType } from "discord.js";
 import { parseChatState, withSeed } from "../daemon/chat-state.ts";
 import { announcementFor } from "../daemon/runtime.ts";
 import { PLUGIN_DIR } from "../daemon/constants.ts";
@@ -188,5 +191,45 @@ describe("daemon chat state", () => {
     expect(announcementFor({ requestedCommand: "clear" }, undefined, "/tmp/x")).toContain("working in /tmp/x");
     expect(announcementFor({ requestedCommand: "clear" }, undefined, PLUGIN_DIR)).toContain("/clear");
     expect(announcementFor({ requestedCommand: "compact" }, "sum", PLUGIN_DIR)).toContain("compacted");
+  });
+});
+
+describe("auto-thread", () => {
+  const BOT = "111";
+  const text = { type: ChannelType.GuildText, isThread: () => false };
+  const msg = (content: string, channel: object = text, guildId: string | null = "g") => ({ content, channel, guildId });
+
+  test("an explicit @mention in a text channel opens a thread", () => {
+    expect(wantsThread(msg("<@111> plan the arm"), BOT, true)).toBe(true);
+    expect(wantsThread(msg("<@!111> hi"), BOT, true)).toBe(true);
+  });
+
+  test("not when off, not in DMs, threads or other channels, not for a bare reply", () => {
+    expect(wantsThread(msg("<@111> hi"), BOT, false)).toBe(false);
+    expect(wantsThread(msg("<@111> hi", text, null), BOT, true)).toBe(false);
+    expect(wantsThread(msg("<@111> hi", { type: ChannelType.PublicThread, isThread: () => true }), BOT, true)).toBe(false);
+    expect(wantsThread(msg("<@111> hi", { type: ChannelType.GuildAnnouncement }), BOT, true)).toBe(false);
+    expect(wantsThread(msg("replying without a ping"), BOT, true)).toBe(false);
+    expect(wantsThread(msg("<@222> not us"), BOT, true)).toBe(false);
+  });
+
+  test("only threads the bot started count as its own", () => {
+    expect(isOwnThread({ isThread: () => true, ownerId: BOT }, BOT)).toBe(true);
+    expect(isOwnThread({ isThread: () => true, ownerId: "999" }, BOT)).toBe(false);
+    expect(isOwnThread(text, BOT)).toBe(false);
+  });
+
+  test("threads are on by default and can be turned off per channel", () => {
+    const dir = mkdtempSync(join(tmpdir(), "autothread-"));
+    dirs.push(dir);
+    const cfg = new ConfigManager(dir);
+    expect(cfg.getAutoThread("c1")).toBe(true);
+    cfg.setAutoThread("c1", false);
+    cfg.setAutoThread("c1", false);
+    expect(new ConfigManager(dir).getAutoThread("c1")).toBe(false);
+    expect(new ConfigManager(dir).getAutoThread("c2")).toBe(true);
+    cfg.setAutoThread("c1", true);
+    expect(new ConfigManager(dir).getAutoThread("c1")).toBe(true);
+    expect(new ConfigManager(dir).getConfig().inlineChannels).toBeUndefined();
   });
 });

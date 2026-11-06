@@ -165,7 +165,7 @@ Shapes and constraints that don't announce themselves. Getting one wrong compile
 - DMs require `Partials.Channel` + `Partials.Message` in discord.js
 - Attachments downloaded to `…/choomfie-inline/inbox/` (`file_path` = first, `file_paths` = all, semicolon-separated)
 - GitHub integration shells out to `gh` via `lib/handlers/github.ts` (15s timeout)
-- Servers: only responds when @mentioned or replied to. DMs: always responds. @mentions stripped before forwarding
+- Servers: only responds when @mentioned or replied to; an @mention in a text channel opens a thread (auto-thread, `/brain threads:false` to opt out), and in its own threads it answers everything. DMs: always responds. @mentions stripped before forwarding
 - Rate limit + conversation timeout configurable in config.json (`rateLimitMs` default 5s, `convoTimeoutMs` default 5 min)
 - Typing indicator: state machine in `lib/typing.ts`. `keep_typing: true` on `reply` holds it between multi-message workflows. Safety timeout 2 min; skipped for conversation_mode
 - Allowlist loaded at startup from access.json; `allow_user`/`remove_user` update in-memory + persist (no restart). Manual file edits require a restart

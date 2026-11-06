@@ -71,9 +71,9 @@ Access is stored in `~/.claude/plugins/data/choomfie-inline/access.json`. To pai
 
 ## Usage & Commands
 
-In servers, `@mention` the bot or reply to its messages; for a few minutes after it answers, it follows the conversation without a mention. In DMs, just talk. In group DMs (where the bot isn't a member), use `/choomfie <prompt>` or right-click a message → Apps → Ask Choomfie.
+In servers, `@mention` the bot and it opens a thread for the conversation, answering everything there without a mention (`/brain threads:false` to answer inline in a channel instead). In DMs, just talk. In group DMs (where the bot isn't a member), use `/choomfie <prompt>` or right-click a message → Apps → Ask Choomfie.
 
-Your first message starts a chat, titled after what you said. `/clear` starts a new one and `/resume` brings an old one back. A thread you create gets its own chat.
+Your first message starts a chat, titled after what you said. `/clear` starts a new one and `/resume` brings an old one back. Each thread, DM and group DM is its own chat.
 
 | Command | Description |
 | --- | --- |

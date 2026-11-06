@@ -235,7 +235,8 @@ export function dispatchToBrain(
   ctx: AppContext,
   brain: Brain,
   channel: SendableChannel,
-  message: BrainMessage & { messageId: string }
+  /** `messageId` anchors the reply; omit it when the message is in another channel. */
+  message: BrainMessage & { messageId?: string }
 ): Promise<void> {
   const prev = queues.get(message.chatKey) ?? Promise.resolve();
   const run = prev.then(async () => {
@@ -248,7 +249,7 @@ export function dispatchToBrain(
         .send({
           allowedMentions: NO_MENTIONS,
           content: `⚠️ ${brain.label} didn't answer: ${errorMessage(e).slice(0, 300)}`,
-          reply: { messageReference: message.messageId },
+          ...(message.messageId ? { reply: { messageReference: message.messageId } } : {}),
         })
         .catch(() => {});
     } finally {
