@@ -76,7 +76,7 @@ daemon.ts (always running)
        └→ supervisor.ts (MCP stdio) → worker.ts (Discord)
 ```
 
-`daemon.ts` is a thin CLI entry point; the runtime lives in `packages/core/daemon/`. Sessions are cycled when context gets heavy (~120k tokens or 80 turns) — once the session is idle, unless a 180k hard ceiling forces it — capturing a handoff summary first. Full detail in [docs/daemon.md](docs/daemon.md).
+`daemon.ts` is a thin CLI entry point; the runtime lives in `packages/core/daemon/`. With `daemon.multiSession` on it runs as a hub instead (`daemon/hub/`): it spawns the worker itself via `lib/worker-host.ts` (shared with the supervisor) and keeps one Agent SDK session per location, which reach the tools through a loopback MCP endpoint rather than the plugin — see [docs/daemon.md](docs/daemon.md). Sessions are cycled when context gets heavy (~120k tokens or 80 turns) — once the session is idle, unless a 180k hard ceiling forces it — capturing a handoff summary first. Full detail in [docs/daemon.md](docs/daemon.md).
 
 **Both launch paths must pass `--dangerously-load-development-channels server:choomfie`** — `extraArgs` in `createSession`, the flag itself in `bin/choomfie`. It puts the server on the session's channel allowlist. In foreground that is all it takes: without it every incoming Discord message is dropped and Choomfie never answers. In daemon mode it is necessary but not sufficient — see below.
 
@@ -134,7 +134,7 @@ Shapes and constraints that don't announce themselves. Getting one wrong compile
 - All JSON state (`config.json`, `access.json`, `meta/*.json`) is written atomically via `writeJsonAtomic` / `writeJsonAtomicSync` from `@choomfie/shared` — temp file + `rename(2)`. Never write these with a bare `writeFile`; a crash mid-write truncates them.
 - **All SQLite datetimes use space-separated format (`YYYY-MM-DD HH:MM:SS`), never ISO 8601 with `T`/`Z`.** Use `@choomfie/shared` time utilities (`toSQLiteDatetime`, `dateToSQLite`, `nowUTC`).
 - Single instance enforced via `choomfie.pid` (supervisor) and `meta/meta.pid` (daemon). Re-running `choomfie` replaces a stale foreground instance, but **refuses** when a daemon is supervising one — the daemon's own supervisor is exempt via `CHOOMFIE_DAEMON_PID`. Process identity comes from `@choomfie/shared`'s `pid-utils.ts`, not ad-hoc `ps` greps.
-- **Chats are routing, not access.** `chats` / `chat_bindings` (SQLite, `lib/chats/`) say which conversation is live at a (location, brain); `brainChannels` says which brain answers; access.json says who may talk at all. Three separate things — never let one stand in for another. Claude chats share one binding (`claude:global`) while there is one daemon session.
+- **Chats are routing, not access.** `chats` / `chat_bindings` (SQLite, `lib/chats/`) say which conversation is live at a (location, brain); `brainChannels` says which brain answers; access.json says who may talk at all. Three separate things — never let one stand in for another. Claude chats share one binding (`claude:global`) under the single-session daemon; with `daemon.multiSession` each location has its own, and the worker binds it before the hub sees the message.
 - `Config` carries a `[key: string]: unknown` index signature, so a removed key survives `...saved` unless actively stripped. `REMOVED_CONFIG_KEYS` in `lib/config.ts` does that, and `ConfigManager` rewrites the file once on load when it finds one.
 
 **Process boundaries**

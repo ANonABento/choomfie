@@ -8,9 +8,10 @@
  * automatically (it inherits the channel's brain), so there is no "new thread".
  *
  * Web brains (Waymond, …) keep one chat per channel, so resuming one only
- * affects this channel. Claude has a single shared session until sessions can
- * run side by side, so a Claude chat swaps the session everywhere — and needs
- * the daemon, which owns that session.
+ * affects this channel. Claude does too when the daemon runs one session per
+ * location (`daemon.multiSession`); otherwise it has a single shared session,
+ * and resuming a Claude chat swaps it everywhere. Either way Claude needs the
+ * daemon, which owns the sessions.
  *
  * Owner-only: titles are the first thing you said, and a Claude swap affects
  * everyone talking to Choomfie.
@@ -42,7 +43,7 @@ import { parentChannelId, resolveBrainId } from "../brain-router.ts";
 import { isDaemonMode, requestDaemonControl } from "../daemon-status.ts";
 import { botIsAbsent } from "../ask-relay.ts";
 import { isOwner } from "../access.ts";
-import { CLAUDE_GLOBAL, syncClaudeChat } from "../chats/claude.ts";
+import { CLAUDE_GLOBAL, claudeIsPerLocation, syncClaudeChat } from "../chats/claude.ts";
 import { brainAt, liveChat, shortPath, type AnyInteraction } from "../chats/here.ts";
 import type { AppContext } from "../types.ts";
 import { requireOwner } from "./shared.ts";
@@ -61,10 +62,8 @@ function brainLabel(id: string): string {
 function chatLine(chat: ChatRecord, ctx: AppContext): string {
   const bits = [`**${chat.title}**`, relativeTime(chat.lastActiveAt)];
   if (chat.cwd) bits.push(`\`${shortPath(chat.cwd)}\``);
-  if (chat.brain !== CLAUDE_BRAIN) {
-    const at = ctx.chats.locationOf(chat.id);
-    if (at) bits.push(`live in <#${at}>`);
-  }
+  const at = ctx.chats.locationOf(chat.id);
+  if (at && at !== CLAUDE_GLOBAL) bits.push(`live in <#${at}>`);
   return `• ${bits.join(" · ")}`;
 }
 
@@ -117,7 +116,9 @@ async function show(interaction: ChatInputCommandInteraction, ctx: AppContext) {
     )
     .setFooter({
       text:
-        (brain === CLAUDE_BRAIN ? "Claude has one shared session: resuming swaps it for every channel. " : "") +
+        (brain === CLAUDE_BRAIN && !(await claudeIsPerLocation(ctx))
+          ? "Claude has one shared session: resuming swaps it for every channel. "
+          : "") +
         "/resume chat: finds any chat by title · /clear starts a new one",
     });
   await interaction.reply({ embeds: [embed], components: buttons(others, current), flags: MessageFlags.Ephemeral });
@@ -145,6 +146,20 @@ export async function resumeChat(interaction: AnyInteraction, ctx: AppContext, c
   if (chat.brain === CLAUDE_BRAIN) {
     if (!(await isDaemonMode(ctx.DATA_DIR))) {
       return reply(interaction, `${FOREGROUND_CHAT_NOTICE}${chat.backendRef ? `\nSession id: \`${chat.backendRef}\`` : ""}`);
+    }
+    if (await claudeIsPerLocation(ctx)) {
+      // Its own session per location: bind it here and let the daemon close
+      // whatever this channel had; the next message opens (resumes) this one.
+      pointHere();
+      if (ctx.chats.bound(channelId, CLAUDE_BRAIN)?.id === chat.id) return reply(interaction, `**${chat.title}** is already live here.`);
+      const movedFrom = ctx.chats.locationOf(chat.id);
+      ctx.chats.bind(channelId, chat.id);
+      ctx.chats.touch(chat.id);
+      await requestDaemonControl(ctx.DATA_DIR, "resume", { requestedBy: interaction.user.id, location: channelId, targetChat: chat.id });
+      return done(
+        `Resumed **${chat.title}** here${chat.cwd ? ` in \`${shortPath(chat.cwd)}\`` : ""} — your next message picks it up.` +
+          (movedFrom && movedFrom !== channelId && movedFrom !== CLAUDE_GLOBAL ? ` (Moved from <#${movedFrom}>, which starts fresh next time.)` : "")
+      );
     }
     const held = await syncClaudeChat(ctx);
     if (held?.id === chat.id) {

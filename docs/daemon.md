@@ -59,6 +59,27 @@ Plan limits come from the SDK's `rate_limit_event`, normalised in `packages/core
 - `modelUsage` and `total_cost_usd` on a result are **session-cumulative** (verified: a model's `inputTokens` climbs across results), so they are assigned, not accumulated. `usage` (input + cache read + cache write — `input_tokens` alone is ~2 per call once cached) and the turn count (one per result; `num_turns` is round-trips within one prompt) are per-turn and *are* accumulated. Getting these backwards silently double-counts
 - Set `--verbose` to dump each raw `rate_limit_event`; it is the only way to see which fields a given CLI build actually sends
 
+### Multi-session (`daemon.multiSession`)
+
+Off by default. On, each Claude location — thread, channel, DM, group DM — gets its own Agent SDK session, running side by side (`/config setting:daemon.multiSession value:on`, then restart the daemon).
+
+```
+daemon.ts (hub, always running)
+  ├→ WorkerHost → worker.ts (Discord, tools)         lib/worker-host.ts
+  ├→ loopback MCP endpoint (every tool, token in RAM)  startLocalMcp in lib/remote-mcp.ts
+  └→ SessionPool → ChatSession × N (Agent SDK)         daemon/hub/
+          mcpServers: { choomfie: http → endpoint }
+```
+
+- **The daemon runs the worker itself** (the same `WorkerHost` the supervisor uses), so a session cycling never drops Discord and a worker restart never touches a session. Sessions load no plugin — its supervisor would log in to Discord a second time — and reach the tools at the endpoint instead; the worker's instructions (persona, rules) are the server instructions. `CHOOMFIE_HUB_SESSION=1` in a session's env makes any supervisor started inside it (a project `.mcp.json`) refuse to run
+- **The worker owns the chat records.** Before a message goes to `meta/incoming`, `forwardToClaude` binds (or creates, titled from the message) the chat at its location, and tags the message with `location_id` (routing only — `formatChannelPrompt` drops it; needed because `/choomfie`'s `chat_id` is an `ask:` relay). `/clear` starts a new bound chat (with `cwd:` if given) and `/resume` rebinds — no confirm, since only this location changes. Both then send a control request with `location` so the old session closes right away
+- **The hub reconciles** (`SessionPool.deliver`): if the chat bound at the location isn't the one its session holds, that session closes and the bound chat's opens — resumed from its `backendRef` in its own cwd, with the summary its session started with (`meta/claude-seeds.json`). A chat is live in one place: opening it closes it elsewhere, so one transcript never has two writers. The hub writes each new SDK session id onto the chat (`chats.setBackendRef`) — SQLite in WAL mode, `busy_timeout` 5s
+- **Limits:** `daemon.maxSessions` (default 3). At the cap the least recently active idle session closes; if all are mid-turn it goes over rather than cut one off. Idle sessions close after 20 minutes and resume on the next message
+- **Per-session cycling:** each session checks its own context every minute with the same thresholds; past one, it waits for idle, captures a summary, and starts a fresh SDK session on the same chat seeded with it. `/compact` does the same on demand and announces back. A stream failure reopens the same SDK session with backoff; auth/billing failures and 5 failures in a row mark it dead, and the next message replaces it
+- **State:** `daemon-state.json` gains `multiSession: true`, `maxSessions` and `sessions[]` (location, chat, title, cwd, turns, context, busy). `/status` lists them; the top-level turn/context figures are the most recently active session's, cost and tokens are summed, rate limits are the account's (newest snapshot from any session)
+- **Health:** the hub reads the worker heartbeat and restarts the **worker** after 3 failures (the single-session daemon has to cycle the whole session for that)
+- Foreground mode and the single-session daemon are unchanged
+
 ### Daemon Control Channel
 
 The worker sits two processes below the daemon (daemon → Agent SDK → claude CLI → supervisor → worker), so there is no IPC between them. `meta/worker-health.json` carries the worker's heartbeat up; `meta/control.json` carries requests down. Contract in `packages/shared/daemon-control.ts` (writer: core, reader: daemon), mirroring `worker-health.ts`.

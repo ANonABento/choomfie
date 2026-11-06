@@ -47,8 +47,24 @@ export interface DaemonSnapshot {
   lastCycleReason?: string | null;
   workerHealth?: { processAlive?: boolean };
   /** The Choomfie chat the session holds. */
-  chat?: { id?: string; cwd?: string; sdkSessionId?: string | null };
+  chat?: { id?: string; cwd?: string; sdkSessionId?: string | null } | null;
+  /** Multi-session daemon (the hub): one Claude session per location. */
+  multiSession?: boolean;
+  maxSessions?: number;
+  sessions?: HubSessionSnapshot[];
   updatedAt?: string;
+}
+
+export interface HubSessionSnapshot {
+  location: string;
+  chatId: string;
+  title: string;
+  cwd: string;
+  sdkSessionId: string | null;
+  busy: boolean;
+  turns: number;
+  contextTokens: number | null;
+  lastActivityAt: number;
 }
 
 export interface ModelUsageSnapshot {

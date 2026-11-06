@@ -9,7 +9,7 @@ import type { ButtonInteraction, ChatInputCommandInteraction } from "discord.js"
 import { CLAUDE_BRAIN, type ChatRecord } from "@choomfie/shared";
 import { parentChannelId, resolveBrainId } from "../brain-router.ts";
 import type { AppContext } from "../types.ts";
-import { CLAUDE_GLOBAL, syncClaudeChat } from "./claude.ts";
+import { claudeChatAt } from "./claude.ts";
 
 export type AnyInteraction = ChatInputCommandInteraction | ButtonInteraction;
 
@@ -19,17 +19,13 @@ export function brainAt(interaction: AnyInteraction, ctx: AppContext): string {
 }
 
 /** Where a chat for this brain is bound: the channel itself, or the shared Claude slot. */
-export function locationFor(brain: string, channelId: string): string {
-  return brain === CLAUDE_BRAIN ? CLAUDE_GLOBAL : channelId;
-}
-
 /** The chat live here for the brain answering here (Claude: the one the daemon holds). */
 export async function liveChat(
   interaction: AnyInteraction,
   ctx: AppContext
 ): Promise<{ brain: string; chat: ChatRecord | null }> {
   const brain = brainAt(interaction, ctx);
-  if (brain === CLAUDE_BRAIN) return { brain, chat: await syncClaudeChat(ctx) };
+  if (brain === CLAUDE_BRAIN) return { brain, chat: await claudeChatAt(ctx, interaction.channelId!) };
   return { brain, chat: ctx.chats.bound(interaction.channelId!, brain) };
 }
 

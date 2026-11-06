@@ -32,7 +32,9 @@ Two readers, one value:
 
 They used to live at `daemon.model`, which meant `/model` silently did nothing in foreground mode — you changed it, restarted, and got the old model back. `mergeConfig` migrates the old key forward and drops it, so there is only ever one place to look. `fallbackModel` still only applies to `--daemon`; the CLI has no equivalent.
 
-`daemon` now holds only the cycling thresholds — read at startup by `packages/core/daemon.ts` and threaded into daemon state, so `packages/core/daemon/` never has to import `lib/`. Changes take effect on the next daemon start.
+`daemon.multiSession` (default `false`) gives each thread, channel and DM its own Claude session, up to `daemon.maxSessions` (default 3) at once — see [daemon.md](daemon.md#multi-session-daemonmultisession). Both are in `/config` and take effect on the next daemon start.
+
+`daemon` otherwise holds the cycling thresholds — read at startup by `packages/core/daemon.ts` and threaded into daemon state, so `packages/core/daemon/` never has to import `lib/`. Changes take effect on the next daemon start.
 
 ### Changing settings
 

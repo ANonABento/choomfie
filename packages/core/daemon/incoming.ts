@@ -13,6 +13,7 @@
 import { readdir, readFile, unlink } from "node:fs/promises";
 import {
   daemonIncomingDir,
+  INBOUND_LOCATION_KEY as LOCATION_KEY,
   isInboundMessageStale,
   parseInboundMessage,
   type InboundMessage,
@@ -55,7 +56,7 @@ export function formatChannelPrompt(
   source = "choomfie",
 ): string {
   const attributes = Object.entries(meta)
-    .filter(([key]) => ATTRIBUTE_KEY.test(key))
+    .filter(([key]) => ATTRIBUTE_KEY.test(key) && key !== LOCATION_KEY)
     .map(([key, value]) => ` ${key}="${escapeAttribute(value)}"`)
     .join("");
 

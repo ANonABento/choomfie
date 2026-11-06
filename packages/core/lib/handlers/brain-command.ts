@@ -176,7 +176,7 @@ registerCommand("stop", {
         });
         return;
       }
-      await requestDaemonControl(ctx.DATA_DIR, "stop", { requestedBy: interaction.user.id });
+      await requestDaemonControl(ctx.DATA_DIR, "stop", { requestedBy: interaction.user.id, location: channelId });
       onReplySent(channelId); // the interrupted turn won't reply, so stop typing now
       await settleAskRelays(channelId, "⏹️ Stopped.");
       await interaction.reply({ content: "Asked **Claude** to stop.", flags: MessageFlags.Ephemeral });

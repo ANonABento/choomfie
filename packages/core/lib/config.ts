@@ -58,6 +58,13 @@ export interface DaemonConfig {
   tokenThreshold: number;
   /** Cycle the session once it has taken this many turns. */
   turnThreshold: number;
+  /**
+   * One Claude session per thread / channel / DM instead of one shared one.
+   * The daemon then runs the Discord worker itself (the hub). Off by default.
+   */
+  multiSession: boolean;
+  /** Most sessions running at once in multi-session mode; idle ones close first. */
+  maxSessions: number;
 }
 
 export interface Config {
@@ -109,6 +116,8 @@ export type BrainAccess = "owner" | "allowlist";
 export const DEFAULT_DAEMON_CONFIG: DaemonConfig = {
   tokenThreshold: 120_000,
   turnThreshold: 80,
+  multiSession: false,
+  maxSessions: 3,
 };
 
 const DEFAULT_CONFIG: Config = {
@@ -175,6 +184,8 @@ function mergeConfig(saved: Partial<Config>): Config {
     daemon: {
       tokenThreshold: savedDaemon.tokenThreshold ?? DEFAULT_DAEMON_CONFIG.tokenThreshold,
       turnThreshold: savedDaemon.turnThreshold ?? DEFAULT_DAEMON_CONFIG.turnThreshold,
+      multiSession: savedDaemon.multiSession === true,
+      maxSessions: savedDaemon.maxSessions ?? DEFAULT_DAEMON_CONFIG.maxSessions,
     },
   };
 }

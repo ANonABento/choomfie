@@ -77,6 +77,7 @@ export {
   INCOMING_MESSAGE_STALE_MS,
   INCOMING_MAX_PENDING,
   daemonIncomingDir,
+  INBOUND_LOCATION_KEY,
   inboundMessageFilename,
   parseInboundMessage,
   isInboundMessageStale,

@@ -57,6 +57,13 @@ export const INCOMING_MESSAGE_STALE_MS = 3 * 60_000;
  */
 export const INCOMING_MAX_PENDING = 50;
 
+/**
+ * Meta key naming the message's location (thread, channel, DM, group DM) for
+ * the daemon hub's session pool — needed where `chat_id` is an `ask:` relay.
+ * Routing only: the daemon leaves it out of the prompt.
+ */
+export const INBOUND_LOCATION_KEY = "location_id";
+
 export type InboundMessage = {
   /** Message text, @mentions already stripped by the worker. */
   content: string;
