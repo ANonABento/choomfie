@@ -21,8 +21,7 @@
     "deploy-commands": "bun packages/core/scripts/deploy-commands.ts",
     "daemon": "bun packages/core/daemon.ts",
     "install:launchd": "packages/core/scripts/install-launchd.sh",
-    "webbrain": "bun packages/webbrain/cli.ts",
-    "waymond:login": "bun packages/webbrain/cli.ts login waymond"
+    "webbrain": "bun packages/webbrain/cli.ts"
   },
   "lint-staged": {
     "*.ts": "eslint --fix"

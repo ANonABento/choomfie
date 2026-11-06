@@ -33,6 +33,8 @@ export interface WorkerHostOptions {
   /** Prefix for log lines ("Supervisor", "Hub"). */
   name: string;
   env?: Record<string, string | undefined>;
+  /** Script to run instead of worker.ts (tests). */
+  workerPath?: string;
   /** Worker sent tools + instructions (first boot and every restart). */
   onReady?: (tools: IpcToolDef[], instructions: string) => void;
   /** MCP notification from the worker (foreground: Discord messages, permission replies). */
@@ -86,7 +88,7 @@ export class WorkerHost {
   private spawn(): Child {
     this.log("spawning worker");
     this.ready = false;
-    const child = Bun.spawn(["bun", WORKER_PATH], {
+    const child = Bun.spawn(["bun", this.opts.workerPath ?? WORKER_PATH], {
       // Not stdin/stdout: in the supervisor those are the MCP stdio transport.
       stdio: ["ignore", "ignore", "inherit"],
       ipc: (msg: WorkerMessage) => this.onMessage(msg),

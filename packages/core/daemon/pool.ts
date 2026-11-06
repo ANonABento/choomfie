@@ -37,19 +37,19 @@ export interface LiveSession {
   close(): Promise<void>;
 }
 
-export interface PoolDeps {
+export interface PoolDeps<S extends LiveSession> {
   /** The chat bound at a location, or null if the worker bound none. */
   boundChat(location: string): PoolChat | null;
-  open(location: string, chat: PoolChat): LiveSession;
+  open(location: string, chat: PoolChat): S;
   max: number;
   idleMs: number;
   log(message: string): void;
   now?: () => number;
 }
 
-export class SessionPool {
-  readonly sessions = new Map<string, LiveSession>();
-  constructor(private readonly deps: PoolDeps) {}
+export class SessionPool<S extends LiveSession = LiveSession> {
+  readonly sessions = new Map<string, S>();
+  constructor(private readonly deps: PoolDeps<S>) {}
 
   private now() {
     return this.deps.now?.() ?? Date.now();

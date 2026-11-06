@@ -7,7 +7,8 @@
  * Every request needs `Authorization: Bearer <token>`, where the token lives in
  * `<dataDir>/remote-mcp-token` (generated on first start, mode 0600).
  *
- * Runs in the supervisor so it survives worker restarts. Stateless: each HTTP
+ * Runs in whichever process owns the worker (the supervisor, or the daemon),
+ * so it survives worker restarts. Stateless: each HTTP
  * request gets a fresh Server + transport, because an SDK Server binds to
  * exactly one transport and the stdio one is already taken by Claude Code.
  *
@@ -185,7 +186,28 @@ export function startRemoteMcp(
 }
 
 /**
- * The daemon hub's endpoint for its own sessions: loopback, an ephemeral port,
+ * Start the endpoint if config.json turns it on. Never throws: a bad config or
+ * a taken port must not take down the process that owns Discord.
+ */
+export function startConfiguredRemoteMcp(
+  dataDir: string,
+  deps: RemoteMcpDeps,
+  log: (message: string) => void
+): { stop: () => void } | null {
+  try {
+    const cfg = loadRemoteMcpConfig(dataDir);
+    if (!cfg.enabled) return null;
+    const server = startRemoteMcp(cfg, ensureRemoteMcpToken(dataDir), deps);
+    log(`remote MCP on http://${cfg.host}:${cfg.port}/mcp (${cfg.tools.length} tools allowed)`);
+    return { stop: () => void server.stop(true) };
+  } catch (e) {
+    log(`remote MCP not started: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+}
+
+/**
+ * The daemon's endpoint for its own sessions: loopback, an ephemeral port,
  * a token that lives only in the daemon's memory, every tool, and the worker's
  * instructions (persona, security rules) as the server instructions.
  */
@@ -196,7 +218,8 @@ export function startLocalMcp(
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch: (req) => handleMcpRequest(req, token, () => buildServer(null, deps.instructions() || "Choomfie is starting up...", deps)),
+    fetch: (req) =>
+      handleMcpRequest(req, token, () => buildServer(null, deps.instructions() || "Choomfie is starting up...", deps)),
   });
   return { url: `http://127.0.0.1:${server.port}/mcp`, token, stop: () => server.stop(true) };
 }

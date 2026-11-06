@@ -34,8 +34,11 @@ export interface ChatRecord {
 
 /** What plugins need from the chat store. Core passes the real one in `PluginContext.chats`. */
 export interface ChatsApi {
-  /** The chat live at this location for this brain, created (and bound) on first use. */
-  current(locationId: string, brain: string, titleHint?: string): ChatRecord;
+  /**
+   * The chat live at this location for this brain, created and bound on first
+   * use. `message` is what was just said: it titles a new or untitled chat.
+   */
+  current(locationId: string, brain: string, message?: string): ChatRecord;
   /** The chat bound here, without creating one. */
   bound(locationId: string, brain: string): ChatRecord | null;
   get(chatId: string): ChatRecord | null;

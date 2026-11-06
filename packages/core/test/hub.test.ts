@@ -1,10 +1,9 @@
 /**
- * Multi-session daemon: the session pool's routing, and the loopback tool
- * endpoint its sessions reach Choomfie through.
+ * The daemon: the session pool's routing, a chat session's compact and
+ * recovery, and the loopback tool endpoint sessions reach Choomfie through.
  */
 import { describe, expect, test } from "bun:test";
-import { parseDaemonControlRequest } from "@choomfie/shared";
-import { SessionPool, type LiveSession, type PoolChat } from "../daemon/hub/pool.ts";
+import { SessionPool, type LiveSession, type PoolChat } from "../daemon/pool.ts";
 import { startLocalMcp } from "../lib/remote-mcp.ts";
 import { formatChannelPrompt } from "../daemon/incoming.ts";
 
@@ -148,19 +147,11 @@ describe("SessionPool", () => {
   });
 });
 
-describe("hub routing details", () => {
+describe("inbound routing", () => {
   test("the location key routes but never reaches the prompt", () => {
     expect(formatChannelPrompt("hi", { chat_id: "ask:1", location_id: "g1", user: "k" })).toBe(
       '<channel source="choomfie" chat_id="ask:1" user="k">\nhi\n</channel>'
     );
-  });
-
-  test("a multi-session resume needs only the location", () => {
-    expect(parseDaemonControlRequest({ command: "resume", requestedAt: 1, location: "t1" })).toMatchObject({
-      command: "resume",
-      location: "t1",
-    });
-    expect(parseDaemonControlRequest({ command: "resume", requestedAt: 1 })).toBeNull();
   });
 });
 

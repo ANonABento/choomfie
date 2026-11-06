@@ -14,7 +14,7 @@ nothing and gives each host its own name, avatar and slash commands.
 
 1. **New Discord application** — [discord.com/developers](https://discord.com/developers/applications) → New Application → Bot → copy the token. Turn on **Message Content Intent**. Invite it with the same permissions as the first ([discord-setup.md](discord-setup.md)), including **Create Public Threads** for auto-thread.
 2. **Install** — clone the repo, then `./install.sh` and paste the *new* token. The owner (you) is detected from the new application on first start.
-3. **Run it** — `choomfie --daemon`, or `bun run install:launchd` to start at login. Optional: `/config setting:daemon.multiSession value:on` for a session per thread/DM.
+3. **Run it** — `choomfie --daemon`, or `bun run install:launchd` to start at login.
 4. **Pair your access list** — host 2 starts with an empty allowlist. DM the new bot `!pair` and approve it from Claude Code on host 2 (`/choomfie:access pair <code>`), then `/choomfie:access policy allowlist`. Repeat for anyone else who should reach it.
 5. **Give it a different persona name** (`/persona new`, `/persona switch`) so it's obvious which machine is answering.
 

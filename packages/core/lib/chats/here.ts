@@ -8,8 +8,8 @@ import { sep } from "node:path";
 import type { ButtonInteraction, ChatInputCommandInteraction } from "discord.js";
 import { CLAUDE_BRAIN, type ChatRecord } from "@choomfie/shared";
 import { parentChannelId, resolveBrainId } from "../brain-router.ts";
+import { isDaemonMode } from "../daemon-status.ts";
 import type { AppContext } from "../types.ts";
-import { claudeChatAt } from "./claude.ts";
 
 export type AnyInteraction = ChatInputCommandInteraction | ButtonInteraction;
 
@@ -18,14 +18,16 @@ export function brainAt(interaction: AnyInteraction, ctx: AppContext): string {
   return resolveBrainId(interaction.channelId!, parentChannelId(interaction.channel), (c) => ctx.config.getChannelBrain(c));
 }
 
-/** Where a chat for this brain is bound: the channel itself, or the shared Claude slot. */
-/** The chat live here for the brain answering here (Claude: the one the daemon holds). */
+/**
+ * The chat live here for the brain answering here. Claude in foreground mode
+ * has none: the terminal's session isn't a Choomfie chat.
+ */
 export async function liveChat(
   interaction: AnyInteraction,
   ctx: AppContext
 ): Promise<{ brain: string; chat: ChatRecord | null }> {
   const brain = brainAt(interaction, ctx);
-  if (brain === CLAUDE_BRAIN) return { brain, chat: await claudeChatAt(ctx, interaction.channelId!) };
+  if (brain === CLAUDE_BRAIN && !(await isDaemonMode(ctx.DATA_DIR))) return { brain, chat: null };
   return { brain, chat: ctx.chats.bound(interaction.channelId!, brain) };
 }
 

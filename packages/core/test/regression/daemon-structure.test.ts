@@ -7,19 +7,29 @@ const DAEMON_DIR = join(CORE_DIR, "daemon");
 const ENTRYPOINT_PATH = join(CORE_DIR, "daemon.ts");
 
 const EXPECTED_FILES = [
+  "chat-session.ts",
   "cli.ts",
   "constants.ts",
   "flags.ts",
-  "handoffs.ts",
+  "hub.ts",
   "lifecycle.ts",
   "log.ts",
   "message-generator.ts",
   "pid.ts",
+  "pool.ts",
   "runtime.ts",
+  "seeds.ts",
   "session-core.ts",
   "state-file.ts",
   "types.ts",
 ];
+
+/**
+ * The one daemon module allowed into core's lib/: hub.ts runs the worker
+ * (WorkerHost, shared with the supervisor), serves its tools (remote-mcp) and
+ * reads chat bindings (ChatStore). Everything else stays independent of it.
+ */
+const LIB_IMPORTERS = new Set(["hub.ts"]);
 
 function getTsFiles(dir: string): string[] {
   const files: string[] = [];
@@ -58,8 +68,9 @@ describe("daemon structure regression", () => {
     const violations: string[] = [];
 
     for (const file of getTsFiles(DAEMON_DIR)) {
+      if (LIB_IMPORTERS.has(file.slice(DAEMON_DIR.length + 1))) continue;
       const content = readFileSync(file, "utf-8");
-      const libImports = content.match(/from\s+["']\.\.\/lib\/[^"']+["']/g);
+      const libImports = content.match(/from\s+["'](?:\.\.\/)+lib\/[^"']+["']/g);
       if (libImports) {
         const relative = file.replace(`${CORE_DIR}/`, "");
         for (const imp of libImports) {

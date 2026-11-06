@@ -111,47 +111,36 @@ system running across context cycles.
 
 ```mermaid
 flowchart TD
-  CLI[packages/core/daemon.ts] --> Runtime[packages/core/daemon/runtime.ts]
-  Runtime --> AgentSDK["@anthropic-ai/claude-agent-sdk query"]
-  AgentSDK --> Session[Claude Code session]
-  Session --> PluginDir[local plugin path]
-  PluginDir --> Supervisor[supervisor.ts MCP stdio]
-  Supervisor --> Worker[worker.ts Discord bridge]
+  CLI[packages/core/daemon.ts] --> Hub[daemon/hub.ts]
+  Hub --> Host[WorkerHost]
+  Host --> Worker[worker.ts Discord bridge]
+  Hub --> Endpoint[loopback MCP endpoint]
+  Endpoint --> Host
+  Worker --> Incoming[meta/incoming]
+  Incoming --> Hub
+  Hub --> Pool[SessionPool]
+  Pool --> Sessions[ChatSession per location]
+  Sessions --> AgentSDK["@anthropic-ai/claude-agent-sdk query"]
+  AgentSDK --> Endpoint
 
-  Runtime --> Generator[message generator]
-  Generator --> Session
-  Session --> Results[assistant results + usage]
-  Results --> State[daemon-state.json]
+  Sessions --> Thresholds{120k tokens or 80 turns?}
+  Thresholds -- yes, once idle --> HandoffPrompt[capture handoff summary]
+  HandoffPrompt --> Seeds[meta/claude-seeds.json]
+  HandoffPrompt --> Fresh[fresh SDK session, same chat, summary in system prompt]
 
-  Results --> Thresholds{120k tokens or 80 turns?}
-  Thresholds -- yes --> HandoffPrompt[capture handoff summary]
-  HandoffPrompt --> Handoffs[meta/handoffs.json]
-  Handoffs --> Cycle[close session + start new session]
-  Cycle --> AgentSDK
-  Handoffs --> SystemPrompt[append handoff to next system prompt]
-  SystemPrompt --> Session
-
-  HealthTimer[worker health timer every 30s] --> PidCheck[check choomfie.pid process]
-  PidCheck --> Healthy{process alive?}
-  Healthy -- yes --> State
-  Healthy -- no --> FailureCount[consecutive failures]
-  FailureCount --> FailureLimit{3 failures?}
-  FailureLimit -- yes --> Cycle
-
-  AgentErrors[session stream errors] --> Retry[restart session with exponential backoff]
-  Retry --> AgentSDK
+  HealthTimer[worker heartbeat every 30s] --> FailureLimit{3 failures?}
+  FailureLimit -- yes --> Host
 ```
 
 Daemon state files:
 
 - `meta/meta.pid` tracks the daemon process.
-- `choomfie.pid` tracks the supervisor process used by worker health checks.
-- `meta/handoffs.json` stores recent handoff summaries.
-- `meta/daemon-state.json` records turns, tokens, cycles, and worker health for status reporting.
+- `meta/claude-seeds.json` keeps the handoff summary each chat's latest session started with.
+- `meta/daemon-state.json` records sessions, tokens, compacts and worker health for status reporting.
 
-Session cycling thresholds come from `config.json` (`daemon.tokenThreshold`,
+Compact thresholds come from `config.json` (`daemon.tokenThreshold`,
 `daemon.turnThreshold`), resolved by `daemon.ts` at startup and threaded through
-daemon state. Sessions always run on Anthropic; an authentication or billing
+each session's state. Full detail in [daemon.md](daemon.md). Sessions always run on Anthropic; an authentication or billing
 error stops the retry loop immediately instead of burning the full backoff
 schedule on an error that retrying cannot fix.
 

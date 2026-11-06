@@ -12,7 +12,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { nowUTC, UNTITLED_CHAT, type ChatRecord, type ChatsApi } from "@choomfie/shared";
+import { nowUTC, titleFrom, UNTITLED_CHAT, type ChatRecord, type ChatsApi } from "@choomfie/shared";
 
 interface ChatRow {
   id: string;
@@ -125,8 +125,13 @@ export class ChatStore implements ChatsApi {
     tx();
   }
 
-  current(locationId: string, brain: string, titleHint?: string): ChatRecord {
-    return this.bound(locationId, brain) ?? this.start(locationId, brain, titleHint);
+  current(locationId: string, brain: string, message?: string): ChatRecord {
+    const title = message?.trim() ? titleFrom(message) : undefined;
+    const chat = this.bound(locationId, brain);
+    if (!chat) return this.start(locationId, brain, title);
+    if (title && chat.title === UNTITLED_CHAT) this.rename(chat.id, title);
+    this.touch(chat.id);
+    return this.get(chat.id)!;
   }
 
   start(locationId: string, brain: string, title?: string): ChatRecord {
@@ -153,28 +158,31 @@ export class ChatStore implements ChatsApi {
 
   /** Most recently active first. */
   list(opts: { brain?: string; limit?: number } = {}): ChatRecord[] {
-    const limit = opts.limit ?? 25;
-    const rows = opts.brain
-      ? this.db
-          .query(`SELECT ${COLUMNS} FROM chats WHERE brain = ? ORDER BY last_active_at DESC, rowid DESC LIMIT ?`)
-          .all(opts.brain, limit)
-      : this.db.query(`SELECT ${COLUMNS} FROM chats ORDER BY last_active_at DESC, rowid DESC LIMIT ?`).all(limit);
-    return (rows as ChatRow[]).map(toRecord);
+    return this.select(opts);
   }
 
   /** Title search for autocomplete — a local indexed query, well inside Discord's 3s. */
   search(typed: string, opts: { brain?: string; limit?: number } = {}): ChatRecord[] {
-    const like = `%${typed.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
-    const limit = opts.limit ?? 25;
-    const rows = opts.brain
-      ? this.db
-          .query(
-            `SELECT ${COLUMNS} FROM chats WHERE brain = ? AND title LIKE ? ESCAPE '\\' ORDER BY last_active_at DESC LIMIT ?`
-          )
-          .all(opts.brain, like, limit)
-      : this.db
-          .query(`SELECT ${COLUMNS} FROM chats WHERE title LIKE ? ESCAPE '\\' ORDER BY last_active_at DESC LIMIT ?`)
-          .all(like, limit);
+    return this.select({ ...opts, titleLike: `%${typed.replace(/[%_\\]/g, (c) => `\\${c}`)}%` });
+  }
+
+  private select(opts: { brain?: string; titleLike?: string; limit?: number }): ChatRecord[] {
+    const where: string[] = [];
+    const args: (string | number)[] = [];
+    if (opts.brain) {
+      where.push("brain = ?");
+      args.push(opts.brain);
+    }
+    if (opts.titleLike) {
+      where.push("title LIKE ? ESCAPE '\\'");
+      args.push(opts.titleLike);
+    }
+    const rows = this.db
+      .query(
+        `SELECT ${COLUMNS} FROM chats ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+         ORDER BY last_active_at DESC, rowid DESC LIMIT ?`
+      )
+      .all(...args, opts.limit ?? 25);
     return (rows as ChatRow[]).map(toRecord);
   }
 }

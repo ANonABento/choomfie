@@ -201,6 +201,9 @@ export class MemoryStore {
         ? options.embeddingProvider ?? null
         : createDefaultEmbeddingProvider();
     this.db.exec("PRAGMA journal_mode = WAL");
+    // The daemon writes here too (each chat's SDK session id): wait out its
+    // write lock rather than fail with SQLITE_BUSY.
+    this.db.exec("PRAGMA busy_timeout = 5000");
     this.db.exec("PRAGMA foreign_keys = ON");
     this.init();
     this.chats = new ChatStore(this.db);

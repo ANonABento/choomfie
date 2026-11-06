@@ -32,7 +32,7 @@ Two readers, one value:
 
 They used to live at `daemon.model`, which meant `/model` silently did nothing in foreground mode — you changed it, restarted, and got the old model back. `mergeConfig` migrates the old key forward and drops it, so there is only ever one place to look. `fallbackModel` still only applies to `--daemon`; the CLI has no equivalent.
 
-`daemon.multiSession` (default `false`) gives each thread, channel and DM its own Claude session, up to `daemon.maxSessions` (default 3) at once — see [daemon.md](daemon.md#multi-session-daemonmultisession). Both are in `/config` and take effect on the next daemon start.
+`daemon.maxSessions` (default 3) caps how many Claude sessions — one per thread, channel and DM — run at once; idle ones close first ([daemon.md](daemon.md#chats-and-sessions)). In `/config`; takes effect on the next daemon start.
 
 `daemon` otherwise holds the cycling thresholds — read at startup by `packages/core/daemon.ts` and threaded into daemon state, so `packages/core/daemon/` never has to import `lib/`. Changes take effect on the next daemon start.
 
@@ -56,7 +56,7 @@ A brain channel only answers messages addressed to it (DM, @mention, reply). Amb
 
 ## Remote MCP endpoint (`remoteMcp`)
 
-Lets a cloud agent — built for Ambition's Waymond, which only accepts remote MCP servers by URL — call a small allowlisted set of Choomfie tools over streamable HTTP. Code: `packages/core/lib/remote-mcp.ts`, started by the supervisor after stdio connects (by the daemon hub in multi-session mode). Off by default.
+Lets a cloud agent — built for Ambition's Waymond, which only accepts remote MCP servers by URL — call a small allowlisted set of Choomfie tools over streamable HTTP. Code: `packages/core/lib/remote-mcp.ts`, started by the supervisor after stdio connects, or by the daemon. Off by default.
 
 ```json
 "remoteMcp": {

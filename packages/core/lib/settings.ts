@@ -299,26 +299,9 @@ export const SETTINGS: Setting[] = [
     read: (config) => config.getDaemonConfig().turnThreshold,
     write: (config, value) => config.setDaemonConfig({ turnThreshold: value }),
   }),
-  {
-    key: "daemon.multiSession",
-    description: "One Claude session per thread, channel and DM (daemon)",
-    example: "on",
-    suggestions: ["on", "off"],
-    scope: "next daemon start",
-    read: (config) => (config.getDaemonConfig().multiSession ? "on" : "off"),
-    write: (config, raw) => {
-      const v = raw.trim().toLowerCase();
-      const on = ["on", "true", "yes", "1"].includes(v);
-      if (!on && !isReset(raw) && !["off", "false", "no", "0"].includes(v)) {
-        return { ok: false, error: "Must be `on` or `off`." };
-      }
-      config.setDaemonConfig({ multiSession: on });
-      return { ok: true, value: on ? "on" : "off" };
-    },
-  },
   countSetting({
     key: "daemon.maxSessions",
-    description: "Most Claude sessions at once in multi-session mode",
+    description: "Most Claude sessions at once (one per thread, channel, DM)",
     example: "3",
     suggestions: ["default", "2", "3", "5"],
     min: 1,

@@ -131,7 +131,7 @@ export function isInboundMessageStale(
 /**
  * True when this process was started by the daemon.
  *
- * The daemon injects `CHOOMFIE_DAEMON_PID` into its session's env
+ * The daemon injects `CHOOMFIE_DAEMON_PID` into the worker's env
  * (`daemon/session-core.ts`) and the supervisor passes its whole env to the
  * worker, so the variable reaches every process in the tree. The worker uses it
  * to choose a delivery route: set means the channel capability is unavailable

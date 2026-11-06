@@ -493,22 +493,20 @@ registerCommand("status", {
         },
       );
       // One session per location: which are running, and where.
-      if (daemon.multiSession) {
-        const sessions = daemon.sessions ?? [];
-        embed.addFields({
-          name: `Claude sessions (${sessions.length}/${daemon.maxSessions ?? "?"})`,
-          value:
-            sessions
-              .map(
-                (s) =>
-                  `${s.location === interaction.channelId ? "▶ " : ""}<#${s.location}> **${s.title}** · ` +
-                  `${s.turns} turns${s.contextTokens ? ` · ${Math.round(s.contextTokens / 1000)}k ctx` : ""}` +
-                  (s.busy ? " · busy" : "")
-              )
-              .join("\n")
-              .slice(0, 1024) || "None running — the next message starts one.",
-        });
-      }
+      const sessions = daemon.sessions ?? [];
+      embed.addFields({
+        name: `Claude sessions (${sessions.length}/${daemon.maxSessions ?? "?"})`,
+        value:
+          sessions
+            .map(
+              (s) =>
+                `${s.location === interaction.channelId ? "▶ " : ""}<#${s.location}> **${s.title}** · ` +
+                `${s.turns} turns${s.contextTokens ? ` · ${Math.round(s.contextTokens / 1000)}k ctx` : ""}` +
+                (s.busy ? " · busy" : "")
+            )
+            .join("\n")
+            .slice(0, 1024) || "None running — the next message starts one.",
+      });
     }
 
     embed.setFooter({
