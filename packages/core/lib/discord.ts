@@ -254,20 +254,19 @@ export function createDiscordClient(ctx: AppContext): Client {
     // Note: !pair handler above is intentionally before this check
     if (!isAllowed(ctx, userId)) return;
 
-    // Rate limit check
-    if (
-      isRateLimited(
-        ctx.lastMessageTime,
-        userId,
-        ctx.config.getRateLimitMs()
-      )
-    )
+    const owner = isOwner(ctx, userId) || (!ctx.ownerUserId && ctx.allowedUsers.size === 0);
+
+    // Rate limit (anti-spam): not for the owner, who runs several chats at
+    // once — two quick pings used to silently drop the second. Anyone else
+    // sees a ⏳ rather than nothing.
+    if (!owner && isRateLimited(ctx.lastMessageTime, userId, ctx.config.getRateLimitMs())) {
+      await message.react("\u23f3").catch(() => {});
       return;
+    }
 
     // Build metadata
     const isMentionedHere =
       !isDM && message.mentions.has(discord.user!.id);
-    const owner = isOwner(ctx, userId) || (!ctx.ownerUserId && ctx.allowedUsers.size === 0);
     const meta: Record<string, string> = {
       chat_id: message.channelId,
       message_id: message.id,
