@@ -20,6 +20,7 @@ This file holds the architecture and the rules that constrain changes. Inventori
 | [docs/voice-plugin.md](docs/voice-plugin.md) | Voice providers, audio pipeline, setup |
 | [docs/plugin-api.md](docs/plugin-api.md), [docs/plugins.md](docs/plugins.md) | Writing plugins |
 | [docs/webbrain.md](docs/webbrain.md) | Web brains: site adapters, the tab pool, stealth launch, login |
+| [docs/multi-host.md](docs/multi-host.md) | A second computer: its own Discord bot, fully independent |
 | [docs/testing.md](docs/testing.md), [docs/roadmap.md](docs/roadmap.md) | Test strategy, what's done and what isn't |
 
 ## Project Structure

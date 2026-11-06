@@ -52,7 +52,7 @@ async function probe() {
   return {
     webdriver: nav.webdriver === true,
     userAgent: nav.userAgent,
-    platform: nav.platform,
+    platform: String(nav.platform),
     chPlatform: nav.userAgentData?.platform ?? null,
     chBrands: (nav.userAgentData?.brands ?? []).map((b) => b.brand).join(", "),
     plugins: nav.plugins.length,
