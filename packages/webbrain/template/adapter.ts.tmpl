@@ -1,0 +1,73 @@
+/**
+ * __LABEL__ as a web-brain adapter. Written from a `webbrain record` capture.
+ *
+ * Fill in the SELECTORS and the two marked steps. Prefer a JSON endpoint from
+ * network.jsonl for reading the answer; DOM settling (below) is the fallback.
+ */
+
+import {
+  LayoutChangedError,
+  LoginRequiredError,
+  waitForSettledText,
+  type SiteAdapter,
+} from "@choomfie/webbrain";
+
+const ORIGIN = "__ORIGIN__";
+const ID = { id: "__ID__", label: "__LABEL__" };
+
+/** From controls-before.json / aria-before.txt. Prefer aria-label, placeholder, role, data-testid. */
+const SELECTORS = {
+  composer: "TODO",          // the message box
+  lastAnswer: "TODO",        // the newest assistant message
+  busy: "TODO",              // visible only while generating (e.g. a stop button)
+};
+
+/** Where a conversation's id sits in the URL (urls.txt). */
+const CONVERSATION_RE = /TODO/;
+
+export const __ID_CAMEL__Adapter: SiteAdapter = {
+  ...ID,
+  loginUrl: `${ORIGIN}/`,
+  chatUrl: (ref) => (ref ? `${ORIGIN}/TODO/${ref}` : `${ORIGIN}/TODO`),
+
+  async turn(page, { text }, t) {
+    await page.goto(this.chatUrl(t.ref), { waitUntil: "domcontentloaded" });
+    const composer = page.locator(SELECTORS.composer).first();
+    try {
+      await composer.waitFor({ state: "visible", timeout: 30_000 });
+    } catch {
+      // TODO: tell "logged out" apart from "layout changed" (e.g. a sign-in URL or button).
+      if (!page.url().startsWith(ORIGIN)) throw new LoginRequiredError(ID);
+      throw new LayoutChangedError(ID, "the message box never appeared");
+    }
+
+    const answers = page.locator(SELECTORS.lastAnswer);
+    const before = await answers.count();
+
+    await t.human.type(composer, text);
+    await t.human.submit(() => composer.press("Enter"));
+
+    let ref = t.ref;
+    if (!ref) {
+      await page.waitForURL(CONVERSATION_RE, { timeout: 30_000 });
+      ref = CONVERSATION_RE.exec(page.url())![1];
+    }
+    t.started(ref);
+
+    // Wait for a new answer to appear, then for its text to stop changing.
+    await page.waitForFunction(
+      ([sel, n]) => document.querySelectorAll(sel as string).length > (n as number),
+      [SELECTORS.lastAnswer, before],
+      { timeout: 60_000 }
+    );
+    const reply = await waitForSettledText(() => answers.last().innerText(), {
+      timeoutMs: t.timeoutMs,
+      isBusy: async () => (await page.locator(SELECTORS.busy).count()) > 0,
+      stopRequested: t.stopRequested,
+      onTick: (ms) => t.progress(`⏳ ${ID.label} is writing (${Math.round(ms / 1000)}s)`),
+    });
+    return { text: reply, ref, stopped: t.stopRequested() };
+  },
+
+  // Optional: stop(page, ref) — click the site's stop button.
+};

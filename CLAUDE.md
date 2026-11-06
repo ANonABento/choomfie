@@ -142,7 +142,7 @@ Shapes and constraints that don't announce themselves. Getting one wrong compile
 - **Console output goes to stderr — stdout is the MCP stdio transport.** Entry point is `packages/core/supervisor.ts`.
 - **Hot-reload boundary:** worker code in `packages/core/` and all plugin packages are hot-reloadable via worker restart. Supervisor code (`supervisor.ts`, IPC types, MCP server) requires a full session restart (exit + re-run `choomfie`). `packages/shared/` changes require a worker restart at minimum.
 - Auto-restart triggers: persona switch, plugin enable/disable, voice config change — all send `request_restart` IPC → supervisor restarts worker → confirmation to the Discord channel.
-- The worker sits two processes below the daemon, so there is no IPC between them. `meta/worker-health.json` carries the heartbeat up; `meta/incoming/` carries inbound Discord messages up; `meta/control.json` carries `/compact`, `/clear`, `/stop` and `/chat new|resume` requests down; `meta/daemon-state.json` carries daemon state down (read by `/status`, `/usage`, and the rate-limit alerter).
+- The worker sits two processes below the daemon, so there is no IPC between them. `meta/worker-health.json` carries the heartbeat up; `meta/incoming/` carries inbound Discord messages up; `meta/control.json` carries `/compact`, `/clear`, `/stop` and `/resume` requests down; `meta/daemon-state.json` carries daemon state down (read by `/status`, `/usage`, and the rate-limit alerter).
 
 **Settings**
 - `model` / `fallbackModel` are **top level, not under `daemon`** — they are not daemon-specific. Both the daemon (via the Agent SDK) and foreground/`--tmux` (via `bin/choomfie` → `scripts/resolve-model.ts`) read the same value. They used to live at `daemon.model`, which meant `/model` silently did nothing in foreground mode; `mergeConfig` migrates the old key forward and drops it.
@@ -165,7 +165,7 @@ Shapes and constraints that don't announce themselves. Getting one wrong compile
 - DMs require `Partials.Channel` + `Partials.Message` in discord.js
 - Attachments downloaded to `…/choomfie-inline/inbox/` (`file_path` = first, `file_paths` = all, semicolon-separated)
 - GitHub integration shells out to `gh` via `lib/handlers/github.ts` (15s timeout)
-- Servers: only responds when @mentioned or replied to. DMs: always responds. @mentions stripped before forwarding
+- Servers: only responds when @mentioned or replied to; an @mention in a text channel opens a thread (auto-thread, `/brain threads:false` to opt out), and in its own threads it answers everything. DMs: always responds. @mentions stripped before forwarding
 - Rate limit + conversation timeout configurable in config.json (`rateLimitMs` default 5s, `convoTimeoutMs` default 5 min)
 - Typing indicator: state machine in `lib/typing.ts`. `keep_typing: true` on `reply` holds it between multi-message workflows. Safety timeout 2 min; skipped for conversation_mode
 - Allowlist loaded at startup from access.json; `allow_user`/`remove_user` update in-memory + persist (no restart). Manual file edits require a restart

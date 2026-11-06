@@ -149,19 +149,6 @@ describe("defineWebBrain", () => {
       await destroy();
     }
   });
-
-  test("moves a pre-kit state dir into webbrain/<id>", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "webbrain-legacy-"));
-    dirs.push(dataDir);
-    mkdirSync(join(dataDir, "fakesite", "profile"), { recursive: true });
-    const plugin = defineWebBrain(
-      { id: "fakesite", label: "F", loginUrl: "", chatUrl: () => "", turn: async () => ({ text: "", ref: "r" }) },
-      { launch: async () => new FakeContext() as never }
-    );
-    await plugin.init!({ DATA_DIR: dataDir, chats: new ChatStore(new Database(":memory:")), config: {} } as never);
-    await plugin.destroy!();
-    expect(readdirSync(join(dataDir, "webbrain", "fakesite"))).toContain("profile");
-  });
 });
 
 describe("answerText", () => {

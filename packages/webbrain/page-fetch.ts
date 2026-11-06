@@ -5,6 +5,7 @@
  */
 
 import type { Page } from "patchright";
+import { LoginRequiredError, type SiteAdapter } from "./adapter.ts";
 
 export interface PageFetchResult {
   status: number;
@@ -32,4 +33,23 @@ export async function pageFetch(
     },
     [url, init] as [string, typeof init]
   )) as PageFetchResult;
+}
+
+/**
+ * `pageFetch` for an endpoint that must succeed: 401/403 means the site wants
+ * a login (`LoginRequiredError`), any other failure throws with the status and
+ * the start of the body. Returns the parsed JSON.
+ */
+export async function pageFetchOk(
+  page: Page,
+  url: string,
+  site: Pick<SiteAdapter, "id" | "label">,
+  init: { method?: string; body?: string; headers?: Record<string, string> } = {}
+): Promise<unknown> {
+  const res = await pageFetch(page, url, init);
+  if (res.status === 401 || res.status === 403) throw new LoginRequiredError(site);
+  if (res.status >= 400) {
+    throw new Error(`${site.label} ${res.status} for ${new URL(url).pathname}${res.errorText ? `: ${res.errorText}` : ""}`);
+  }
+  return res.json;
 }

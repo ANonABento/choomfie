@@ -6,7 +6,7 @@
  * a thread. A *chat* is the conversation held there, with its backend's own
  * id (`backendRef`: a Waymond conversation id, a Claude SDK session id).
  *
- * The indirection is what lets `/chat resume` put an old conversation back
+ * The indirection is what lets `/resume` put an old conversation back
  * into a location without the brain having to know: the brain asks "which chat
  * is live here?" and gets whichever one is bound.
  *

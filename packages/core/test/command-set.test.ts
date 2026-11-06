@@ -52,12 +52,12 @@ describe("slash command set", () => {
     for (const c of slash()) walk(c);
   });
 
-  test("only /choomfie, /access, /brain, /chat, /clear, /stop and the Ask Choomfie menu work outside the bot's servers", () => {
+  test("only /choomfie, /access, /brain, /clear, /resume, /stop and the Ask Choomfie menu work outside the bot's servers", () => {
     const anywhere = (getCommandDefs() as Json[])
       .filter((c) => c.integration_types?.includes(IT.UserInstall))
       .map((c) => c.name)
       .sort();
-    expect(anywhere).toEqual(["Ask Choomfie", "access", "brain", "chat", "choomfie", "clear", "stop"]);
+    expect(anywhere).toEqual(["Ask Choomfie", "access", "brain", "choomfie", "clear", "resume", "stop"]);
     for (const c of getCommandDefs() as Json[]) {
       expect(c.integration_types?.length).toBeGreaterThan(0);
       if (anywhere.includes(c.name)) expect(c.contexts).toContain(CT.PrivateChannel);
@@ -81,6 +81,7 @@ function fakeInteraction(over: Record<string, unknown> = {}) {
     options: {
       getSubcommand: () => opts.sub,
       getString: (k: string) => (opts[k] as string | undefined) ?? null,
+      getBoolean: (k: string) => (opts[k] as boolean | undefined) ?? null,
       getUser: (k: string) => opts[k] ?? null,
       getInteger: (k: string) => opts[k] ?? null,
     },

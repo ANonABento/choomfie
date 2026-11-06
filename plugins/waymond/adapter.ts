@@ -9,7 +9,7 @@
 
 import { basename } from "node:path";
 import type { BrainApproval } from "@choomfie/shared";
-import { LayoutChangedError, LoginRequiredError, pageFetch, type Page, type SiteAdapter } from "@choomfie/webbrain";
+import { LayoutChangedError, LoginRequiredError, pageFetchOk, type Page, type SiteAdapter } from "@choomfie/webbrain";
 import {
   APP_ORIGIN,
   CONVERSATION_PATH_RE,
@@ -53,12 +53,7 @@ export function progressLine(turn: TurnState, elapsedMs: number): string {
 }
 
 /** GET an Ambition endpoint from the logged-in page. */
-async function getJson(page: Page, url: string): Promise<unknown> {
-  const res = await pageFetch(page, url);
-  if (res.status === 401 || res.status === 403) throw new LoginRequiredError(ID);
-  if (res.status >= 400) throw new Error(`Ambition API ${res.status} for ${new URL(url).pathname}`);
-  return res.json;
-}
+const getJson = (page: Page, url: string) => pageFetchOk(page, url, ID);
 
 /** fetch() needs the app origin for the session cookie and CORS. */
 async function onApp(page: Page) {
@@ -176,9 +171,7 @@ export const waymondAdapter: SiteAdapter = {
   },
 
   async stop(page, ref) {
-    const res = await pageFetch(page, stopUrl(ref), { method: "POST" });
-    if (res.status === 401 || res.status === 403) throw new LoginRequiredError(ID);
-    if (res.status >= 400) throw new Error(`Ambition refused the stop (${res.status})`);
+    await pageFetchOk(page, stopUrl(ref), ID, { method: "POST" });
     return true;
   },
 
@@ -198,14 +191,12 @@ export const waymondAdapter: SiteAdapter = {
   /** `POST cards/:id/send|decline`. Returns Ambition's status for the card. */
   async resolveApproval(page, ref, approvalId, approve) {
     await onApp(page);
-    const res = await pageFetch(page, offerActionUrl(approvalId, approve ? "send" : "decline"), {
+    const action = approve ? "send" : "decline";
+    const json = await pageFetchOk(page, offerActionUrl(approvalId, action), ID, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ conversation_id: ref }),
     });
-    if (res.status === 401 || res.status === 403) throw new LoginRequiredError(ID);
-    if (res.status >= 400) throw new Error(`Ambition refused (${res.status}): ${res.errorText ?? ""}`);
-    const action = approve ? "send" : "decline";
-    return String((res.json as { status?: unknown } | undefined)?.status ?? action);
+    return String((json as { status?: unknown } | undefined)?.status ?? action);
   },
 };

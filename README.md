@@ -71,7 +71,9 @@ Access is stored in `~/.claude/plugins/data/choomfie-inline/access.json`. To pai
 
 ## Usage & Commands
 
-In servers, `@mention` the bot or reply to its messages. In DMs, just talk.
+In servers, `@mention` the bot and it opens a thread for the conversation, answering everything there without a mention (`/brain threads:false` to answer inline in a channel instead). In DMs, just talk. In group DMs (where the bot isn't a member), use `/choomfie <prompt>` or right-click a message → Apps → Ask Choomfie.
+
+Your first message starts a chat, titled after what you said. `/clear` starts a new one and `/resume` brings an old one back. Each thread, DM and group DM is its own chat.
 
 | Command | Description |
 | --- | --- |
@@ -79,7 +81,8 @@ In servers, `@mention` the bot or reply to its messages. In DMs, just talk.
 | `/memory list` · `search` · `save` · `forget` | List, search, save, delete memories |
 | `/github <check>` | Check PRs, issues, notifications |
 | `/persona list` · `switch` · `new` | List, switch, create personas |
-| `/brain [name]` · `/stop` | Who answers this channel (Claude, Waymond, …) / interrupt it |
+| `/clear [cwd]` · `/resume [chat]` | Start a new chat (optionally in another project) / list, rename or bring back a chat |
+| `/compact` · `/stop` | Free up context keeping a summary / interrupt the reply in progress |
 | `/access list` · `allow` · `revoke` | Who can talk to the bot |
 | `/plugins` | List, enable, or disable plugins |
 | `/voice` | Voice provider setup |
@@ -100,7 +103,9 @@ In servers, `@mention` the bot or reply to its messages. In DMs, just talk.
 
 `choomfie --daemon` cycles Claude sessions automatically when context gets heavy (~120k tokens or 80 turns), capturing a handoff summary first — see [Daemon Mode](CLAUDE.md#daemon-mode-choomfie---daemon).
 
-For a foreground session, use `/compact` or start a fresh Claude Code session once conversation history gets long.
+`/clear`, `/compact` and `/resume` from Discord need the daemon, which owns the session. In a foreground session, type them in the terminal instead.
+
+`/clear cwd:<dir>` starts the new chat in another project. Allowed directories are listed in `chatRoots` in `~/.claude/plugins/data/choomfie-inline/config.json`, e.g. `"chatRoots": ["~/projects"]`.
 
 ## Architecture
 

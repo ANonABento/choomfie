@@ -29,10 +29,14 @@ import {
 } from "@choomfie/shared";
 import { downloadAttachments, forwardToClaude } from "./inbound.ts";
 import { decideRoute, dispatchToBrain, installBrainPoster, parentChannelId } from "./brain-router.ts";
+import { isOwnThread, openThread, wantsThread } from "./chats/auto-thread.ts";
 import {
   dispatchPluginMessage,
   initializePlugins,
 } from "./plugin-lifecycle.ts";
+
+/** Channels already told that auto-thread lacks permission (once per worker). */
+const threadWarned = new Set<string>();
 
 const PERMISSION_REPLY_RE = /^\s*(y|yes|n|no)\s+([a-km-z]{5})\s*$/i;
 
@@ -207,10 +211,14 @@ export function createDiscordClient(ctx: AppContext): Client {
     }
 
     // --- Trigger rules ---
-    // DMs: always respond
+    // DMs and threads Choomfie opened: always respond
     // Servers: only when @mentioned or replying to the bot
+    const botId = discord.user!.id;
+    const ownThread = isOwnThread(message.channel as never, botId);
+    // An @mention in a text channel moves the conversation into a new thread.
+    const threadIt = wantsThread(message, botId, ctx.config.getAutoThread(message.channelId));
     let replyToUserId: string | null = null;
-    if (!isDM) {
+    if (!isDM && !ownThread) {
       const isMentioned = message.mentions.has(discord.user!.id);
       // Resolve who this message is replying to (if anyone)
       let isReplyToBot = false;
@@ -230,8 +238,11 @@ export function createDiscordClient(ctx: AppContext): Client {
 
       if (!isMentioned && !isReplyToBot && !channelActive) return;
 
-      // Activate channel on @mention or reply; refresh on ongoing conversation
-      if (isMentioned || isReplyToBot) {
+      // Activate channel on @mention or reply; refresh on ongoing conversation.
+      // Not when the answer goes to a new thread — the channel itself stays quiet.
+      if (threadIt) {
+        // nothing to follow here
+      } else if (isMentioned || isReplyToBot) {
         activateChannel(ctx.activeChannels, message.channelId);
       } else if (channelActive) {
         refreshChannel(ctx.activeChannels, message.channelId);
@@ -270,6 +281,7 @@ export function createDiscordClient(ctx: AppContext): Client {
     // Mark conversation mode messages
     if (
       !isDM &&
+      !ownThread &&
       !isMentionedHere &&
       isChannelActive(ctx.activeChannels, message.channelId, ctx.config.getConvoTimeoutMs())
     ) {
@@ -304,21 +316,38 @@ export function createDiscordClient(ctx: AppContext): Client {
       return;
     }
 
+    // Auto-thread: answer (and keep the chat) in a new thread off the message.
+    // Without permission, answer inline and say why once per channel.
+    const thread = threadIt ? await openThread(message) : null;
+    if (threadIt && !thread && !threadWarned.has(message.channelId)) {
+      threadWarned.add(message.channelId);
+      await message
+        .reply(
+          "I couldn't open a thread here (I need **Create Public Threads**), so I'll answer inline. " +
+            "`/brain threads:false` turns threads off for this channel."
+        )
+        .catch(() => {});
+    }
+    const where = thread ?? message.channel;
+    const whereId = thread?.id ?? message.channelId;
+    meta.chat_id = whereId;
+
     // Show typing indicator while the brain processes (state machine in lib/typing.ts)
-    onMessageReceived(message.channelId, message.channel, isConversationMode);
+    onMessageReceived(whereId, where, isConversationMode);
 
     // Strip bot @mention from the message so Claude sees clean text
     const cleanContent = message.content
-      .replace(new RegExp(`<@!?${discord.user!.id}>`, "g"), "")
+      .replace(new RegExp(`<@!?${botId}>`, "g"), "")
       .trim();
 
     const content =
       cleanContent || "(empty message — user may have just mentioned you)";
 
     if (route.kind === "brain") {
-      void dispatchToBrain(ctx, route.brain, message.channel as never, {
-        chatKey: message.channelId,
-        messageId: message.id,
+      void dispatchToBrain(ctx, route.brain, where as never, {
+        chatKey: whereId,
+        // The message sits in the parent channel; a reply can't point across.
+        messageId: thread ? undefined : message.id,
         content,
         meta,
         filePaths,

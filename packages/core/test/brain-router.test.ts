@@ -197,7 +197,7 @@ describe("brain output never pings", () => {
 });
 
 describe("/clear and /compact follow the channel's brain", () => {
-  async function run(command: "clear" | "compact", channelBrain: string | undefined, reset = true) {
+  async function run(command: "clear" | "compact", channelBrain: string | undefined, reset = true, cwd: string | null = null) {
     const { commands, registerBrain, unregisterBrain } = await import("@choomfie/shared");
     await import("../lib/handlers/session-commands.ts");
     const resets: string[] = [];
@@ -207,6 +207,7 @@ describe("/clear and /compact follow the channel's brain", () => {
       channelId: "chan1",
       channel: { isThread: () => false },
       user: { id: "owner" },
+      options: { getString: (name: string) => (name === "cwd" ? cwd : null) },
       reply: async (o: (typeof replies)[number]) => void replies.push(o),
     };
     const { Database } = await import("bun:sqlite");
@@ -240,6 +241,13 @@ describe("/clear and /compact follow the channel's brain", () => {
     const { replies, chats, before } = await run("clear", "testbrain", false);
     expect(JSON.stringify(replies[0].embeds)).toContain("Fresh TestBrain conversation");
     expect(chats.bound("chan1", "testbrain")?.id).not.toBe(before.id);
+  });
+
+  test("/clear cwd: is refused in a brain channel, changing nothing", async () => {
+    const { replies, resets, chats, before } = await run("clear", "testbrain", true, "~/x");
+    expect(replies[0].content).toContain("only applies to Claude");
+    expect(resets).toEqual([]);
+    expect(chats.bound("chan1", "testbrain")?.id).toBe(before.id);
   });
 
   test("/compact in a brain channel explains instead of touching Claude", async () => {

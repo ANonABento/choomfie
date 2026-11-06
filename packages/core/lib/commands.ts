@@ -309,7 +309,8 @@ registerCommand("help", {
           value: [
             "`/brain [name]` — who answers here (Claude, Waymond, …)",
             "`/stop` — interrupt the reply in progress",
-            "`/clear` — start fresh (Claude: daemon only; other brains: this channel)",
+            "`/clear [cwd]` — start a new chat here (Claude: daemon only; `cwd` picks the project)",
+            "`/resume [chat]` — see this channel's chats, rename, or bring an old one back",
             "`/compact` — free up Claude's context, keep a summary",
             "_Saved memories and reminders survive all of these._",
           ].join("\n"),

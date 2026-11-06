@@ -36,13 +36,13 @@ export const STOP_REQUEST_STALE_MS = 20_000;
  * memories, reminders or personas — those live in SQLite. `stop` interrupts
  * the turn in progress (Esc in Claude Code) and keeps the session.
  *
- * `new` and `resume` swap which *chat* the session holds (`/chat`): `new`
- * starts a fresh one, optionally in another working directory; `resume` puts
- * an earlier one back by its SDK session id (Claude Code's `--resume`).
+ * A cleared session is a new *chat*, optionally in another working directory
+ * (`cwd`); the old one stays resumable. `resume` puts an earlier chat back by
+ * its SDK session id (`/resume`, Claude Code's `--resume`).
  */
-export type DaemonControlCommand = "compact" | "clear" | "stop" | "new" | "resume";
+export type DaemonControlCommand = "compact" | "clear" | "stop" | "resume";
 
-const COMMANDS: readonly DaemonControlCommand[] = ["compact", "clear", "stop", "new", "resume"];
+const COMMANDS: readonly DaemonControlCommand[] = ["compact", "clear", "stop", "resume"];
 
 export type DaemonControlRequest = {
   command: DaemonControlCommand;
@@ -52,13 +52,13 @@ export type DaemonControlRequest = {
   requestedBy?: string;
   /** Discord channel to report back in once the new session is up. */
   chatId?: string;
-  /** `new` / `resume`: the Choomfie chat the next session holds. */
+  /** `resume`: the Choomfie chat the next session holds. */
   targetChat?: string;
   /** `resume`: the SDK session to load. */
   sdkSessionId?: string;
-  /** `new` / `resume`: working directory for the next session. */
+  /** `clear` / `resume`: working directory for the next session. */
   cwd?: string;
-  /** `new` / `resume`: the chat's title, for the "I'm back" line. */
+  /** `resume`: the chat's title, for the "I'm back" line. */
   title?: string;
 };
 
@@ -92,7 +92,6 @@ export function parseDaemonControlRequest(
     title: str(raw.title),
   };
   // Without these the daemon wouldn't know which chat to hold.
-  if (request.command === "new" && !request.targetChat) return null;
   if (request.command === "resume" && (!request.targetChat || !request.sdkSessionId)) return null;
   return request;
 }
