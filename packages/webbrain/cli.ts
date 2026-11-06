@@ -8,6 +8,9 @@
  *                                        writing an adapter (docs/webbrain.md)
  *   bun run webbrain doctor <id>         send "pong" through the adapter and
  *                                        check the answer (sends a real message)
+ *   bun run webbrain doctor <id> --detect [--engine patchright|cloak|all]
+ *                                        how botty the engine looks (throwaway
+ *                                        profile, bot.sannysoft.com + own probes)
  *
  * <id> is a plugin that exports `adapter` (e.g. `waymond` → @choomfie/waymond).
  * `record` needs no adapter yet — it's how you write one.
@@ -16,7 +19,8 @@
 import { resolveDataDir } from "@choomfie/shared";
 import type { SiteAdapter } from "./adapter.ts";
 import { doctor, PONG_PROMPT } from "./doctor.ts";
-import { launchContext } from "./engine/launch.ts";
+import { ENGINES, engineFor, isEngine, launchContext, type EngineName } from "./engine/launch.ts";
+import { detect, formatReport } from "./detect.ts";
 import { profileDir, profileInUse } from "./paths.ts";
 import { record } from "./record.ts";
 
@@ -25,6 +29,7 @@ const USAGE = [
   "  bun run webbrain login <id>",
   "  bun run webbrain record <id> <url>",
   "  bun run webbrain doctor <id> [--headed]",
+  "  bun run webbrain doctor <id> --detect [--engine patchright|cloak|all] [--headed]",
 ].join("\n");
 
 const ID_RE = /^[a-z0-9-]+$/;
@@ -41,16 +46,17 @@ async function loadAdapter(id: string): Promise<SiteAdapter> {
 }
 
 async function login(dataDir: string, adapter: SiteAdapter) {
-  const dir = profileDir(dataDir, adapter.id);
+  const engine = engineFor(dataDir, adapter);
+  const dir = profileDir(dataDir, adapter.id, engine);
   if (profileInUse(dir)) {
     throw new Error(
       `${adapter.label}'s browser profile is open in another process (Choomfie's worker, mid-conversation?).\n` +
         "Wait for it to go idle (it closes after ~10 min), or stop Choomfie, then try again."
     );
   }
-  console.error(`Opening ${adapter.label} with profile ${dir}`);
+  console.error(`Opening ${adapter.label} (${engine}) with profile ${dir}`);
   console.error("Sign in, check that the chat loads, then close the window.");
-  const context = await launchContext(dir, { headless: false });
+  const context = await launchContext(dir, { headless: false, engine });
   const page = context.pages()[0] ?? (await context.newPage());
   await page.goto(adapter.loginUrl);
   await new Promise<void>((resolve) => context.on("close", () => resolve()));
@@ -70,6 +76,24 @@ try {
     if (!url || !/^https:\/\//.test(url)) throw new Error(`record needs the site's https URL\n${USAGE}`);
     const dir = await record(dataDir, id, url);
     console.error(`Recorded to ${dir}`);
+  } else if (command === "doctor" && rest.includes("--detect")) {
+    const wanted = rest[rest.indexOf("--engine") + 1];
+    const adapter = await loadAdapter(id).catch(() => ({ id }));
+    const engines: EngineName[] =
+      rest.includes("--engine") ? (wanted === "all" ? [...ENGINES] : isEngine(wanted) ? [wanted] : []) : [engineFor(dataDir, adapter)];
+    if (!engines.length) throw new Error(`--engine must be one of ${ENGINES.join(", ")}, all`);
+    let bad = 0;
+    for (const engine of engines) {
+      try {
+        const report = await detect(engine, { headless: !rest.includes("--headed") });
+        console.error(formatReport(report));
+        bad += report.rows.filter((r) => !r.ok).length + (report.sannysoftFailed?.length ?? 0);
+      } catch (e) {
+        console.error(`${engine}: couldn't launch — ${e instanceof Error ? e.message : String(e)}`);
+        bad++;
+      }
+    }
+    process.exit(bad ? 1 : 0);
   } else if (command === "doctor") {
     const adapter = await loadAdapter(id);
     console.error(`${adapter.label}: sending "${PONG_PROMPT}" in a new chat…`);

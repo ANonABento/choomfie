@@ -25,7 +25,7 @@ Prefer the site's own JSON endpoints for reading answers (`pageFetch(page, url)`
 | | |
 |---|---|
 | **Tabs** (`tabs.ts`) | One persistent browser per site; one tab per chat. The same chat runs one turn at a time; different chats run side by side. Max 3 tabs (an idle chat's tab is reused, least recently used first; if all are busy, the next waits). The browser closes after 10 min idle. |
-| **Launch** (`engine/launch.ts`) | Patchright on installed Chrome (bundled Chromium as fallback), the site's own profile in `<data>/webbrain/<id>/profile`, real window size, the machine's locale and timezone — the same every launch. No fingerprint rotation: consistency matters more than randomness for a logged-in account. |
+| **Launch** (`engine/launch.ts`) | Two engines. **patchright** (default): installed Chrome (bundled Chromium as fallback); headless, it relaunches once with "HeadlessChrome" taken out of the user agent. **cloak**: CloakBrowser, a Chromium with source-level fingerprint patches — needs a license key (`npx cloakbrowser login`, free with an email, **one browser at a time**; more is paid). Per site: config.json `"webbrain": { "<id>": { "engine": "cloak" } }`, else the adapter's `engine`. Each engine has its own profile (`<data>/webbrain/<id>/profile`, `profile-cloak`), so switching means logging in again. Real window size, the machine's locale and timezone, the same every launch — no fingerprint rotation: consistency matters more than randomness for a logged-in account. |
 | **Pacing** (`engine/human.ts`) | Short messages typed with jittered key timing; long or multi-line ones pasted (Enter sends in most composers). Submits to one site are spaced ≥1.5s plus jitter across all its tabs. |
 | **Discord** (`define.ts`) | Typing indicator; one self-updating status line after 45s; attachments copied under their original names; prompts from non-owners say who is talking; stopped / background answers say so. |
 | **Chats** | The conversation id is stored on the chat record (`ctx.chats`), so `/resume` and `/clear` work for every web brain. |
@@ -40,10 +40,11 @@ The `new-web-brain` skill (`.claude/skills/new-web-brain/`) walks a Claude Code 
 - `bun run webbrain login <id>` — opens the site headed on its profile; sign in, close the window. Refuses while the profile is open elsewhere (Chrome's `SingletonLock`).
 - `bun run webbrain record <id> <url>` — headed, on `<id>`'s profile (so signing in here is the login). You send `Reply with exactly: pong` by hand; it writes `network.jsonl` (fetch/XHR/stream entries with clipped request and response bodies, **no headers**), `controls-*.json` and `aria-*.txt` (selector material, before and after), `urls.txt` and `meta.json` to `<data>/webbrain/<id>/recording/`. That holds account data: it stays in the data dir, never the repo.
 - `bun run webbrain doctor <id> [--headed]` — one real round trip through the adapter in a new chat; passes when the answer contains `pong`. Exit code 0/1. Sends a real message.
+- `bun run webbrain doctor <id> --detect [--engine patchright|cloak|all] [--headed]` — how botty the engine looks, on a throwaway profile (never the logged-in one): our probes (`navigator.webdriver`, Headless in the user agent or client hints, software GPU, plugins, zero-size window, UA vs client-hint platform, contradictory notification permission, `window.chrome`) plus bot.sannysoft.com's failed rows. Exit 1 on any tell.
 - `CHOOMFIE_<ID>_HEADED=1` — run that site's browser visibly, for debugging.
 
 A site that kept state in `<data>/<id>/` before the kit (Waymond) has it moved to `<data>/webbrain/<id>/` on first start.
 
 ## Caveat
 
-Automating a site's web UI is usually against its terms, and an account can be flagged whatever the tooling. Patchright lowers detection, it doesn't remove it. Where a site has an official API, use that instead.
+Automating a site's web UI is usually against its terms, and an account can be flagged whatever the tooling. Patchright and CloakBrowser lower detection, they don't remove it. Where a site has an official API, use that instead.

@@ -22,7 +22,7 @@ import {
 } from "@choomfie/shared";
 import type { Page } from "patchright";
 import { LoginRequiredError, type SiteAdapter, type TurnContext, type TurnResult } from "./adapter.ts";
-import { launchContext } from "./engine/launch.ts";
+import { engineFor, launchContext } from "./engine/launch.ts";
 import { createHuman, Pacer } from "./engine/human.ts";
 import { outboxDir, profileDir } from "./paths.ts";
 import { TabPool, type ContextLike } from "./tabs.ts";
@@ -91,13 +91,14 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
     const chats = ctx.chats;
     if (!chats) throw new Error(`${adapter.label} needs Choomfie's chat store (ctx.chats)`);
 
-    const profile = profileDir(ctx.DATA_DIR, adapter.id);
+    const engine = engineFor(ctx.DATA_DIR, adapter);
+    const profile = profileDir(ctx.DATA_DIR, adapter.id, engine);
     const outbox = outboxDir(ctx.DATA_DIR, adapter.id);
     const human = createHuman(new Pacer());
     const timeoutMs = opts.turnTimeoutMs ?? 15 * 60_000;
     const active = new Map<string, ActiveTurn>();
     const tabs = (pool = new TabPool<Page>({
-      launch: () => (opts.launch ? opts.launch(profile) : launchContext(profile, { headless: !headedFor(adapter.id) })),
+      launch: () => (opts.launch ? opts.launch(profile) : launchContext(profile, { headless: !headedFor(adapter.id), engine })),
       maxTabs: opts.maxTabs,
       idleCloseMs: opts.idleCloseMs,
     }));

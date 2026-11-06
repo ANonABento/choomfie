@@ -9,6 +9,8 @@
   },
   "dependencies": {
     "@choomfie/shared": "workspace:*",
-    "patchright": "1.64.1"
+    "cloakbrowser": "0.7.0",
+    "patchright": "1.64.1",
+    "playwright-core": "^1.65.0"
   }
 }
