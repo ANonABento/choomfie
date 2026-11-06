@@ -21,7 +21,8 @@
     "deploy-commands": "bun packages/core/scripts/deploy-commands.ts",
     "daemon": "bun packages/core/daemon.ts",
     "install:launchd": "packages/core/scripts/install-launchd.sh",
-    "waymond:login": "bun plugins/waymond/login.ts"
+    "webbrain": "bun packages/webbrain/cli.ts",
+    "waymond:login": "bun packages/webbrain/cli.ts login waymond"
   },
   "lint-staged": {
     "*.ts": "eslint --fix"
@@ -34,6 +35,7 @@
     "@choomfie/tutor": "workspace:*",
     "@choomfie/voice": "workspace:*",
     "@choomfie/waymond": "workspace:*",
+    "@choomfie/webbrain": "workspace:*",
     "@discordjs/opus": "^0.10.0",
     "@discordjs/voice": "^0.19.2",
     "@modelcontextprotocol/sdk": "^1.0.0",
