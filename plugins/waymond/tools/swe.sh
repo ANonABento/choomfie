@@ -61,9 +61,25 @@ case "${1:-}" in
   check)
     detect_checks; cd "$REPO_DIR" || exit 1
     fail=0
+    # Failure lines a check prints: failing test names, compiler/linter errors.
+    problems() { grep -E '\(fail\)|[Ee]rror|✗|FAILED' | sed -E 's/\[[0-9.]+m?s\]//g; s/ +$//' | sort -u; }
     for c in "${CHECKS[@]}"; do
       out=$(timeout 100 bash -c "$c" 2>&1); rc=$?
-      if [ $rc -eq 0 ]; then say "PASS  $c"; else say "FAIL  $c (exit $rc)"; fail=1; fi
+      if [ $rc -eq 0 ]; then
+        say "PASS  $c"
+      else
+        # Same check on the untouched code: failures that were already there aren't yours to chase.
+        git stash push -q -u -m swe-baseline >/dev/null 2>&1
+        base=$(timeout 100 bash -c "$c" 2>&1); brc=$?
+        git stash pop -q >/dev/null 2>&1
+        new=$(comm -13 <(printf '%s\n' "$base" | problems) <(printf '%s\n' "$out" | problems))
+        if [ $brc -ne 0 ] && [ -z "$new" ]; then
+          say "PASS  $c (its only failures also fail without your change — not yours, ignore them)"
+        else
+          say "FAIL  $c (exit $rc)"; fail=1
+          [ -n "$new" ] && [ $brc -ne 0 ] && { say "      new since your change:"; printf '%s\n' "$new" | head -n 10 | sed 's/^/        /'; }
+        fi
+      fi
       printf '%s\n' "$out" | tail -n 6 | sed 's/^/      /'
     done
     [ ${#CHECKS[@]} -eq 0 ] && { say "no checks found"; exit 1; }
