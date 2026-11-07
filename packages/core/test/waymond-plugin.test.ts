@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
   CONVERSATION_PATH_RE,
@@ -15,7 +17,7 @@ import {
   workspaceLinks,
 } from "../../../plugins/waymond/api.ts";
 import { withFiles } from "../../../plugins/waymond/adapter.ts";
-import { stripNarration, WAYMOND_MODES } from "../../../plugins/waymond/modes.ts";
+import { stripNarration, TOOLS_REF, toolUrl, WAYMOND_MODES } from "../../../plugins/waymond/modes.ts";
 import type { Page } from "@choomfie/webbrain";
 import { framePrompt, originalName, toApproval } from "../../../plugins/waymond/index.ts";
 
@@ -288,7 +290,7 @@ describe("modes", () => {
     for (const m of WAYMOND_MODES) {
       expect(m.id).toMatch(/^[a-z0-9]+$/);
       expect(m.frame).toMatch(/Reply with/);
-      expect(m.frame.length).toBeLessThan(1600);
+      expect(m.frame.length).toBeLessThan(2000);
     }
     expect(WAYMOND_MODES.find((m) => m.id === "code")!.frame).toContain("repo: <owner>/<name>");
   });
@@ -299,5 +301,27 @@ describe("modes", () => {
     expect(stripNarration("Nested quotes; retry.```\n 22 pass\n```")).toBe("```\n 22 pass\n```");
     const normal = "I fixed it. Tests pass.\nSee README.md for details.";
     expect(stripNarration(normal)).toBe(normal);
+  });
+});
+
+describe("sandbox tools", () => {
+  const tools = ["swe.sh", "cad_check.py"];
+
+  test("frames fetch tools that exist, pinned to TOOLS_REF", () => {
+    const frames = WAYMOND_MODES.map((m) => m.frame).join("\n");
+    for (const f of tools) {
+      expect(existsSync(join(import.meta.dir, "../../../plugins/waymond/tools", f))).toBe(true);
+      expect(frames).toContain(toolUrl(f));
+    }
+    expect(TOOLS_REF).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  test("TOOLS_REF has the same tools as this checkout (bump it when tools/ changes)", () => {
+    for (const f of tools) {
+      const path = `plugins/waymond/tools/${f}`;
+      const pinned = Bun.spawnSync(["git", "show", `${TOOLS_REF}:${path}`], { cwd: join(import.meta.dir, "../../..") });
+      if (pinned.exitCode !== 0) continue; // shallow clone without that commit: nothing to compare
+      expect(pinned.stdout.toString()).toBe(readFileSync(join(import.meta.dir, "../../..", path), "utf8"));
+    }
   });
 });

@@ -17,27 +17,51 @@
 
 import type { SiteMode } from "@choomfie/webbrain";
 
+/**
+ * The commit Waymond's sandbox fetches tools/ from (raw.githubusercontent.com:
+ * the repo is public). Pinned, so a chat always runs scripts that match these
+ * frames; bump it when tools/ changes.
+ */
+export const TOOLS_REF = "5fd84786822a84958650f917b3ed7cb9fc0c28b4";
+export const toolUrl = (file: string) =>
+  `https://raw.githubusercontent.com/ANonABento/choomfie/${TOOLS_REF}/plugins/waymond/tools/${file}`;
+
+/** First lines of every run_python: fetch a tool, and a shell helper that prints the tail of the output. */
+const fetchTool = (file: string, then = "") => `\`\`\`python
+import subprocess, urllib.request
+urllib.request.urlretrieve("${toolUrl(file)}", "/tmp/${file}")
+def sh(c, t=140):
+    r = subprocess.run(c, shell=True, capture_output=True, text=True, timeout=t); print((r.stdout + r.stderr)[-4000:]); return r.returncode${then ? `\n${then}` : ""}
+\`\`\``;
+
 const SANDBOX =
   "Each run_python is a fresh container killed after ~150 s: nothing installed carries over, so install what you need at the start of every run " +
   "(apt-get install -y -qq …, pip install -q …) and keep each run under 120 s, one focused step per run. Only workspace files persist.";
 
+/*
+ * code and cad were measured against a small benchmark of real tasks (hidden
+ * tests for patches, measured STLs for parts). Both versions got the answers
+ * right; the tool versions were the only ones that ran the full test suite,
+ * type-check and lint every time, and that showed their checks in the reply.
+ */
 export const WAYMOND_MODES: SiteMode[] = [
   {
     id: "code",
     label: "Code",
     description: "Coding agent: edits a GitHub repo in its sandbox, runs the tests, hands back a patch",
-    frame: `[code mode — work it through yourself before replying; never ask questions mid-task, state assumptions at the end. Plain tone.
-${SANDBOX}
-Every run: apt-get install -y -qq git curl unzip; curl -fsSL https://bun.sh/install | bash (or the repo's own toolchain); git clone --depth 1 <repo> /tmp/repo; install deps. Carry edits between runs as workspace patches/wip.patch (git apply at start, git diff > it at end).
-Loop: read the code (grep first) → smallest change in the repo's style → run the narrowest tests, then the repo's own check scripts (package.json scripts like \`bun run type-check\` / \`bun run lint\`, or its Makefile/CI config) — required, not optional → on failure read, fix, rerun (max 6 tries). A reply without real test output is a failure.
-Finish: save git diff as workspace patches/<short-name>.patch. Reply with exactly: one line saying what changed; a line \`repo: <owner>/<name>\`; the last 5 lines of test output in a code block; the patch link; assumptions if any. No commits or PRs unless asked.]`,
+    frame: `[code mode — work it through yourself in run_python before replying; no questions mid-task, state assumptions at the end. Plain tone.
+Each run_python is a fresh container killed after ~150 s; nothing installed persists. Start EVERY run with:
+${fetchTool("swe.sh", 'sh("bash /tmp/swe.sh setup OWNER/REPO")  # add a wip.patch path as 3rd arg to restore earlier edits')}
+setup clones to /tmp/repo, installs deps and lists the repo's own checks. Prefer doing setup + edit + check in one run; if you need more runs, save \`bash /tmp/swe.sh diff /tmp/wip.patch\` to your workspace and pass it to setup next time.
+Loop: grep/read the code → smallest change in the repo's style, plus a test → \`bash /tmp/swe.sh check\` (tests + type-check + lint). Every line must say PASS (a PASS noting failures that also happen without your change is fine — leave those alone); on FAIL read it, fix, rerun (max 6). A reply without a full-PASS check is a failure.
+Finish: \`bash /tmp/swe.sh diff /tmp/out/<short-name>.patch\`, save it to workspace patches/<short-name>.patch. Reply with exactly: one line on what changed; a line \`repo: <owner>/<name>\`; the check output in a code block; the patch link; assumptions. No commits or PRs unless asked.]`,
   },
   {
     id: "plan",
     label: "Plan",
     description: "Planner: reads the code or researches, writes a step-by-step plan, changes nothing",
     frame: `[plan mode — investigate, then plan; change nothing (no commits, PRs, emails or posts). Plain tone, no questions mid-task.
-For a repo: clone it in run_python (${SANDBOX}) and read the real code; cite files and functions. For anything else: research first (web_search), cite sources.
+For a repo: in run_python (a fresh container each run, ~150 s) fetch and run the code-mode setup — urllib.request.urlretrieve("${toolUrl("swe.sh")}", "/tmp/swe.sh"), then bash /tmp/swe.sh setup OWNER/REPO — and read the real code; cite files and functions. For anything else: research first (web_search), cite sources.
 Write the plan to workspace plans/<short-name>.md: Goal · What exists now (with file/function refs) · Approach and why (alternatives briefly rejected) · Steps, each small and checkable · Risks / unknowns · How to verify.
 Reply with: a 3–5 line summary, the decisions I need to make (if any), and the plan link.]`,
   },
@@ -45,12 +69,13 @@ Reply with: a 3–5 line summary, the decisions I need to make (if any), and the
     id: "cad",
     label: "CAD",
     description: "3D-printable parts in OpenSCAD: STL, preview renders, size and filament check",
-    frame: `[cad mode — parametric parts for FDM printing, in mm. Plain tone, no questions mid-task; state what you assumed (especially any bought hardware: screws, bearings, rails).
-${SANDBOX}
-Tools: apt-get install -y -qq --no-install-recommends openscad xvfb xauth; pip install -q trimesh manifold3d (or cadquery when you need STEP or fillets).
-Design rules: simple is better — fewest parts and screws, features integrated into the print; lean on filament, no optional extras. Flat face on the bed at Z=0, overhangs ≤45° or bridged, walls ≥1.2 mm, 0.2–0.3 mm clearance on fits, named parameters at the top of the .scad.
-Check every version: render the STL (openscad -o), preview PNGs from iso + front + top (xvfb-run -a openscad --render -o x.png --imgsize=900,700 --autocenter --viewall --camera=…), trimesh: watertight, bounding box, volume → grams of PLA at 1.24 g/cm³ (solid, upper bound). Fix anything that fails before replying.
-Save to workspace cad/<name>/ (.scad, .stl, PNGs). Reply with: one line on the design, bounding box (mm), estimated grams, printability notes, links to the STL and PNGs, and the .scad.]`,
+    frame: `[cad mode — FDM parts for the user's Bambu P1S, 0.4 mm nozzle, PLA, in mm. Plain tone; no questions mid-task; state assumptions (especially bought hardware) at the end.
+Each run_python is a fresh container killed after ~150 s. Start every run with:
+${fetchTool("cad_check.py")}
+Design: simple is better — fewest parts and screws, features integrated; lean on filament. Named parameters at the top of the .scad. A flat face on the bed at Z=0, overhangs ≤45° (chamfer instead), walls ≥1.2 mm.
+P1S fits: holes print ~0.2 mm small, so model them +0.2 (M3 clearance 3.4); sliding fit 0.2 mm per side; snug push fit over a shaft or tube 0.1–0.15 mm per side; snap fits 0.3.
+Check every version: sh("python /tmp/cad_check.py /tmp/part.scad --expect X,Y,Z --hole D") — expect = the overall size the request implies, one --hole per functional round hole. It builds the STL with iso/front/top PNG renders and prints PASS/WARN/FAIL. Fix every FAIL, then look at the PNGs and confirm the shape is what was asked.
+Save to workspace cad/<name>/ (.scad, .stl, PNGs). Reply with: one line on the design; the check output in a code block; printability notes; links to the STL, PNGs and .scad.]`,
   },
   {
     id: "3d",
