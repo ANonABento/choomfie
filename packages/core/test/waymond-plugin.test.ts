@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   CONVERSATION_PATH_RE,
+  conversationIdFromSend,
   hasWaitingCard,
   answerState,
   lateMessages,
@@ -96,6 +97,9 @@ describe("waymond api parsing", () => {
     const id = "f96c82f8-2298-485d-8e76-3317bba629f2";
     expect(CONVERSATION_PATH_RE.exec(`https://app.ambition.inc/chat/${id}`)?.[1]).toBe(id);
     expect(CONVERSATION_PATH_RE.exec("https://app.ambition.inc/chat?new=1")).toBeNull();
+    expect(conversationIdFromSend(JSON.stringify({ messages: [], conversation_id: id }))).toBe(id);
+    expect(conversationIdFromSend("not json")).toBeNull();
+    expect(conversationIdFromSend(JSON.stringify({ conversation_id: "../x" }))).toBeNull();
   });
 });
 
