@@ -62,7 +62,12 @@ case "${1:-}" in
     detect_checks; cd "$REPO_DIR" || exit 1
     fail=0
     # Failure lines a check prints: failing test names, compiler/linter errors.
-    problems() { grep -E '\(fail\)|[Ee]rror|✗|FAILED' | sed -E 's/\[[0-9.]+m?s\]//g; s/ +$//' | sort -u; }
+    # Only real failure markers (log lines with timestamps would differ every run):
+    # bun/jest "(fail) name", "✗ name", pytest "FAILED path::name", tsc "error TS1234", eslint "12:3  error".
+    problems() {
+      grep -E '^\s*(\(fail\)|✗) |^FAILED |^FAIL |error TS[0-9]+|^\s*[0-9]+:[0-9]+\s+error\s' |
+        sed -E 's/\[[0-9.]+ ?m?s\]//g; s/ +$//' | sort -u
+    }
     for c in "${CHECKS[@]}"; do
       out=$(timeout 100 bash -c "$c" 2>&1); rc=$?
       if [ $rc -eq 0 ]; then
