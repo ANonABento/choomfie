@@ -140,6 +140,7 @@ export {
   type BrainReply,
   type BrainFile,
   type BrainApproval,
+  type BrainMode,
 } from "./brains.ts";
 
 // Chats (location → conversation bindings)

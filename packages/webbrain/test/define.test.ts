@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getBrain, type Brain, type BrainMessage, type PluginContext } from "@choomfie/shared";
 import { ChatStore } from "../../core/lib/chats/store.ts";
-import { answerText, defineWebBrain } from "../define.ts";
+import { answerText, defineWebBrain, modePrompt } from "../define.ts";
 import { LoginRequiredError, type SiteAdapter, type TurnContext, type TurnInput } from "../adapter.ts";
 import { LateWatch } from "../watch.ts";
 import { FakeContext, gate, tick } from "./fakes.ts";
@@ -148,6 +148,37 @@ describe("defineWebBrain", () => {
     } finally {
       await destroy();
     }
+  });
+});
+
+describe("modes", () => {
+  const modes = [{ id: "code", label: "Code", description: "d", frame: "[code mode — test it]" }];
+
+  test("the chat's mode frame rides on every message, and the adapter is told the mode", async () => {
+    const seen: TurnInput[] = [];
+    const { brain, chats, destroy } = await setup(
+      async (input, t) => (seen.push(input), { text: "ok", ref: t.ref ?? "r" }),
+      { modes }
+    );
+    try {
+      expect(brain.modes).toEqual([{ id: "code", label: "Code", description: "d" }]); // no frame leaks out
+      await brain.send(msg("c1", "plain"), {} as never);
+      chats.setMode(chats.bound("c1", "fakesite")!.id, "code");
+      await brain.send(msg("c1", "fix it"), {} as never);
+      await brain.send(msg("c1", "and again"), {} as never);
+      expect(seen.map((i) => [i.text, i.mode])).toEqual([
+        ["plain", undefined],
+        ["[code mode — test it]\n\nfix it", "code"],
+        ["[code mode — test it]\n\nand again", "code"],
+      ]);
+    } finally {
+      await destroy();
+    }
+  });
+
+  test("a mode the adapter no longer has is ignored", () => {
+    expect(modePrompt({ modes }, "gone", "hi")).toEqual({ text: "hi" });
+    expect(modePrompt({}, "code", "hi")).toEqual({ text: "hi" });
   });
 });
 

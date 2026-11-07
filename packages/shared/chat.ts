@@ -27,6 +27,8 @@ export interface ChatRecord {
   cwd: string | null;
   /** Model for this chat (Claude chats only); null = the configured default. */
   model: string | null;
+  /** Working mode for this chat (a web brain's `modes`: code, cad, …); null = plain chat. */
+  mode: string | null;
   /** Location the chat was started in. */
   locationId: string;
   /** SQLite datetimes (`YYYY-MM-DD HH:MM:SS`, UTC). */

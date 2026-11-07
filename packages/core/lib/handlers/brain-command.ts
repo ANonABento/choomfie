@@ -10,7 +10,8 @@
  * channel's brain shows in `/status`. One command per verb, whoever answers.
  *
  * Also handles the buttons a brain's answer can carry: quick replies
- * (`brain:choice:<n>`) and approvals (`brain:approval:yes|no`).
+ * (`brain:choice:<n>`), approvals (`brain:approval:yes|no`) and patches
+ * (`brain:pr`, owner only: opens a draft PR from the patch).
  *
  * Threads inherit their parent channel's brain unless set directly, but each
  * thread is its own backend conversation.
@@ -41,6 +42,7 @@ import {
 import { isAllowed, isOwner } from "../access.ts";
 import { onMessageReceived, onReplySent } from "../typing.ts";
 import { isDaemonMode, requestDaemonControl } from "../daemon-status.ts";
+import { openDraftPr, takePatch } from "../patch-pr.ts";
 import { requireOwner } from "./shared.ts";
 
 function label(id: string): string {
@@ -204,6 +206,7 @@ registerCommand("stop", {
 // that brain: owner, or anyone allowlisted when brainAccess is "allowlist".
 registerButtonHandler("brain", async (interaction, parts, ctx) => {
   if (parts[1] === "approval") return handleApproval(interaction, parts[2] === "yes", ctx);
+  if (parts[1] === "pr") return handlePatchPr(interaction, ctx);
   if (parts[1] !== "choice") return;
   const userId = interaction.user.id;
   const owner = isOwner(ctx, userId);
@@ -262,6 +265,34 @@ registerButtonHandler("brain", async (interaction, parts, ctx) => {
     filePaths: [],
   });
 });
+
+/**
+ * "Open draft PR" under a patch. Owner only: it pushes a branch and opens a PR
+ * as the owner's GitHub account.
+ */
+async function handlePatchPr(
+  interaction: ButtonInteraction,
+  ctx: Parameters<Parameters<typeof registerButtonHandler>[1]>[2]
+): Promise<void> {
+  if (!isOwner(ctx, interaction.user.id)) {
+    await interaction.reply({ content: "Only the owner can open a PR from this~", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const offer = takePatch(interaction.message.id);
+  if (!offer) {
+    await interaction.reply({ content: "This patch expired (Choomfie restarted) — ask for it again.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  await interaction.update({ content: `${interaction.message.content}\n⏳ Opening a draft PR on **${offer.repo}**…`, components: [] });
+  try {
+    const url = await openDraftPr(offer);
+    await interaction.editReply({ content: `📦 Patch for **${offer.repo}** → draft PR: ${url}` });
+  } catch (e) {
+    await interaction.editReply({
+      content: `📦 Patch for **${offer.repo}** — couldn't open a PR: ${(e instanceof Error ? e.message : String(e)).slice(0, 1500)}`,
+    });
+  }
+}
 
 /**
  * Approve/decline a brain's pending action. Owner-only regardless of

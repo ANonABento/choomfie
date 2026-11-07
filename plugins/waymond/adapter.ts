@@ -17,6 +17,7 @@ import {
   type Page,
   type SiteAdapter,
 } from "@choomfie/webbrain";
+import { stripNarration, WAYMOND_MODES } from "./modes.ts";
 import {
   APP_ORIGIN,
   absoluteLinks,
@@ -145,8 +146,9 @@ export const waymondAdapter: SiteAdapter = {
   ...ID,
   loginUrl: `${APP_ORIGIN}/chat`,
   chatUrl,
+  modes: WAYMOND_MODES,
 
-  async turn(page, { text, files }, t) {
+  async turn(page, { text, files, mode }, t) {
     await page.goto(chatUrl(t.ref), { waitUntil: "domcontentloaded" });
     const composer = page.getByPlaceholder(COMPOSER_PLACEHOLDER).first();
     try {
@@ -207,7 +209,7 @@ export const waymondAdapter: SiteAdapter = {
           throw new Error(`Waymond's turn ended without an answer (a tool may have failed on its side) — ${chatUrl(ref)}`);
         }
         if (state.done || t.stopRequested()) {
-          const answer = await withFiles(page, state.reply);
+          const answer = await withFiles(page, mode ? stripNarration(state.reply) : state.reply);
           return {
             ...answer,
             ref,

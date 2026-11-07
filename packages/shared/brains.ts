@@ -54,11 +54,22 @@ export interface BrainApproval {
   declineLabel: string;
 }
 
+/** A working style a brain offers per chat (`/mode`): how it should go about the work. */
+export interface BrainMode {
+  /** `/mode <id>`. Lowercase, no spaces. */
+  id: string;
+  label: string;
+  /** One line for `/mode` and autocomplete. */
+  description: string;
+}
+
 export interface Brain {
   /** Stable id used in config and `/brain <name>`. Lowercase, no spaces. */
   id: string;
   /** Display name, e.g. "Waymond". */
   label: string;
+  /** Modes a chat with this brain can be put in (`/mode`). */
+  modes?: BrainMode[];
   send(message: BrainMessage, ctx: PluginContext): Promise<BrainReply>;
   /** Forget the backend conversation for this key, so the next message starts fresh. */
   reset?(chatKey: string): Promise<void>;

@@ -10,7 +10,7 @@
 
 import type { EngineName } from "./engine/launch.ts";
 import type { Locator, Page } from "patchright";
-import type { BrainApproval, BrainFile } from "@choomfie/shared";
+import type { BrainApproval, BrainFile, BrainMode } from "@choomfie/shared";
 
 export type { Locator, Page };
 
@@ -19,6 +19,17 @@ export interface TurnInput {
   text: string;
   /** Attachments, copied under their original file names. */
   files: string[];
+  /** The chat's mode (`/mode`), already applied to `text`; lets the adapter tidy mode replies. */
+  mode?: string;
+}
+
+/**
+ * A per-chat working style. `frame` is put in front of every message while
+ * the chat is in this mode: the site keeps no instructions of ours, so the
+ * reminder rides along each time.
+ */
+export interface SiteMode extends BrainMode {
+  frame: string;
 }
 
 export interface TurnContext {
@@ -85,6 +96,8 @@ export interface SiteAdapter {
   label: string;
   /** Where `webbrain login <id>` opens. */
   loginUrl: string;
+  /** Modes a chat can be put in with `/mode`. */
+  modes?: SiteMode[];
   /** Default browser engine; config.json `webbrain.<id>.engine` overrides. */
   engine?: EngineName;
   /** Link to a conversation, for messages that point the owner at the site. */

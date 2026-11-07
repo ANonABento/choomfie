@@ -15,6 +15,7 @@ import {
   workspaceLinks,
 } from "../../../plugins/waymond/api.ts";
 import { withFiles } from "../../../plugins/waymond/adapter.ts";
+import { stripNarration, WAYMOND_MODES } from "../../../plugins/waymond/modes.ts";
 import type { Page } from "@choomfie/webbrain";
 import { framePrompt, originalName, toApproval } from "../../../plugins/waymond/index.ts";
 
@@ -277,5 +278,26 @@ describe("workspace files (link shape observed 2026-11-06)", () => {
       ["make.py", [...new TextEncoder().encode("print(1)")]],
     ]);
     expect(out.text).toContain("(https://app.ambition.inc/chat?workspace=");
+  });
+});
+
+describe("modes", () => {
+  test("ids are /mode-safe and unique; every frame says what to hand back", () => {
+    const ids = WAYMOND_MODES.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const m of WAYMOND_MODES) {
+      expect(m.id).toMatch(/^[a-z0-9]+$/);
+      expect(m.frame).toMatch(/Reply with/);
+      expect(m.frame.length).toBeLessThan(1600);
+    }
+    expect(WAYMOND_MODES.find((m) => m.id === "code")!.frame).toContain("repo: <owner>/<name>");
+  });
+
+  test("stripNarration drops notes glued onto the answer, and leaves normal text alone", () => {
+    expect(stripNarration("No git; download tarball.No node/bun present. Let me look.I fixed `x`.\n\nMore."))
+      .toBe("I fixed `x`.\n\nMore.");
+    expect(stripNarration("Nested quotes; retry.```\n 22 pass\n```")).toBe("```\n 22 pass\n```");
+    const normal = "I fixed it. Tests pass.\nSee README.md for details.";
+    expect(stripNarration(normal)).toBe(normal);
   });
 });
