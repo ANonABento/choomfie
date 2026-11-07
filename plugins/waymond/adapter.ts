@@ -20,11 +20,14 @@ import {
 import {
   APP_ORIGIN,
   absoluteLinks,
+  CHAT_SEND_URL,
   CONVERSATION_PATH_RE,
+  conversationIdFromSend,
   answerState,
   chatUrl,
   hasWaitingCard,
   lateMessages,
+  memoryPrivateUrl,
   messagesUrl,
   offerActionUrl,
   openOffers,
@@ -159,11 +162,24 @@ export const waymondAdapter: SiteAdapter = {
     await clearDraftAttachments(page);
     if (files.length) await attach(page, files);
     await t.human.type(composer, text);
+    // A new chat's URL only changes once the whole answer has streamed, so the
+    // conversation id comes from the send request instead.
+    const sent = ref
+      ? null
+      : page.waitForRequest((r) => r.method() === "POST" && r.url().startsWith(CHAT_SEND_URL), { timeout: 30_000 });
     await t.human.submit(() => composer.press("Enter"));
 
     if (!ref) {
-      await page.waitForURL(CONVERSATION_PATH_RE, { timeout: 30_000 });
-      ref = CONVERSATION_PATH_RE.exec(page.url())![1];
+      const id = conversationIdFromSend((await sent!).postData()) ?? CONVERSATION_PATH_RE.exec(page.url())?.[1];
+      if (!id) throw new LayoutChangedError(ID, "couldn't tell which conversation the message started");
+      ref = id;
+      // Chats from Discord stay out of Waymond's memory, so nothing in them
+      // resurfaces elsewhere (a community chat it answers in).
+      await pageFetchOk(page, memoryPrivateUrl(ref), ID, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ private: true }),
+      }).catch((e) => t.notice(`⚠️ Couldn't turn off Waymond's memory for this chat: ${errorMessage(e)}`));
     }
     t.started(ref);
 
@@ -185,6 +201,10 @@ export const waymondAdapter: SiteAdapter = {
             await page.waitForTimeout(SETTLE_POLL_MS);
             continue;
           }
+        }
+        if (state.done && !state.messageIds.length && !t.stopRequested()) {
+          // Turn over, nothing written: Waymond's side failed (a tool call crashed the turn).
+          throw new Error(`Waymond's turn ended without an answer (a tool may have failed on its side) — ${chatUrl(ref)}`);
         }
         if (state.done || t.stopRequested()) {
           const answer = await withFiles(page, state.reply);
