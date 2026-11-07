@@ -26,6 +26,7 @@ import type { BrainAccess } from "./config.ts";
 import type { AppContext } from "./types.ts";
 import { onReplySent } from "./typing.ts";
 import { getBrainRelay } from "./ask-relay.ts";
+import { findPatch, offerPatch } from "./patch-pr.ts";
 
 export type RouteDecision =
   /** Forward to the Claude session as usual. */
@@ -209,6 +210,21 @@ export async function postBrainReply(
     });
     const id = (sent as { id?: unknown } | undefined)?.id;
     if (last && choices.length && typeof id === "string") pendingChoices.set(id, { brainId, chatKey, choices });
+  }
+  // A patch made in the brain's sandbox: the owner can turn it into a draft PR.
+  const patch = findPatch(reply.text, reply.files);
+  if (patch) {
+    const sent = await channel.send({
+      allowedMentions: NO_MENTIONS,
+      content: `📦 Patch for **${patch.repo}** (\`${patch.file.name}\`)`,
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId("brain:pr").setLabel("Open draft PR").setStyle(ButtonStyle.Primary)
+        ),
+      ],
+    });
+    const id = (sent as { id?: unknown } | undefined)?.id;
+    if (typeof id === "string") offerPatch(id, patch);
   }
   // One message per approval, so each card is resolved on its own.
   const label = getBrain(brainId)?.label ?? brainId;

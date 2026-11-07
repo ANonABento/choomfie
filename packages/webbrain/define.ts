@@ -74,6 +74,12 @@ export function answerText(result: Pick<TurnResult, "text" | "stopped" | "backgr
   return result.text || `(${label} finished without a text reply)`;
 }
 
+/** The message as the site sees it: the chat's mode frame (if any), then the framed message. */
+export function modePrompt(adapter: Pick<SiteAdapter, "modes">, mode: string | null, framed: string): { text: string; mode?: string } {
+  const m = mode ? adapter.modes?.find((x) => x.id === mode) : undefined;
+  return m ? { text: `${m.frame.trim()}\n\n${framed}`, mode: m.id } : { text: framed };
+}
+
 /** Headed for debugging: `CHOOMFIE_<ID>_HEADED=1`. */
 const headedFor = (id: string) => process.env[`CHOOMFIE_${id.toUpperCase()}_HEADED`] === "1";
 
@@ -124,6 +130,7 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
     return {
       id: adapter.id,
       label: adapter.label,
+      modes: adapter.modes?.map(({ id, label, description }) => ({ id, label, description })),
 
       // Core has already bound a fresh chat here; only the background watch is ours to drop.
       async reset(chatKey) {
@@ -195,7 +202,7 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
 
         const turn: ActiveTurn = { ref: chat.backendRef ?? undefined, stop: false };
         try {
-          const text = (adapter.framePrompt ?? framePrompt)(message.content, message.meta);
+          const { text, mode } = modePrompt(adapter, chat.mode, (adapter.framePrompt ?? framePrompt)(message.content, message.meta));
           const result = await onTab(message.chatKey, (page) => {
             started = Date.now();
             active.set(message.chatKey, turn);
@@ -211,7 +218,7 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
               human,
               timeoutMs,
             };
-            return adapter.turn(page, { text, files }, tctx);
+            return adapter.turn(page, { text, files, mode }, tctx);
           });
           chats.setBackendRef(chat.id, result.ref);
           lateWatch.delivered(message.chatKey, result.messageIds ?? []);

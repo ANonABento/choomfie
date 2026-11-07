@@ -411,6 +411,7 @@ async function chatHere(interaction: ChatInputCommandInteraction, ctx: AppContex
     const cwd = cwdLabel(ctx, chat.cwd);
     if (cwd) lines.push(`cwd: \`${cwd}\``);
     if (chat.model) lines.push(`Model: **${chat.model}**`);
+    if (chat.mode) lines.push(`Mode: **${chat.mode}**`);
   } else if (brain === CLAUDE_BRAIN && !(await isDaemonMode(ctx.DATA_DIR))) {
     lines.push("Chat: the terminal session");
   } else {

@@ -6,11 +6,12 @@
  * See docs/webbrain.md.
  */
 
-export { defineWebBrain, framePrompt, originalName, answerText, type WebBrainOptions } from "./define.ts";
+export { defineWebBrain, framePrompt, modePrompt, originalName, answerText, type WebBrainOptions } from "./define.ts";
 export {
   LoginRequiredError,
   LayoutChangedError,
   type SiteAdapter,
+  type SiteMode,
   type TurnInput,
   type TurnContext,
   type TurnResult,

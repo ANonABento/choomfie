@@ -5,7 +5,7 @@
 
 import { realpathSync } from "node:fs";
 import { sep } from "node:path";
-import type { ButtonInteraction, ChatInputCommandInteraction } from "discord.js";
+import type { AutocompleteInteraction, ButtonInteraction, ChatInputCommandInteraction } from "discord.js";
 import { chatHomeDir, CLAUDE_BRAIN, type ChatRecord } from "@choomfie/shared";
 import { parentChannelId, resolveBrainId } from "../brain-router.ts";
 import { isDaemonMode } from "../daemon-status.ts";
@@ -14,7 +14,7 @@ import type { AppContext } from "../types.ts";
 export type AnyInteraction = ChatInputCommandInteraction | ButtonInteraction;
 
 /** The brain answering here (thread → parent channel → claude). */
-export function brainAt(interaction: AnyInteraction, ctx: AppContext): string {
+export function brainAt(interaction: AnyInteraction | AutocompleteInteraction, ctx: AppContext): string {
   return resolveBrainId(interaction.channelId!, parentChannelId(interaction.channel), (c) => ctx.config.getChannelBrain(c));
 }
 

@@ -14,6 +14,7 @@ import {
   type RouteInput,
 } from "../lib/brain-router.ts";
 import { ConfigManager } from "../lib/config.ts";
+import { takePatch } from "../lib/patch-pr.ts";
 import { findSetting } from "../lib/settings.ts";
 
 const fake = (id = "waymond", send: Brain["send"] = async (m) => ({ text: `echo ${m.content}` })): Brain => ({
@@ -165,6 +166,25 @@ describe("files", () => {
     await postBrainReply(channel, "waymond", "c1", { text: "", files: [file] });
     expect(sent).toHaveLength(1);
     expect(sent[0].content).toBe("");
+  });
+});
+
+describe("patches", () => {
+  test("a reply with a .patch file and a repo line gets an Open draft PR button", async () => {
+    const sent: { content?: string; components?: unknown[] }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: `p${sent.length}` }) };
+    const file = { name: "fix.patch", data: new TextEncoder().encode("diff --git a/x b/x\n") };
+    await postBrainReply(channel, "waymond", "c1", { text: "Fixed the split.\nrepo: owner/name", files: [file] });
+    expect(sent).toHaveLength(2);
+    expect(sent[1].content).toContain("owner/name");
+    const ids = (sent[1].components![0] as { toJSON(): { components: { custom_id: string }[] } }).toJSON().components;
+    expect(ids.map((c) => c.custom_id)).toEqual(["brain:pr"]);
+    expect(takePatch("p2")).toMatchObject({ repo: "owner/name", title: "Fixed the split." });
+    expect(takePatch("p2")).toBeUndefined(); // one use
+
+    sent.length = 0;
+    await postBrainReply(channel, "waymond", "c1", { text: "no repo line", files: [file] });
+    expect(sent).toHaveLength(1);
   });
 });
 

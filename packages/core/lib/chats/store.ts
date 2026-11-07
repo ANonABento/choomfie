@@ -21,12 +21,13 @@ interface ChatRow {
   title: string;
   cwd: string | null;
   model: string | null;
+  mode: string | null;
   location_id: string;
   created_at: string;
   last_active_at: string;
 }
 
-const COLUMNS = "id, brain, backend_ref, title, cwd, model, location_id, created_at, last_active_at";
+const COLUMNS = "id, brain, backend_ref, title, cwd, model, mode, location_id, created_at, last_active_at";
 
 function toRecord(row: ChatRow): ChatRecord {
   return {
@@ -36,6 +37,7 @@ function toRecord(row: ChatRow): ChatRecord {
     title: row.title,
     cwd: row.cwd,
     model: row.model,
+    mode: row.mode,
     locationId: row.location_id,
     createdAt: row.created_at,
     lastActiveAt: row.last_active_at,
@@ -48,6 +50,7 @@ export interface NewChat {
   title?: string;
   cwd?: string | null;
   model?: string | null;
+  mode?: string | null;
   backendRef?: string | null;
   /** Use this id instead of a fresh one (the daemon names Claude chats itself). */
   id?: string;
@@ -63,6 +66,7 @@ export class ChatStore implements ChatsApi {
         title TEXT NOT NULL,
         cwd TEXT,
         model TEXT,
+        mode TEXT,
         location_id TEXT NOT NULL,
         created_at TEXT NOT NULL,
         last_active_at TEXT NOT NULL
@@ -77,10 +81,9 @@ export class ChatStore implements ChatsApi {
         PRIMARY KEY (location_id, brain)
       );
     `);
-    // Added after the first release: older databases lack it.
-    if (!(db.query("PRAGMA table_info(chats)").all() as { name: string }[]).some((c) => c.name === "model")) {
-      db.exec("ALTER TABLE chats ADD COLUMN model TEXT");
-    }
+    // Added after the first release: older databases lack them.
+    const have = new Set((db.query("PRAGMA table_info(chats)").all() as { name: string }[]).map((c) => c.name));
+    for (const col of ["model", "mode"]) if (!have.has(col)) db.exec(`ALTER TABLE chats ADD COLUMN ${col} TEXT`);
   }
 
   get(chatId: string): ChatRecord | null {
@@ -112,7 +115,7 @@ export class ChatStore implements ChatsApi {
     const now = nowUTC();
     const id = chat.id ?? randomUUID();
     this.db
-      .query(`INSERT INTO chats (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .query(`INSERT INTO chats (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(
         id,
         chat.brain,
@@ -120,6 +123,7 @@ export class ChatStore implements ChatsApi {
         chat.title || UNTITLED_CHAT,
         chat.cwd ?? null,
         chat.model ?? null,
+        chat.mode ?? null,
         chat.locationId,
         now,
         now
@@ -168,6 +172,10 @@ export class ChatStore implements ChatsApi {
 
   setModel(chatId: string, model: string | null): void {
     this.db.query("UPDATE chats SET model = ? WHERE id = ?").run(model, chatId);
+  }
+
+  setMode(chatId: string, mode: string | null): void {
+    this.db.query("UPDATE chats SET mode = ? WHERE id = ?").run(mode, chatId);
   }
 
   touch(chatId: string): void {
