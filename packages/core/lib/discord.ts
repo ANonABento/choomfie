@@ -57,6 +57,14 @@ function generatePairingCode(): string {
   return code;
 }
 
+/**
+ * How long one Discord REST request may take before discord.js aborts and
+ * retries it. Its 15 s default is shorter than uploading ~9 MB of images on a
+ * home uplink, and an aborted upload Discord had already accepted is posted
+ * again by the retry — the same images twice (seen 2026-11-08).
+ */
+export const REST_TIMEOUT_MS = 120_000;
+
 export function createDiscordClient(ctx: AppContext): Client {
   // Merge core intents with plugin intents
   const pluginIntents = ctx.plugins.flatMap((p) => p.intents ?? []);
@@ -73,6 +81,7 @@ export function createDiscordClient(ctx: AppContext): Client {
       Partials.Channel, // Required for DM support
       Partials.Message,
     ],
+    rest: { timeout: REST_TIMEOUT_MS },
   });
 
   discord.once(Events.ClientReady, async (c) => {
@@ -378,7 +387,8 @@ export function createDiscordClient(ctx: AppContext): Client {
 
   // Handle interactions (buttons, slash commands, modals)
   discord.on(Events.InteractionCreate, async (interaction) => {
-    await handleInteraction(interaction, ctx);
+    // An event handler's rejection is unhandled, and that exits the worker.
+    await handleInteraction(interaction, ctx).catch((e) => console.error(`Interaction failed: ${errorMessage(e)}`));
   });
 
   return discord;

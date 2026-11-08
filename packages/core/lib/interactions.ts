@@ -59,13 +59,19 @@ async function safeHandle(
     await fn();
   } catch (e) {
     console.error(`${label}: ${errorMessage(e)}`);
-    if (interaction.deferred && interaction.editReply) {
-      await interaction.editReply({ content: "Something went wrong." });
-    } else if (!interaction.replied) {
-      await interaction.reply({
-        content: "Something went wrong.",
-        flags: MessageFlags.Ephemeral,
-      });
+    // Telling the user can fail too — an interaction Discord already dropped
+    // ("Unknown interaction", 3 s past) — and must not take the worker down with it.
+    try {
+      if (interaction.deferred && interaction.editReply) {
+        await interaction.editReply({ content: "Something went wrong." });
+      } else if (!interaction.replied) {
+        await interaction.reply({
+          content: "Something went wrong.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+    } catch (e2) {
+      console.error(`${label}: couldn't report the error: ${errorMessage(e2)}`);
     }
   }
 }
