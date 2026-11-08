@@ -2,7 +2,7 @@
 # Waymond code mode: one command per step inside its sandbox (a fresh
 # container per run_python, killed after ~150 s, nothing installed persists).
 #
-#   bash swe.sh setup <owner/repo | git url> [patch|dir ...] clone to /tmp/repo (or start empty if the repo doesn't exist yet),
+#   bash swe.sh setup <owner/repo | git url | x.bundle> [patch|dir ...] clone to /tmp/repo (or start empty if the repo doesn't exist yet),
 #                                                         apply earlier patches in order as the base, install deps, list checks
 #   bash swe.sh check                                       run the repo's own tests, type-check and lint; prints a summary, exit 1 on failure
 #   bash swe.sh diff <out.patch>                            save the change (git diff, including new files)
@@ -46,15 +46,23 @@ case "${1:-}" in
     # Earlier-work paths are relative to where setup was run from; setup cd's into the repo below.
     base_args=()
     for arg in "$@"; do [[ "$arg" == /* ]] && base_args+=("$arg") || base_args+=("$PWD/$arg"); done
-    [[ "$src" == http* || "$src" == git@* ]] || src="https://github.com/$src.git"
+    # A git bundle (a plan's branch, attached to the task) clones like a remote.
+    if [ -f "$src" ]; then src="$(cd "$(dirname "$src")" && pwd)/$(basename "$src")"
+    elif [[ "$src" != http* && "$src" != git@* ]]; then src="https://github.com/$src.git"; fi
     apt-get update -qq >/dev/null 2>&1; apt-get install -y -qq git curl unzip >/dev/null 2>&1
     rm -rf "$REPO_DIR"
-    if ! git clone -q --depth 1 "$src" "$REPO_DIR" 2>/dev/null; then
-      if git ls-remote "$src" >/dev/null 2>&1; then say "clone failed: $src"; exit 1; fi
+    depth=(--depth 1); [ -f "$src" ] && depth=()  # a shallow clone of a bundle fetches no branches
+    if ! git clone -q ${depth[@]+"${depth[@]}"} "$src" "$REPO_DIR" 2>/dev/null; then
+      if [ -f "$src" ] || git ls-remote "$src" >/dev/null 2>&1; then say "clone failed: $src"; exit 1; fi
       # Not on GitHub yet: a new project. Start an empty repo; the patch becomes its first commit.
       git init -q -b main "$REPO_DIR"; say "new repo: couldn't clone $src, so starting empty. If that repo exists (private?), stop and say so instead."
     fi
     cd "$REPO_DIR"
+    # A bundle without HEAD clones with nothing checked out: take its first branch.
+    if [ -f "$src" ] && ! git rev-parse -q --verify HEAD >/dev/null; then
+      b=$(git bundle list-heads "$src" | awk '$2 ~ /^refs\/heads\// {sub("refs/heads/", "", $2); print $2; exit}')
+      [ -n "$b" ] && git checkout -q -b "$b" "origin/$b"
+    fi
     git config user.name swe; git config user.email swe@localhost
     git commit -q --allow-empty -m base >/dev/null 2>&1 || true
     # Earlier work, in order: patch files, or folders of them (plan tasks: plans/<name>/patches/).
