@@ -231,6 +231,23 @@ export function hasWaitingCard(raw: unknown, conversationId: string): boolean {
 
 export const CONVERSATION_PATH_RE = /\/chat\/([0-9a-f-]{36})(?:[/?#]|$)/;
 
+/** Waymond's per-chat memory switch (the eye-slash button): `PUT {private: true}`. */
+export const memoryPrivateUrl = (conversationId: string) =>
+  `${API_ORIGIN}/api/conversations/${encodeURIComponent(conversationId)}/memory-private`;
+
+/** The app's send request; its body names the conversation before any answer streams. */
+export const CHAT_SEND_URL = `${API_ORIGIN}/api/waymond/chat`;
+
+/** `conversation_id` from a `POST /api/waymond/chat` body, or null. */
+export function conversationIdFromSend(body: string | null | undefined): string | null {
+  try {
+    const id = (JSON.parse(body ?? "") as { conversation_id?: unknown }).conversation_id;
+    return typeof id === "string" && /^[0-9a-f-]{36}$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Files Waymond made in its workspace (images, PDFs, scripts) are linked as
  * `[label](/chat?workspace=<path>&owner=<id>)` — a path inside its own app,
