@@ -47,11 +47,23 @@ export type WorkerMessage =
 
 // --- Supervisor → Worker ---
 
+/**
+ * Who made a tool call, as far as the process that received it can tell. Tools
+ * that act with the owner's authority check it (`callerIsOwner`) instead of
+ * trusting the prompt.
+ * - `session`: a daemon chat session; its endpoint token is bound to `location`.
+ * - `remote`: the remote MCP endpoint (a cloud agent holding the owner's token).
+ * - `local`: the supervisor's one stdio session, which serves every chat.
+ */
+export type ToolCaller = { via: "session"; location: string } | { via: "remote" } | { via: "local" };
+
 export interface IpcToolCall {
   type: "tool_call";
   id: string;
   name: string;
   args: Record<string, unknown>;
+  /** Absent from an older host: treated as `local`. */
+  caller?: ToolCaller;
 }
 
 export interface IpcPermissionRequest {

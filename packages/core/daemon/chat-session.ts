@@ -12,7 +12,7 @@ import { getErrorMessage } from "./error.ts";
 import { createInitialState } from "./lifecycle.ts";
 import { createMessageGenerator } from "./message-generator.ts";
 import { captureHandoffSummary, handleSessionMessage, hardCeiling, isIdleForCycle, shouldCycle } from "./runtime.ts";
-import { createSession, isUnrecoverableAnthropicError } from "./session-core.ts";
+import { createSession, isUnrecoverableAnthropicError, type ToolEndpoint } from "./session-core.ts";
 import type { DaemonSettings, MetaState } from "./types.ts";
 import type { LiveSession, PoolChat } from "./pool.ts";
 
@@ -23,7 +23,7 @@ export interface ChatSessionDeps {
   location: string;
   chat: PoolChat;
   settings: DaemonSettings;
-  mcp: { url: string; token: string };
+  mcp: ToolEndpoint;
   /** Summary a chat's latest session started with (system prompt, not in the transcript). */
   seed(chatId: string): string | undefined;
   /** The chat compacted: its next session starts from `summary`. */

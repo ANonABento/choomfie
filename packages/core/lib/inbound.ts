@@ -13,6 +13,7 @@ import {
   isDaemonOwnedProcess,
   type McpTransport,
 } from "@choomfie/shared";
+import { recordTurn } from "./caller.ts";
 import { deliverInboundMessage } from "./daemon-status.ts";
 import type { AppContext } from "./types.ts";
 
@@ -93,6 +94,7 @@ export async function forwardToClaude(
   /** Thread, channel, DM or group DM — differs from `chat_id` for an `ask:` relay. */
   location: string = meta.chat_id
 ): Promise<void> {
+  recordTurn(meta, location);
   if (isDaemonOwnedProcess()) {
     // The daemon opens whichever chat is bound at the location, so bind one
     // (titled from this message) before the message reaches it.

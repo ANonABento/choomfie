@@ -120,7 +120,7 @@ function createMcp(): Server {
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: host.listTools() }));
   server.setRequestHandler(CallToolRequestSchema, async (req) =>
-    host.callTool(req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>)
+    host.callTool(req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>, { via: "local" })
   );
 
   // Forward permission requests from MCP to worker
@@ -165,7 +165,7 @@ console.error("Supervisor: MCP connected");
 // Optional remote MCP endpoint (off by default).
 const remoteMcpServer = startConfiguredRemoteMcp(
   DATA_DIR,
-  { name: "choomfie", version: VERSION, listTools: () => host.listTools(), callTool: (name, args) => host.callTool(name, args) },
+  { name: "choomfie", version: VERSION, listTools: () => host.listTools(), callTool: (name, args, caller) => host.callTool(name, args, caller) },
   (m) => console.error(`Supervisor: ${m}`)
 );
 

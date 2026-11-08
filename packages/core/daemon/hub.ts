@@ -24,6 +24,7 @@ import {
 import { ChatStore } from "../lib/chats/store.ts";
 import { startConfiguredRemoteMcp, startLocalMcp } from "../lib/remote-mcp.ts";
 import { VERSION } from "../lib/version.ts";
+import type { ToolCaller } from "../lib/ipc-types.ts";
 import { WorkerHost } from "../lib/worker-host.ts";
 import {
   CHAT_HOME,
@@ -91,7 +92,7 @@ export async function runDaemon(settings: DaemonSettings): Promise<void> {
     name: "choomfie",
     version: VERSION,
     listTools: () => host.listTools(),
-    callTool: (name: string, args: Record<string, unknown>) => host.callTool(name, args),
+    callTool: (name: string, args: Record<string, unknown>, caller: ToolCaller) => host.callTool(name, args, caller),
   };
   const endpoint = startLocalMcp({ ...tools, instructions: () => host.instructions });
   log(`Tool endpoint on ${endpoint.url}`);
@@ -125,7 +126,7 @@ export async function runDaemon(settings: DaemonSettings): Promise<void> {
         location,
         chat,
         settings,
-        mcp: { url: endpoint.url, token: endpoint.token },
+        mcp: { url: endpoint.url, headers: endpoint.headersFor(location) },
         seed: (id) => seeds[id],
         onCompacted: (id, summary) => {
           seeds = withSeed(seeds, id, summary);

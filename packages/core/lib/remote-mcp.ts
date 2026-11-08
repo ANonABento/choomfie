@@ -24,8 +24,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import type { IpcToolDef } from "./ipc-types.ts";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import type { IpcToolDef, ToolCaller } from "./ipc-types.ts";
 
 export const DEFAULT_REMOTE_TOOLS = [
   "choomfie_status",
@@ -95,18 +95,26 @@ function tokenMatches(header: string | null, token: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+/** Header a daemon session sends with its location; its token is bound to it. */
+export const LOCATION_HEADER = "x-choomfie-location";
+
+/** A session's token: the daemon's secret bound to the session's location, so one chat can't call as another. */
+export function sessionToken(secret: string, location: string): string {
+  return createHmac("sha256", secret).update(location).digest("base64url");
+}
+
 export interface RemoteMcpDeps {
   name: string;
   version: string;
   /** Current tool list (supervisor + worker), re-read on every request. */
   listTools: () => IpcToolDef[];
-  callTool: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+  callTool: (name: string, args: Record<string, unknown>, caller: ToolCaller) => Promise<unknown>;
 }
 
 const REMOTE_INSTRUCTIONS = "Choomfie remote tools: read the owner's Choomfie memories, reminders and bot status.";
 
 /** `allowed` null = every tool (the daemon hub's own sessions). */
-function buildServer(allowed: Set<string> | null, instructions: string, deps: RemoteMcpDeps): Server {
+function buildServer(allowed: Set<string> | null, instructions: string, deps: RemoteMcpDeps, caller: ToolCaller): Server {
   const server = new Server(
     { name: deps.name, version: deps.version },
     { capabilities: { tools: {} }, instructions }
@@ -125,7 +133,8 @@ function buildServer(allowed: Set<string> | null, instructions: string, deps: Re
     try {
       return (await deps.callTool(
         name,
-        (req.params.arguments ?? {}) as Record<string, unknown>
+        (req.params.arguments ?? {}) as Record<string, unknown>,
+        caller
       )) as { content: unknown[] };
     } catch (e) {
       return {
@@ -143,13 +152,20 @@ export function handleRemoteMcpRequest(
   token: string,
   deps: RemoteMcpDeps
 ): Promise<Response> {
-  return handleMcpRequest(req, token, () => buildServer(new Set(cfg.tools), REMOTE_INSTRUCTIONS, deps));
+  const auth = (r: Request): ToolCaller | null => (tokenMatches(r.headers.get("authorization"), token) ? { via: "remote" } : null);
+  return handleMcpRequest(req, auth, (caller) => buildServer(new Set(cfg.tools), REMOTE_INSTRUCTIONS, deps, caller));
 }
 
-async function handleMcpRequest(req: Request, token: string, build: () => Server): Promise<Response> {
+/** `auth` returns who is calling, or null to refuse the request. */
+async function handleMcpRequest(
+  req: Request,
+  auth: (req: Request) => ToolCaller | null,
+  build: (caller: ToolCaller) => Server
+): Promise<Response> {
   const url = new URL(req.url);
   if (url.pathname !== "/mcp") return new Response("Not found", { status: 404 });
-  if (!tokenMatches(req.headers.get("authorization"), token)) {
+  const caller = auth(req);
+  if (!caller) {
     return new Response("Unauthorized", {
       status: 401,
       headers: { "WWW-Authenticate": "Bearer" },
@@ -159,7 +175,7 @@ async function handleMcpRequest(req: Request, token: string, build: () => Server
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405, headers: { Allow: "POST" } });
   }
-  const server = build();
+  const server = build(caller);
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
@@ -208,18 +224,41 @@ export function startConfiguredRemoteMcp(
 
 /**
  * The daemon's endpoint for its own sessions: loopback, an ephemeral port,
- * a token that lives only in the daemon's memory, every tool, and the worker's
- * instructions (persona, security rules) as the server instructions.
+ * every tool, and the worker's instructions (persona, security rules) as the
+ * server instructions.
+ *
+ * Each session gets its own headers (`headersFor(location)`): its location,
+ * and a token that is the daemon's in-memory secret bound to that location. A call is then known to come from that chat (`ToolCaller`
+ * `session`), which owner-only tools check.
  */
 export function startLocalMcp(
   deps: RemoteMcpDeps & { instructions: () => string }
-): { url: string; token: string; stop: () => void } {
-  const token = randomBytes(32).toString("base64url");
+): { url: string; headersFor: (location: string) => Record<string, string>; stop: () => void } {
+  const secret = randomBytes(32).toString("base64url");
+  const auth = (req: Request): ToolCaller | null => {
+    const location = req.headers.get(LOCATION_HEADER);
+    return location && tokenMatches(req.headers.get("authorization"), sessionToken(secret, location))
+      ? { via: "session", location }
+      : null;
+  };
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch: (req) =>
-      handleMcpRequest(req, token, () => buildServer(null, deps.instructions() || "Choomfie is starting up...", deps)),
+    fetch: (req, server) => {
+      // Responses are JSON, sent when the tool finishes: a long tool (ask_brain)
+      // is silent for minutes, and Bun would close it after 10 s idle.
+      server.timeout(req, 0);
+      return handleMcpRequest(req, auth, (caller) =>
+        buildServer(null, deps.instructions() || "Choomfie is starting up...", deps, caller)
+      );
+    },
   });
-  return { url: `http://127.0.0.1:${server.port}/mcp`, token, stop: () => server.stop(true) };
+  return {
+    url: `http://127.0.0.1:${server.port}/mcp`,
+    headersFor: (location) => ({
+      Authorization: `Bearer ${sessionToken(secret, location)}`,
+      [LOCATION_HEADER]: location,
+    }),
+    stop: () => server.stop(true),
+  };
 }

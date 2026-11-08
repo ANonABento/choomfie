@@ -94,7 +94,7 @@ function setup(
     location: "t1",
     chat: { id: "chat1", backendRef: opts.backendRef ?? null, cwd: opts.cwd === undefined ? "/tmp" : opts.cwd, model: opts.model ?? null, title: "arm" },
     settings: { tokenThreshold: 120_000, turnThreshold: 2, maxSessions: 3, model: "opus" },
-    mcp: { url: "http://127.0.0.1:1/mcp", token: "t" },
+    mcp: { url: "http://127.0.0.1:1/mcp", headers: { Authorization: "Bearer t" } },
     seed: () => opts.seed,
     onCompacted: (_id, summary) => events.compacted.push(summary),
     onSessionId: (_id, sid, cwd) => {
@@ -154,7 +154,7 @@ describe("ChatSession", () => {
   test("a chat with a session resumes it, with the summary it started from", () => {
     const { session, queries } = setup({ backendRef: "sdk-1", seed: "earlier summary" });
     session.start();
-    expect(queries[0].placement).toMatchObject({ resume: "sdk-1", cwd: "/tmp", mcp: { token: "t" } });
+    expect(queries[0].placement).toMatchObject({ resume: "sdk-1", cwd: "/tmp", mcp: { headers: { Authorization: "Bearer t" } } });
     expect(queries[0].summary).toBe("earlier summary");
     void session.close();
   });

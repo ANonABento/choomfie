@@ -182,8 +182,8 @@ describe("inbound routing", () => {
 });
 
 describe("startLocalMcp", () => {
-  test("serves every tool and the worker's instructions, behind its token", async () => {
-    const calls: string[] = [];
+  test("serves every tool and the worker's instructions, to a session holding its location's token", async () => {
+    const calls: [string, unknown][] = [];
     const ep = startLocalMcp({
       name: "choomfie",
       version: "test",
@@ -192,20 +192,24 @@ describe("startLocalMcp", () => {
         { name: "reply", description: "r", inputSchema: { type: "object", properties: {} } },
         { name: "save_memory", description: "m", inputSchema: { type: "object", properties: {} } },
       ],
-      callTool: async (name) => (calls.push(name), { content: [{ type: "text", text: "ok" }] }),
+      callTool: async (name, _args, caller) => (calls.push([name, caller]), { content: [{ type: "text", text: "ok" }] }),
     });
-    const rpc = (body: object, token = ep.token) =>
+    const own = ep.headersFor("chan-1");
+    const rpc = (body: object, location = "chan-1", authorization = own.Authorization) =>
       fetch(ep.url, {
         method: "POST",
         headers: {
           "content-type": "application/json",
           accept: "application/json, text/event-stream",
-          authorization: `Bearer ${token}`,
+          authorization,
+          "x-choomfie-location": location,
         },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, ...body }),
       });
     try {
-      expect((await rpc({ method: "tools/list" }, "wrong")).status).toBe(401);
+      expect((await rpc({ method: "tools/list" }, "chan-1", "Bearer wrong")).status).toBe(401);
+      // one chat's token can't speak for another
+      expect((await rpc({ method: "tools/list" }, "chan-2")).status).toBe(401);
       const init = await (
         await rpc({
           method: "initialize",
@@ -217,7 +221,7 @@ describe("startLocalMcp", () => {
       expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(["reply", "save_memory"]);
       const call = await (await rpc({ method: "tools/call", params: { name: "reply", arguments: {} } })).json();
       expect(call.result.content[0].text).toBe("ok");
-      expect(calls).toEqual(["reply"]);
+      expect(calls).toEqual([["reply", { via: "session", location: "chan-1" }]]);
     } finally {
       ep.stop();
     }

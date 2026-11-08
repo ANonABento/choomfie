@@ -95,13 +95,16 @@ export function isUnrecoverableAnthropicError(error: unknown): boolean {
   );
 }
 
+/** The daemon's tool endpoint as one session sees it: the URL and the headers that identify this session. */
+export type ToolEndpoint = { url: string; headers: Record<string, string> };
+
 /** Where the session runs, what it continues, and where its tools are. */
 export type SessionPlacement = {
   cwd: string;
   /** SDK session id to load (Claude Code's `--resume`). Must have been created in `cwd`. */
   resume?: string;
   /** The daemon's loopback endpoint serving every Choomfie tool. */
-  mcp: { url: string; token: string };
+  mcp: ToolEndpoint;
 };
 
 export function createSession(
@@ -131,7 +134,7 @@ export function createSession(
         choomfie: {
           type: "http",
           url: placement.mcp.url,
-          headers: { Authorization: `Bearer ${placement.mcp.token}` },
+          headers: placement.mcp.headers,
         },
       },
       systemPrompt: {

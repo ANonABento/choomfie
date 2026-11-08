@@ -135,6 +135,7 @@ export {
   listBrainIds,
   setBrainPoster,
   pushBrainReply,
+  awaitLateReply,
   type Brain,
   type BrainMessage,
   type BrainReply,
