@@ -2,6 +2,8 @@
  * Shared GitHub CLI helper — used by both MCP tool and slash command.
  */
 
+import { which } from "../which.ts";
+
 const GH_TIMEOUT_MS = 15_000;
 
 /** Build gh CLI args from a command + optional repo */
@@ -27,7 +29,7 @@ export function buildGhArgs(
 
 /** Run gh CLI and return stdout/stderr output */
 export async function runGh(args: string[]): Promise<string> {
-  const proc = Bun.spawn(["gh", ...args], {
+  const proc = Bun.spawn([which("gh"), ...args], {
     stdout: "pipe",
     stderr: "pipe",
     env: process.env,

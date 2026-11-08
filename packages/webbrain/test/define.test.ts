@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getBrain, type Brain, type BrainMessage, type PluginContext } from "@choomfie/shared";
 import { ChatStore } from "../../core/lib/chats/store.ts";
-import { answerText, defineWebBrain } from "../define.ts";
+import { answerText, defineWebBrain, modePrompt } from "../define.ts";
 import { LoginRequiredError, type SiteAdapter, type TurnContext, type TurnInput } from "../adapter.ts";
 import { LateWatch } from "../watch.ts";
 import { FakeContext, gate, tick } from "./fakes.ts";
@@ -102,6 +102,7 @@ describe("defineWebBrain", () => {
       await started.promise;
       expect(await brain.stop!("chan1")).toBe(true);
       expect((await reply).text).toContain("⏹️ Stopped.");
+      expect((await reply).stopped).toBe(true);
       expect(stops).toEqual(["conv-s"]);
       expect(await brain.stop!("chan1")).toBe(false);
     } finally {
@@ -139,6 +140,82 @@ describe("defineWebBrain", () => {
     }
   });
 
+  test("an answer the site cut short carries on in the same conversation, keeping every part's files", async () => {
+    const seen: { text: string; ref?: string }[] = [];
+    const { brain, destroy } = await setup(
+      async (input, t) => {
+        seen.push({ text: input.text, ref: t.ref });
+        if (seen.length === 1) return { text: "half done (cut)", ref: "conv-9", files: [{ name: "a.png", data: Buffer.from("a") }] };
+        if (seen.length === 2) return { text: "more (cut)", ref: "conv-9" };
+        return { text: "all done", ref: "conv-9", files: [{ name: "b.patch", data: Buffer.from("b") }] };
+      },
+      { continueAfter: (a) => (a.endsWith("(cut)") ? "continue" : null) }
+    );
+    try {
+      const r = await brain.send(msg("c", "build it"), {} as never);
+      expect(r.text).toBe("all done");
+      expect(r.files?.map((f) => f.name)).toEqual(["a.png", "b.patch"]);
+      expect(seen.map((s) => s.text)).toEqual(["build it", "continue", "continue"]);
+      expect(seen.map((s) => s.ref)).toEqual([undefined, "conv-9", "conv-9"]);
+    } finally {
+      await destroy();
+    }
+  });
+
+  test("it carries on a few times at most", async () => {
+    let n = 0;
+    const { brain, destroy } = await setup(
+      async () => ({ text: `cut ${++n}`, ref: "r" }),
+      { continueAfter: () => "continue" }
+    );
+    try {
+      expect((await brain.send(msg("d"), {} as never)).text).toBe("cut 4");
+    } finally {
+      await destroy();
+    }
+  });
+
+  test("a turn left running in the background isn't continued, and says so", async () => {
+    let n = 0;
+    const { brain, destroy } = await setup(
+      async () => (n++, { text: "still going", ref: "r", background: true, lastMessageId: "m1" }),
+      { continueAfter: () => "continue" }
+    );
+    try {
+      const r = await brain.send(msg("bg"), {} as never);
+      expect(r.background).toBe(true);
+      expect(n).toBe(1);
+    } finally {
+      await destroy();
+    }
+  });
+
+  test("a work mode's turn gets the longer wait, and continueAfter is told the mode", async () => {
+    const waits: number[] = [];
+    const modesSeen: (string | undefined)[] = [];
+    const { brain, chats, destroy } = await setup(
+      async (_i, t) => (waits.push(t.timeoutMs), { text: "ok", ref: "r" }),
+      {
+        modes: [
+          { id: "code", label: "Code", description: "d", frame: "[code]", repo: true },
+          { id: "ask", label: "Ask", description: "d", frame: "[ask]" },
+        ],
+        continueAfter: (_a, mode) => (modesSeen.push(mode), null),
+      }
+    );
+    try {
+      await brain.send(msg("w"), {} as never);
+      chats.setMode(chats.bound("w", "fakesite")!.id, "code");
+      await brain.send(msg("w"), {} as never);
+      chats.setMode(chats.bound("w", "fakesite")!.id, "ask");
+      await brain.send(msg("w"), {} as never);
+      expect(waits).toEqual([15 * 60_000, 45 * 60_000, 15 * 60_000]);
+      expect(modesSeen).toEqual([undefined, "code", "ask"]);
+    } finally {
+      await destroy();
+    }
+  });
+
   test("a logged-out site says how to log in", async () => {
     const { brain, destroy } = await setup(async () => {
       throw new LoginRequiredError({ id: "fakesite", label: "FakeSite" });
@@ -148,6 +225,55 @@ describe("defineWebBrain", () => {
     } finally {
       await destroy();
     }
+  });
+});
+
+describe("modes", () => {
+  const modes = [{ id: "code", label: "Code", description: "d", frame: "[code mode — test it]" }];
+
+  test("the chat's mode frame rides on every message, and the adapter is told the mode", async () => {
+    const seen: TurnInput[] = [];
+    const { brain, chats, destroy } = await setup(
+      async (input, t) => (seen.push(input), { text: "ok", ref: t.ref ?? "r" }),
+      { modes }
+    );
+    try {
+      expect(brain.modes).toEqual([{ id: "code", label: "Code", description: "d" }]); // no frame leaks out
+      await brain.send(msg("c1", "plain"), {} as never);
+      chats.setMode(chats.bound("c1", "fakesite")!.id, "code");
+      await brain.send(msg("c1", "fix it"), {} as never);
+      await brain.send(msg("c1", "and again"), {} as never);
+      expect(seen.map((i) => [i.text, i.mode])).toEqual([
+        ["plain", undefined],
+        ["[code mode — test it]\n\nfix it", "code"],
+        ["[code mode — test it]\n\nand again", "code"],
+      ]);
+    } finally {
+      await destroy();
+    }
+  });
+
+  test("a tasks mode's reply carries its task list and the adapter's task context", async () => {
+    const { brain, chats, destroy } = await setup(
+      async (_i, t) => ({ text: "Plan.\nTasks\n1. [code] Fix it — in repo x. Done when: tests pass", ref: t.ref ?? "r" }),
+      { modes: [...modes, { id: "plan", label: "Plan", description: "d", frame: "[plan]", tasks: true }], taskContext: () => "ctx" }
+    );
+    try {
+      await brain.send(msg("c1", "hi"), {} as never);
+      chats.setMode(chats.bound("c1", "fakesite")!.id, "plan");
+      const reply = await brain.send(msg("c1", "plan it"), {} as never);
+      expect(reply.tasks).toEqual([{ n: 1, mode: "code", title: "Fix it", spec: "Fix it — in repo x. Done when: tests pass" }]);
+      expect(reply.taskContext).toBe("ctx");
+      chats.setMode(chats.bound("c1", "fakesite")!.id, "code");
+      expect((await brain.send(msg("c1", "again"), {} as never)).tasks).toBeUndefined();
+    } finally {
+      await destroy();
+    }
+  });
+
+  test("a mode the adapter no longer has is ignored", () => {
+    expect(modePrompt({ modes }, "gone", "hi")).toEqual({ text: "hi" });
+    expect(modePrompt({}, "code", "hi")).toEqual({ text: "hi" });
   });
 });
 

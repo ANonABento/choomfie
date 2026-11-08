@@ -21,7 +21,7 @@
  */
 
 import { AUTOCOMPLETE_LIMIT } from "@choomfie/shared";
-import type { ConfigManager } from "./config.ts";
+import { DEFAULT_EFFORT, EFFORT_LEVELS, type ConfigManager } from "./config.ts";
 
 /** When a change takes effect. */
 export type SettingScope =
@@ -262,6 +262,22 @@ export const SETTINGS: Setting[] = [
     read: (config) => config.getFallbackModel(),
     write: (config, model) => config.setFallbackModel(model),
   }),
+  {
+    key: "effort",
+    description: "How hard Claude thinks before answering, in every mode — lower uses fewer tokens",
+    example: EFFORT_LEVELS.join(", "),
+    suggestions: [...EFFORT_LEVELS],
+    scope: "next start",
+    read: (config) => config.getEffort(),
+    write: (config, raw) => {
+      const value = isReset(raw) ? DEFAULT_EFFORT : raw.trim().toLowerCase();
+      if (!(EFFORT_LEVELS as readonly string[]).includes(value)) {
+        return { ok: false, error: `Must be one of ${EFFORT_LEVELS.join(", ")}.` };
+      }
+      config.setEffort(value);
+      return { ok: true, value };
+    },
+  },
   {
     key: "brainAccess",
     description: "Who a non-Claude brain (/brain) answers: owner, or everyone allowlisted",

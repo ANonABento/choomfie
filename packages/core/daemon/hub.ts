@@ -142,6 +142,10 @@ export async function runDaemon(settings: DaemonSettings): Promise<void> {
           }
           void writeState();
         },
+        postReply: async (chatId, text) => {
+          const res = await host.callTool("reply", { chat_id: chatId, text });
+          if (res.isError) throw new Error(JSON.stringify(res.content).slice(0, 300));
+        },
         onUsage: (tokens) => {
           if (usageToday.date !== todayKey()) usageToday = { date: todayKey(), inputTokens: 0 };
           usageToday.inputTokens += tokens;
@@ -184,7 +188,10 @@ export async function runDaemon(settings: DaemonSettings): Promise<void> {
           log("Inbound message without a location — dropped");
           continue;
         }
-        if (await pool.deliver(location, formatChannelPrompt(m.content, m.meta))) void writeState();
+        // A plain final answer is posted back to where the message came from —
+        // except in conversation mode, where staying quiet is a valid answer.
+        const replyTo = m.meta.conversation_mode === "true" ? null : (m.meta.chat_id ?? null);
+        if (await pool.deliver(location, formatChannelPrompt(m.content, m.meta), replyTo)) void writeState();
       }
     } catch (e: unknown) {
       log(`Incoming sweep failed: ${getErrorMessage(e)}`);

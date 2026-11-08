@@ -139,8 +139,21 @@ describe("per-chat model", () => {
       cwd TEXT, location_id TEXT NOT NULL, created_at TEXT NOT NULL, last_active_at TEXT NOT NULL)`);
     db.exec(`INSERT INTO chats VALUES ('c1', 'claude', 's1', 'old', NULL, 't1', '2026-01-01 00:00:00', '2026-01-01 00:00:00')`);
     const chats = new ChatStore(db);
-    expect(chats.get("c1")).toMatchObject({ title: "old", backendRef: "s1", model: null });
+    expect(chats.get("c1")).toMatchObject({ title: "old", backendRef: "s1", model: null, mode: null });
     new ChatStore(db); // idempotent
+  });
+});
+
+describe("per-chat mode", () => {
+  test("stored on the chat, survives current(), cleared with null; a new chat starts without one", () => {
+    const chats = store();
+    const c = chats.current("t1", "waymond", "hi");
+    expect(c.mode).toBeNull();
+    chats.setMode(c.id, "code");
+    expect(chats.current("t1", "waymond", "next").mode).toBe("code");
+    expect(chats.start("t1", "waymond").mode).toBeNull();
+    chats.setMode(c.id, null);
+    expect(chats.get(c.id)!.mode).toBeNull();
   });
 });
 

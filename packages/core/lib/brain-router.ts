@@ -15,17 +15,25 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from "disc
 import {
   CLAUDE_BRAIN,
   errorMessage,
+  fileBatches,
   getBrain,
   setBrainPoster,
   type Brain,
   type BrainApproval,
   type BrainMessage,
   type BrainReply,
+  type BrainFile,
+  type BrainTask,
+  writeJsonAtomicSync,
 } from "@choomfie/shared";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { BrainAccess } from "./config.ts";
 import type { AppContext } from "./types.ts";
 import { onReplySent } from "./typing.ts";
 import { getBrainRelay } from "./ask-relay.ts";
+import { findPatch, offerPatch } from "./patch-pr.ts";
+import { pickPatch, pruneClones, type PlanBranch } from "./plan-branch.ts";
 
 export type RouteDecision =
   /** Forward to the Claude session as usual. */
@@ -149,8 +157,11 @@ export function approvalMessage(brainLabel: string, approval: BrainApproval) {
   };
 }
 
-/** Discord: 5 buttons per row, 5 rows, 80-char labels, 100-char custom ids. */
-const MAX_CHOICES = 25;
+/**
+ * Discord: 5 buttons per row, 5 rows, 80-char labels, 100-char custom ids.
+ * 24, not 25, so 💬 Reply always has a slot beside them.
+ */
+const MAX_CHOICES = 24;
 
 export interface PendingChoices {
   brainId: string;
@@ -167,9 +178,10 @@ export function takeChoices(messageId: string): PendingChoices | undefined {
   return p;
 }
 
-export function choiceRows(choices: string[]) {
+export function choiceRows(all: string[]) {
+  const choices = all.slice(0, MAX_CHOICES);
   const rows = [];
-  for (let r = 0; r * 5 < Math.min(choices.length, MAX_CHOICES); r++) {
+  for (let r = 0; r * 5 < choices.length; r++) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         choices.slice(r * 5, r * 5 + 5).map((label, i) =>
@@ -184,31 +196,306 @@ export function choiceRows(choices: string[]) {
   return rows;
 }
 
+export type TaskState = { kind: "idle" } | { kind: "running" | "done" | "failed"; url: string };
+
+export interface TaskBoard {
+  brainId: string;
+  tasks: BrainTask[];
+  context?: string;
+  states: TaskState[];
+  createdAt: number;
+  /** The channel the board message is in (to redraw it from a task's thread). */
+  channelId?: string;
+  /** Repo → the plan's branch on it, opened by its first repo task. */
+  plans?: Record<string, PlanBranch>;
+  /** Task thread id → task index. */
+  threads?: Record<string, number>;
+  /** Not saved: "Run all" is working through the list. */
+  busy?: boolean;
+  /** Not saved: branches being opened right now. */
+  opening?: Map<string, Promise<PlanBranch>>;
+}
+
+/**
+ * Task-board message id → its plan's tasks and how each is going. Saved to
+ * `meta/task-boards.json`, so a restart doesn't strand a plan halfway: its
+ * buttons keep working, and a task the restart cut off shows as failed
+ * (retry it).
+ */
+const taskBoards = new Map<string, TaskBoard>();
+let boardsFile: string | null = null;
+const BOARD_TTL_MS = 30 * 24 * 3600_000;
+
+export function getTaskBoard(messageId: string): TaskBoard | undefined {
+  return taskBoards.get(messageId);
+}
+
+/** The plan task a thread is running, if it's a task thread. */
+export function taskForThread(threadId: string): { boardId: string; board: TaskBoard; index: number } | undefined {
+  for (const [boardId, board] of taskBoards) {
+    const index = board.threads?.[threadId];
+    if (index !== undefined) return { boardId, board, index };
+  }
+  return undefined;
+}
+
+export function saveTaskBoards(): void {
+  if (!boardsFile) return;
+  const out: Record<string, Omit<TaskBoard, "busy" | "opening">> = {};
+  for (const [id, { busy: _b, opening: _o, ...rest }] of taskBoards) out[id] = rest;
+  try {
+    writeJsonAtomicSync(boardsFile, out);
+  } catch (e) {
+    console.error(`[tasks] couldn't save task boards: ${errorMessage(e)}`);
+  }
+}
+
+/** Load saved boards (once, at startup). Tasks a restart cut off become failed; old boards are dropped. */
+export function loadTaskBoards(dataDir: string, now = Date.now()): void {
+  boardsFile = join(dataDir, "meta", "task-boards.json");
+  taskBoards.clear();
+  try {
+    const saved = existsSync(boardsFile) ? (JSON.parse(readFileSync(boardsFile, "utf8")) as Record<string, TaskBoard>) : {};
+    for (const [id, b] of Object.entries(saved)) {
+      if (!b || !Array.isArray(b.tasks) || !Array.isArray(b.states) || now - (b.createdAt ?? 0) > BOARD_TTL_MS) continue;
+      b.states = b.states.map((s) => (s.kind === "running" ? { kind: "failed", url: s.url } : s));
+      taskBoards.set(id, b);
+    }
+  } catch (e) {
+    console.error(`[tasks] couldn't read saved task boards: ${errorMessage(e)}`);
+    return; // can't tell which clones are in use: keep them all
+  }
+  // Clones no saved board uses any more are only taking space (the work is on GitHub).
+  const keep = new Set([...taskBoards.values()].flatMap((b) => Object.values(b.plans ?? {}).map((p) => p.dir)));
+  const removed = pruneClones(join(dataDir, "plans"), keep, now);
+  if (removed.length) console.error(`[tasks] removed ${removed.length} old plan clone(s)`);
+}
+
+/** The newest board posted in this chat (the plan's own thread or channel), if any. */
+export function latestBoardIn(chatKey: string): { boardId: string; board: TaskBoard } | undefined {
+  let best: { boardId: string; board: TaskBoard } | undefined;
+  for (const [boardId, board] of taskBoards) {
+    if (board.channelId === chatKey && (!best || board.createdAt > best.board.createdAt)) best = { boardId, board };
+  }
+  return best;
+}
+
+/**
+ * What the planning chat can't see for itself: how its tasks went. Each task
+ * ran in its own chat, and the repo is private, so the brain would otherwise
+ * say none of them ran. Added to the owner's messages in a plan's chat once
+ * any task has started.
+ */
+export function planStatusNote(chatKey: string): string | undefined {
+  const plan = latestBoardIn(chatKey);
+  if (!plan || plan.board.states.every((s) => s.kind === "idle")) return undefined;
+  const { board } = plan;
+  const word = { idle: "not run yet", running: "running now", done: "done", failed: "failed" } as const;
+  const lines = board.tasks.map((t, i) => `${t.n}. ${t.title} [${t.mode}] — ${word[board.states[i]?.kind ?? "idle"]}`);
+  const branches = Object.values(board.plans ?? {}).map(
+    (p) => `${p.repo} (private — read it through the user's connected GitHub account), branch ${p.branch}${p.prUrl ? `, PR ${p.prUrl} (opened as a draft — mark it ready for review before merging it)` : ""}`
+  );
+  return [
+    "[Plan status, from Choomfie (not the user): each task ran in its own chat; finished code/cad tasks are committed to the plan's branch, one commit per task.",
+    ...lines,
+    ...(branches.length ? [`Repo: ${branches.join("; ")}`] : []),
+    "]",
+  ].join("\n");
+}
+
+/** Add a task to a plan's board (numbered after the last), and redraw it later. Returns its index. */
+export function appendTask(board: TaskBoard, task: BrainTask): number {
+  const n = Math.max(0, ...board.tasks.map((t) => t.n)) + 1;
+  const repos = [...new Set(board.tasks.flatMap((t) => (t.repo ? [t.repo] : [])))];
+  board.tasks.push({ ...task, n, ...(task.repo ? {} : repos.length === 1 ? { repo: repos[0] } : {}) });
+  board.states.push({ kind: "idle" });
+  saveTaskBoards();
+  return board.tasks.length - 1;
+}
+
+type PlanTaskStarter = (ctx: AppContext, boardId: string, index: number, user: { id: string; username: string }) => Promise<boolean>;
+let planTaskStarter: PlanTaskStarter | null = null;
+
+/** The task handlers register how to run a board task (its thread, its branch); the router only triggers it. */
+export function setPlanTaskStarter(fn: PlanTaskStarter): void {
+  planTaskStarter = fn;
+}
+
+/** Forget every board (tests). */
+export function resetTaskBoards(): void {
+  taskBoards.clear();
+  boardsFile = null;
+}
+
+const TASK_ICON = { running: "⏳", done: "✅", failed: "❌" } as const;
+
+/** The prompt a task starts with: stands alone, since its chat never saw the planning conversation. */
+export function taskPrompt(task: { n: number; spec: string }, context?: string): string {
+  return [`Task ${task.n} of a plan: ${task.spec}`, context].filter(Boolean).join("\n\n");
+}
+
+/** A button per task: runnable until started, then a link to its thread showing how it went. Plus "Run all" while 2+ are idle. */
+export function taskBoardRows(board: Pick<TaskBoard, "tasks" | "states" | "busy">) {
+  const rows = [];
+  // Failed tasks can run again (their thread is still linked from the retry).
+  const idle = board.busy ? 0 : board.states.filter((s) => s.kind === "idle" || s.kind === "failed").length;
+  const tasks = board.tasks.slice(0, idle >= 2 ? 20 : 25);
+  for (let r = 0; r * 5 < tasks.length; r++) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        tasks.slice(r * 5, r * 5 + 5).map((t, j) => {
+          const i = r * 5 + j;
+          const state = board.states[i] ?? { kind: "idle" };
+          const label = `${t.n} · ${t.mode} · ${t.title}`;
+          const b = new ButtonBuilder();
+          if (state.kind === "idle") {
+            return b.setCustomId(`brain:task:${i}`).setLabel(`▶ ${label}`.slice(0, 80)).setStyle(ButtonStyle.Secondary);
+          }
+          if (state.kind === "failed" && !board.busy) {
+            return b.setCustomId(`brain:task:${i}`).setLabel(`↻ ${label} (failed — retry)`.slice(0, 80)).setStyle(ButtonStyle.Danger);
+          }
+          return b.setURL(state.url).setLabel(`${TASK_ICON[state.kind]} ${label}`.slice(0, 80)).setStyle(ButtonStyle.Link);
+        })
+      )
+    );
+  }
+  if (idle >= 2) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("brain:taskall").setLabel(`▶ Run the remaining ${idle}, in order`).setStyle(ButtonStyle.Primary)
+      )
+    );
+  }
+  return rows;
+}
+
+export interface PostOptions {
+  /** No "Open draft PR" button: the caller commits the patch itself (a plan's branch). */
+  noPatchOffer?: boolean;
+}
+
+/** The repo a plan task works in: its own, or the plan's one repo when its line doesn't say. */
+export function planTaskRepo(board: Pick<TaskBoard, "tasks">, index: number): string | undefined {
+  const task = board.tasks[index];
+  if (!task) return undefined;
+  const repos = [...new Set(board.tasks.flatMap((t) => (t.repo ? [t.repo] : [])))];
+  return task.repo ?? (repos.length === 1 ? repos[0] : undefined);
+}
+
+export type Landing = { kind: "patch"; files: [BrainFile] } | { kind: "files"; files: BrainFile[]; folder: string };
+
+/**
+ * What a plan task's reply would put on the plan's branch: its patch (a repo
+ * mode), or its files (a files mode, like cad → cad/). Undefined when the
+ * task has no repo, or the reply has nothing for it.
+ */
+export function landingFor(board: Pick<TaskBoard, "brainId" | "tasks">, index: number, files: BrainFile[] | undefined): Landing | undefined {
+  const task = board.tasks[index];
+  if (!task || !planTaskRepo(board, index)) return undefined;
+  const mode = getBrain(board.brainId)?.modes?.find((m) => m.id === task.mode);
+  if (mode?.repo) {
+    const patch = pickPatch(files);
+    return patch ? { kind: "patch", files: [patch] } : undefined;
+  }
+  if (mode?.files) {
+    const out = (files ?? []).filter((f) => !/\.(patch|diff)$/i.test(f.name));
+    return out.length ? { kind: "files", files: out, folder: mode.files } : undefined;
+  }
+  return undefined;
+}
+
+/** "Commit to the plan's branch" button message id → what to commit. In memory: a restart expires them. */
+const pendingLands = new Map<string, Landing & { boardId: string; index: number }>();
+
+export function takeLand(messageId: string) {
+  const p = pendingLands.get(messageId);
+  pendingLands.delete(messageId);
+  return p;
+}
+
 /** Post a brain's reply: chunked, threaded to `replyTo` when given, quick replies as buttons on the last chunk. */
 export async function postBrainReply(
   channel: SendableChannel,
   brainId: string,
   chatKey: string,
   reply: BrainReply,
-  replyTo?: string
+  replyTo?: string,
+  opts: PostOptions = {}
 ): Promise<void> {
   const choices = (reply.choices ?? []).filter(Boolean).slice(0, MAX_CHOICES);
   const fallback = choices.length ? "(pick one)" : reply.approvals?.length || reply.files?.length ? "" : "(no reply)";
   const chunks = chunkForDiscord(reply.text || fallback);
   if (!chunks.length && reply.files?.length) chunks.push(""); // files alone still need a message
+  // More files than one message carries go on in messages of their own, right after.
+  const [firstFiles, ...moreFiles] = fileBatches(reply.files ?? []);
+  const attach = (files: BrainFile[]) => files.map((f) => ({ attachment: Buffer.from(f.data), name: f.name }));
   for (let i = 0; i < chunks.length; i++) {
     const last = i === chunks.length - 1;
     const sent = await channel.send({
       allowedMentions: NO_MENTIONS,
       content: chunks[i],
       ...(i === 0 && replyTo ? { reply: { messageReference: replyTo } } : {}),
-      ...(last && reply.files?.length
-        ? { files: reply.files.map((f) => ({ attachment: Buffer.from(f.data), name: f.name })) }
-        : {}),
+      ...(last && firstFiles ? { files: attach(firstFiles) } : {}),
       ...(last && choices.length ? { components: choiceRows(choices) } : {}),
     });
     const id = (sent as { id?: unknown } | undefined)?.id;
     if (last && choices.length && typeof id === "string") pendingChoices.set(id, { brainId, chatKey, choices });
+  }
+  for (const files of moreFiles) await channel.send({ allowedMentions: NO_MENTIONS, files: attach(files) });
+  // A plan's tasks: one button each, which runs it in its own thread (owner only).
+  // A single task the brain will run right away needs no buttons.
+  if (reply.tasks?.length && !reply.runNow) {
+    const board: TaskBoard = {
+      brainId,
+      tasks: reply.tasks,
+      context: reply.taskContext,
+      states: reply.tasks.map(() => ({ kind: "idle" })),
+      createdAt: Date.now(),
+      channelId: chatKey,
+    };
+    const sent = await channel.send({
+      allowedMentions: NO_MENTIONS,
+      content: "📋 **Tasks** — click one to run it in its own thread.",
+      components: taskBoardRows(board),
+    });
+    const id = (sent as { id?: unknown } | undefined)?.id;
+    if (typeof id === "string") {
+      taskBoards.set(id, board);
+      saveTaskBoards();
+    }
+  }
+  // A patch made in the brain's sandbox: the owner can turn it into a draft PR.
+  // A follow-up in a plan task's thread ("continue"): what it hands back goes on the plan's branch.
+  const planTask = opts.noPatchOffer ? undefined : taskForThread(chatKey);
+  const land = planTask ? landingFor(planTask.board, planTask.index, reply.files) : undefined;
+  if (planTask && land) {
+    const what = land.kind === "patch" ? `Patch (\`${land.files[0].name}\`)` : `${land.files.length} file${land.files.length === 1 ? "" : "s"} for ${land.folder}/`;
+    const sent = await channel.send({
+      allowedMentions: NO_MENTIONS,
+      content: `📦 ${what} — task ${planTask.board.tasks[planTask.index].n} of the plan`,
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId("brain:landtask").setLabel("Commit to the plan's branch").setStyle(ButtonStyle.Primary)
+        ),
+      ],
+    });
+    const id = (sent as { id?: unknown } | undefined)?.id;
+    if (typeof id === "string") pendingLands.set(id, { boardId: planTask.boardId, index: planTask.index, ...land });
+  }
+  const planPatch = land?.kind === "patch";
+  const patch = opts.noPatchOffer || planPatch ? null : findPatch(reply.text, reply.files);
+  if (patch) {
+    const sent = await channel.send({
+      allowedMentions: NO_MENTIONS,
+      content: `📦 Patch for **${patch.repo}** (\`${patch.file.name}\`)`,
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId("brain:pr").setLabel("Open draft PR").setStyle(ButtonStyle.Primary)
+        ),
+      ],
+    });
+    const id = (sent as { id?: unknown } | undefined)?.id;
+    if (typeof id === "string") offerPatch(id, patch);
   }
   // One message per approval, so each card is resolved on its own.
   const label = getBrain(brainId)?.label ?? brainId;
@@ -221,6 +508,7 @@ export async function postBrainReply(
 
 /** Lets plugins post late results (background jobs) through the same formatting. */
 export function installBrainPoster(ctx: AppContext): void {
+  loadTaskBoards(ctx.DATA_DIR);
   setBrainPoster(async (brainId, chatKey, reply) => {
     const fetched = await ctx.discord?.channels.fetch(chatKey).catch(() => null);
     // A chat the bot isn't in (group DM /choomfie) can still be answered while its
@@ -232,20 +520,52 @@ export function installBrainPoster(ctx: AppContext): void {
 }
 
 /** One in-flight request per backend conversation; later messages queue behind it. */
-const queues = new Map<string, Promise<void>>();
+const queues = new Map<string, Promise<unknown>>();
 
 export function dispatchToBrain(
   ctx: AppContext,
   brain: Brain,
   channel: SendableChannel,
   /** `messageId` anchors the reply; omit it when the message is in another channel. */
-  message: BrainMessage & { messageId?: string }
-): Promise<void> {
+  message: BrainMessage & { messageId?: string },
+  opts: PostOptions = {}
+): Promise<BrainReply | null> {
   const prev = queues.get(message.chatKey) ?? Promise.resolve();
   const run = prev.then(async () => {
     try {
-      const reply = await brain.send(message, ctx);
-      await postBrainReply(channel, brain.id, message.chatKey, reply, message.messageId);
+      const status = message.meta?.role === "owner" ? planStatusNote(message.chatKey) : undefined;
+      const reply = await brain.send(status ? { ...message, content: `${message.content}\n\n${status}` } : message, ctx);
+      await postBrainReply(channel, brain.id, message.chatKey, reply, message.messageId, opts);
+      const task = reply.runNow ? reply.tasks?.[0] : undefined;
+      const plan = task && message.meta?.role === "owner" && planTaskStarter ? latestBoardIn(message.chatKey) : undefined;
+      if (task && plan && plan.board.busy) {
+        // Run all is going: queue it on the board rather than run two things on the branch at once.
+        const added = plan.board.tasks[appendTask(plan.board, task)];
+        await channel
+          .send({ allowedMentions: NO_MENTIONS, content: `-# → added to the plan as **task ${added.n}** — start it from the board once Run all finishes` })
+          .catch(() => {});
+      } else if (task && plan) {
+        // The plan's own chat asked for one more job: it joins the plan, and runs as its next task.
+        const index = appendTask(plan.board, task);
+        const added = plan.board.tasks[index];
+        await channel
+          .send({ allowedMentions: NO_MENTIONS, content: `-# → added to the plan as **task ${added.n}** (\`${added.mode}\`) — running it in its own thread` })
+          .catch(() => {});
+        void planTaskStarter!(ctx, plan.boardId, index, { id: message.meta.user_id ?? "", username: message.meta.user ?? "" }).then(async (ok) => {
+          if (!ok) {
+            await channel
+              .send({ allowedMentions: NO_MENTIONS, content: `-# Couldn't start task ${added.n} — run it from the plan's board.` })
+              .catch(() => {});
+          }
+        });
+      } else if (task) {
+        // One job for one mode: switch this chat to it and start, in this same thread.
+        const chat = ctx.chats.bound(message.chatKey, brain.id);
+        if (chat) ctx.chats.setMode(chat.id, task.mode);
+        await channel.send({ allowedMentions: NO_MENTIONS, content: `-# → **${task.mode}** mode · \`/mode off\` to go back to auto` }).catch(() => {});
+        void dispatchToBrain(ctx, brain, channel, { ...message, messageId: undefined, content: taskPrompt(task, reply.taskContext), filePaths: [] });
+      }
+      return reply;
     } catch (e) {
       console.error(`[brain:${brain.id}] ${errorMessage(e)}`);
       await channel
@@ -255,6 +575,7 @@ export function dispatchToBrain(
           ...(message.messageId ? { reply: { messageReference: message.messageId } } : {}),
         })
         .catch(() => {});
+      return null;
     } finally {
       onReplySent(message.chatKey);
     }

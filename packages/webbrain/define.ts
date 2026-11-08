@@ -12,6 +12,7 @@ import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
   errorMessage,
+  parseTaskList,
   pushBrainReply,
   registerBrain,
   unregisterBrain,
@@ -32,8 +33,10 @@ export interface WebBrainOptions {
   maxTabs?: number;
   /** Close the browser after this long with nothing running. Default 10 min. */
   idleCloseMs?: number;
-  /** Whole-turn timeout. Default 15 min. */
+  /** How long to wait on one turn before leaving it to the late-result watch. Default 15 min. */
   turnTimeoutMs?: number;
+  /** The same for a work mode's turn (one that makes a patch or files). Default 45 min. */
+  workTurnTimeoutMs?: number;
   /** Replace the browser launch (tests, or another engine). Gets the site's profile dir. */
   launch?(profileDir: string): Promise<ContextLike<Page>>;
 }
@@ -74,6 +77,18 @@ export function answerText(result: Pick<TurnResult, "text" | "stopped" | "backgr
   return result.text || `(${label} finished without a text reply)`;
 }
 
+/** The message as the site sees it: the chat's mode frame (if any), then the framed message. */
+export function modePrompt(adapter: Pick<SiteAdapter, "modes">, mode: string | null, framed: string): { text: string; mode?: string } {
+  const m = mode ? adapter.modes?.find((x) => x.id === mode) : undefined;
+  return m ? { text: `${m.frame.trim()}\n\n${framed}`, mode: m.id } : { text: framed };
+}
+
+/** Times one message carries on after the site cuts an answer short. */
+export const MAX_CONTINUES = 3;
+
+/** Meta flag on a continue the kit sends itself for a late answer (it doesn't reset the count). */
+const LATE_CONTINUE = "webbrain_continue";
+
 /** Headed for debugging: `CHOOMFIE_<ID>_HEADED=1`. */
 const headedFor = (id: string) => process.env[`CHOOMFIE_${id.toUpperCase()}_HEADED`] === "1";
 
@@ -95,6 +110,10 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
     const outbox = outboxDir(ctx.DATA_DIR, adapter.id);
     const human = createHuman(new Pacer());
     const timeoutMs = opts.turnTimeoutMs ?? 15 * 60_000;
+    const workTimeoutMs = opts.workTurnTimeoutMs ?? 45 * 60_000;
+    const isWorkMode = (mode: string | null | undefined) => !!adapter.modes?.some((m) => m.id === mode && (m.repo || m.files));
+    /** Continues sent for late answers, per chat, since the owner last wrote: bounded like the in-turn ones. */
+    const lateContinues = new Map<string, number>();
     const active = new Map<string, ActiveTurn>();
     const tabs = (pool = new TabPool<Page>({
       launch: () => (opts.launch ? opts.launch(profile) : launchContext(profile, { headless: !headedFor(adapter.id), engine })),
@@ -117,13 +136,26 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
     const lateWatch = (watch = new LateWatch(
       (chatKey, ref, afterId, posted) =>
         adapter.readLate ? onTab(chatKey, (page) => adapter.readLate!(page, ref, afterId, posted)) : Promise.resolve(null),
-      (chatKey, late) =>
-        pushBrainReply(adapter.id, chatKey, { text: late.text, files: late.files, choices: late.choices, approvals: late.approvals })
+      async (chatKey, late) => {
+        // A late answer that stopped short (the turn outlasted our wait, then hit the tool cap): carry on, as in a turn.
+        const more = late.approvals?.length ? null : adapter.continueAfter?.(late.text, chats.bound(chatKey, adapter.id)?.mode ?? undefined);
+        const n = lateContinues.get(chatKey) ?? 0;
+        if (more && n < MAX_CONTINUES) {
+          lateContinues.set(chatKey, n + 1);
+          await pushBrainReply(adapter.id, chatKey, { text: `-# ${adapter.label} stopped before finishing — continuing (${n + 1}/${MAX_CONTINUES})` });
+          const reply = await brain.send({ chatKey, content: more, filePaths: [], meta: { chat_id: chatKey, role: "owner", [LATE_CONTINUE]: "1" } }, ctx);
+          await pushBrainReply(adapter.id, chatKey, reply);
+          return;
+        }
+        await pushBrainReply(adapter.id, chatKey, { text: late.text, files: late.files, choices: late.choices, approvals: late.approvals });
+      }
     ));
 
-    return {
+    const brain: Brain = {
       id: adapter.id,
       label: adapter.label,
+      modes: adapter.modes?.map(({ id, label, description, repo, files }) => ({ id, label, description, ...(repo ? { repo } : {}), ...(files ? { files } : {}) })),
+      defaultMode: adapter.defaultMode,
 
       // Core has already bound a fresh chat here; only the background watch is ours to drop.
       async reset(chatKey) {
@@ -145,6 +177,7 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
       },
 
       async send(message) {
+        if (!message.meta?.[LATE_CONTINUE]) lateContinues.delete(message.chatKey);
         const chat = chats.current(message.chatKey, adapter.id, message.content);
         // In a chat the bot isn't in, status goes in the "thinking…" reply instead.
         const relayProgress = message.progress;
@@ -195,32 +228,62 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
 
         const turn: ActiveTurn = { ref: chat.backendRef ?? undefined, stop: false };
         try {
-          const text = (adapter.framePrompt ?? framePrompt)(message.content, message.meta);
-          const result = await onTab(message.chatKey, (page) => {
-            started = Date.now();
-            active.set(message.chatKey, turn);
-            const tctx: TurnContext = {
-              ref: turn.ref,
-              started(ref) {
-                turn.ref = ref;
-                chats.setBackendRef(chat.id, ref);
-              },
-              stopRequested: () => turn.stop,
-              progress,
-              notice,
-              human,
-              timeoutMs,
-            };
-            return adapter.turn(page, { text, files }, tctx);
-          });
+          const { text, mode } = modePrompt(
+            adapter,
+            chat.mode ?? adapter.defaultMode ?? null,
+            (adapter.framePrompt ?? framePrompt)(message.content, message.meta)
+          );
+          const runTurn = (prompt: string, attach: string[]) =>
+            onTab(message.chatKey, (page) => {
+              started ||= Date.now();
+              active.set(message.chatKey, turn);
+              const tctx: TurnContext = {
+                ref: turn.ref,
+                started(ref) {
+                  turn.ref = ref;
+                  chats.setBackendRef(chat.id, ref);
+                },
+                stopRequested: () => turn.stop,
+                progress,
+                notice,
+                human,
+                timeoutMs: isWorkMode(mode) ? workTimeoutMs : timeoutMs,
+              };
+              return adapter.turn(page, { text: prompt, files: attach, mode }, tctx);
+            });
+          let result = await runTurn(text, files);
+          // The site cut the answer short (a tool-call cap): carry on, keeping files from every part.
+          for (let i = 0; i < MAX_CONTINUES && !result.stopped && !turn.stop && !result.approvals?.length; i++) {
+            if (result.background) break;
+            const more = adapter.continueAfter?.(result.text, mode ?? undefined);
+            if (!more) break;
+            turn.ref = result.ref;
+            chats.setBackendRef(chat.id, result.ref);
+            lateWatch.delivered(message.chatKey, result.messageIds ?? []);
+            notice(`${adapter.label} stopped before finishing — continuing (${i + 1}/${MAX_CONTINUES})`);
+            const earlier = result.files ?? [];
+            const { text: next } = modePrompt(adapter, mode ?? null, more);
+            result = await runTurn(next, []);
+            const names = new Set((result.files ?? []).map((f) => f.name));
+            const kept = earlier.filter((f) => !names.has(f.name));
+            if (kept.length) result = { ...result, files: [...kept, ...(result.files ?? [])] };
+          }
           chats.setBackendRef(chat.id, result.ref);
           lateWatch.delivered(message.chatKey, result.messageIds ?? []);
           if (result.background && result.lastMessageId) lateWatch.start(message.chatKey, result.ref, result.lastMessageId);
+          const planMode = mode ? adapter.modes?.find((m) => m.id === mode && m.tasks) : undefined;
+          // A task can't be for the planning modes themselves, except a sub-plan.
+          const runnable = (adapter.modes ?? []).filter((m) => !m.runSingleTask).map((m) => m.id);
+          const tasks = planMode ? parseTaskList(result.text, runnable) : [];
+          const runNow = !!planMode?.runSingleTask && tasks.length === 1;
           return {
             text: answerText(result, adapter.label),
+            ...(result.stopped || turn.stop ? { stopped: true } : {}),
+            ...(result.background ? { background: true } : {}),
             files: result.files,
             choices: result.choices,
             approvals: result.approvals,
+            ...(tasks.length ? { tasks, taskContext: adapter.taskContext?.(result.text), runNow } : {}),
           };
         } finally {
           if (active.get(message.chatKey) === turn) active.delete(message.chatKey);
@@ -229,6 +292,7 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
         }
       },
     };
+    return brain;
   }
 
   return {

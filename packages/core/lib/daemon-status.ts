@@ -187,6 +187,27 @@ export async function readDaemonStatus(
   }
 }
 
+/**
+ * After a `/stop`: wait until the daemon has written state since `since` with
+ * no turn running at `location`. False when it hasn't by `timeoutMs`.
+ */
+export async function waitForClaudeIdle(
+  dataDir: string,
+  location: string,
+  since: number,
+  timeoutMs = 20_000,
+  pollMs = 1_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const snap = await readDaemonStatus(dataDir);
+    const fresh = snap?.updatedAt ? Date.parse(snap.updatedAt) >= since : false;
+    if (fresh && !snap!.sessions?.some((s) => s.location === location && s.busy)) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+}
+
 /** True when a live daemon is supervising this worker. */
 export async function isDaemonMode(dataDir: string): Promise<boolean> {
   return (await readLiveDaemonPid(daemonPidPath(dataDir))) !== null;

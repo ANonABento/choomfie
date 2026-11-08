@@ -10,7 +10,9 @@
  * channel's brain shows in `/status`. One command per verb, whoever answers.
  *
  * Also handles the buttons a brain's answer can carry: quick replies
- * (`brain:choice:<n>`) and approvals (`brain:approval:yes|no`).
+ * (`brain:choice:<n>`), approvals (`brain:approval:yes|no`) and patches
+ * (`brain:pr`, owner only: opens a draft PR from the patch) and plan tasks
+ * (`brain:task:<n>`, owner only: runs the task in its own thread, in its mode).
  *
  * Threads inherit their parent channel's brain unless set directly, but each
  * thread is its own backend conversation.
@@ -27,12 +29,23 @@ import {
   type ButtonInteraction,
 } from "discord.js";
 import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds } from "@choomfie/shared";
+import { join } from "node:path";
 import { botIsAbsent, interactionChannel, rememberBrainRelay, settleAskRelays } from "../ask-relay.ts";
 import { registerButtonHandler, registerCommand } from "../register.ts";
 import {
   clearPendingApproval,
   dispatchToBrain,
   getPendingApproval,
+  getTaskBoard,
+  landingFor,
+  setPlanTaskStarter,
+  planTaskRepo,
+  saveTaskBoards,
+  takeLand,
+  taskBoardRows,
+  taskPrompt,
+  type Landing,
+  type TaskBoard,
   parentChannelId,
   resolveBrainId,
   takeChoices,
@@ -40,7 +53,9 @@ import {
 } from "../brain-router.ts";
 import { isAllowed, isOwner } from "../access.ts";
 import { onMessageReceived, onReplySent } from "../typing.ts";
-import { isDaemonMode, requestDaemonControl } from "../daemon-status.ts";
+import { isDaemonMode, requestDaemonControl, waitForClaudeIdle } from "../daemon-status.ts";
+import { openDraftPr, takePatch } from "../patch-pr.ts";
+import { bundlePlanBranch, landFiles, landPatch, openPlanBranch, planBranchNote, planFilesNote, type PlanBranch } from "../plan-branch.ts";
 import { requireOwner } from "./shared.ts";
 
 function label(id: string): string {
@@ -176,10 +191,15 @@ registerCommand("stop", {
         });
         return;
       }
+      const asked = Date.now();
       await requestDaemonControl(ctx.DATA_DIR, "stop", { requestedBy: interaction.user.id, location: channelId });
       onReplySent(channelId); // the interrupted turn won't reply, so stop typing now
       await settleAskRelays(channelId, "⏹️ Stopped.");
-      await interaction.reply({ content: "Asked **Claude** to stop.", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "Stopping **Claude**…", flags: MessageFlags.Ephemeral });
+      const idle = await waitForClaudeIdle(ctx.DATA_DIR, channelId, asked);
+      await interaction
+        .editReply(idle ? "⏹️ **Claude** stopped." : "Asked **Claude** to stop — it hasn't confirmed yet; `/status` shows whether it's still busy.")
+        .catch(() => {});
       return;
     }
     const brain = getBrain(current);
@@ -204,6 +224,10 @@ registerCommand("stop", {
 // that brain: owner, or anyone allowlisted when brainAccess is "allowlist".
 registerButtonHandler("brain", async (interaction, parts, ctx) => {
   if (parts[1] === "approval") return handleApproval(interaction, parts[2] === "yes", ctx);
+  if (parts[1] === "pr") return handlePatchPr(interaction, ctx);
+  if (parts[1] === "landtask") return handleLandTask(interaction, ctx);
+  if (parts[1] === "task") return handleTask(interaction, Number(parts[2]), ctx);
+  if (parts[1] === "taskall") return handleTask(interaction, "all", ctx);
   if (parts[1] !== "choice") return;
   const userId = interaction.user.id;
   const owner = isOwner(ctx, userId);
@@ -242,6 +266,7 @@ registerButtonHandler("brain", async (interaction, parts, ctx) => {
       first: "followUp",
       ephemeral: interaction.message.flags.has(MessageFlags.Ephemeral),
       replyButton: true,
+      chatKey: pending.chatKey,
     });
     rememberBrainRelay(pending.chatKey, relay);
     channel = relay;
@@ -262,6 +287,334 @@ registerButtonHandler("brain", async (interaction, parts, ctx) => {
     filePaths: [],
   });
 });
+
+type Ctx = Parameters<Parameters<typeof registerButtonHandler>[1]>[2];
+
+/**
+ * A plan task's button: open a thread off the plan's channel, put a fresh
+ * chat there in the task's mode, and send it the task. The button becomes a
+ * link to the thread (⏳, then ✅ or ❌). Owner only — it starts real work.
+ */
+async function handleTask(interaction: ButtonInteraction, which: number | "all", ctx: Ctx): Promise<void> {
+  const ephemeral = (content: string) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
+  if (!isOwner(ctx, interaction.user.id)) return void (await ephemeral("Only the owner can start plan tasks~"));
+  const boardId = interaction.message.id;
+  const board = getTaskBoard(boardId);
+  const brain = board ? getBrain(board.brainId) : undefined;
+  if (!board || !brain) return void (await ephemeral("These tasks expired — ask for the task list again."));
+  if (board.busy) return void (await ephemeral("Run all is already working through these — one at a time."));
+  const runnable = (i: number) => board.states[i]?.kind === "idle" || board.states[i]?.kind === "failed";
+  const indices = which === "all" ? board.states.flatMap((_, i) => (runnable(i) ? [i] : [])) : [which];
+  if (!indices.length || indices.some((i) => !runnable(i) || !board.tasks[i])) {
+    return void (await ephemeral("That task is already running."));
+  }
+
+  // Threads can't nest: from inside a thread, the task's thread goes in the parent channel.
+  const here = interaction.channel as unknown as { isThread?: () => boolean; parent?: unknown } | null;
+  const parent = (here?.isThread?.() ? here.parent : here) as
+    | { type?: ChannelType; threads?: { create(o: { name: string }): Promise<unknown> } }
+    | null
+    | undefined;
+  if (!interaction.guildId || parent?.type !== ChannelType.GuildText || !parent.threads) {
+    return void (await ephemeral("Plan tasks run in threads, so they need a server text channel — not a DM."));
+  }
+  // Claim before the first await, so a double click can't start the same work twice:
+  // Run all holds the whole board; one task holds itself.
+  const claimed = indices;
+  const before = claimed.map((i) => board.states[i]);
+  board.busy = which === "all";
+  if (which !== "all") board.states[which] = { kind: "running", url: interaction.message.url };
+  /** Undo a claim that never turned into a running thread. */
+  const release = (i: number) => {
+    const s = board.states[i];
+    if (s?.kind === "running" && s.url === interaction.message.url) board.states[i] = before[claimed.indexOf(i)] ?? { kind: "idle" };
+  };
+  const redraw = () => interaction.message.edit({ components: taskBoardRows(board) }).catch(() => {});
+
+  const runOne = async (index: number): Promise<boolean> => {
+    const ok = await runBoardTask(ctx, brain, board, index, parent, interaction.user, redraw);
+    if (ok === null) {
+      await interaction.followUp({ content: "Couldn't open a thread for that task.", flags: MessageFlags.Ephemeral }).catch(() => {});
+      release(index);
+      return false;
+    }
+    return ok;
+  };
+
+  try {
+    await interaction.deferUpdate();
+    // In order, one at a time: later tasks build on earlier ones. A failure stops the run.
+    for (const i of claimed) if (!(await runOne(i))) break;
+  } finally {
+    claimed.forEach(release);
+    board.busy = false;
+    saveTaskBoards();
+    await redraw();
+  }
+}
+
+type ThreadParent = { threads?: { create(o: { name: string }): Promise<unknown> } };
+
+/**
+ * One plan task in its own thread off `parent`; resolves when its answer is
+ * posted (and committed, for a repo task). Null when the thread couldn't open.
+ */
+async function runBoardTask(
+  ctx: Ctx,
+  brain: NonNullable<ReturnType<typeof getBrain>>,
+  board: TaskBoard,
+  index: number,
+  parent: ThreadParent,
+  user: { username: string; id: string },
+  redraw: () => Promise<unknown>
+): Promise<boolean | null> {
+  const task = board.tasks[index];
+  let thread: SendableChannel & { id: string; url: string; members?: { add(id: string): Promise<unknown> } };
+  try {
+    thread = (await parent.threads!.create({ name: `${task.n} · ${task.mode} · ${task.title}`.slice(0, 100) })) as typeof thread;
+  } catch (e) {
+    console.error(`[tasks] couldn't open a thread: ${errorText(e)}`);
+    return null;
+  }
+  await thread.members?.add(user.id).catch(() => {});
+  ctx.config.setChannelBrain(thread.id, brain.id);
+  ctx.chats.setMode(ctx.chats.start(thread.id, brain.id).id, task.mode);
+  board.states[index] = { kind: "running", url: thread.url };
+  board.threads = { ...board.threads, [thread.id]: index };
+  saveTaskBoards();
+  await redraw();
+  await thread.send({ content: `**Task ${task.n}** · \`${task.mode}\` mode\n${task.spec}`.slice(0, 2000), allowedMentions: { parse: [] } });
+  onMessageReceived(thread.id, thread as never, false);
+  let ok = false;
+  try {
+    ok = await runTaskInThread(ctx, brain, board, index, thread, user);
+  } catch (e) {
+    await thread.send({ content: `❌ ${errorText(e).slice(0, 1500)}`, allowedMentions: { parse: [] } }).catch(() => {});
+  }
+  board.states[index] = { kind: ok ? "done" : "failed", url: thread.url };
+  saveTaskBoards();
+  await redraw();
+  return ok;
+}
+
+/**
+ * A plan's chat asked for one more job ("make the meshes stickerless"): it
+ * joined the plan's board (the router added it), and runs like a clicked
+ * task — its own thread, on the plan's branch — not in the planning chat.
+ */
+setPlanTaskStarter(async (ctx, boardId, index, user) => {
+  const board = getTaskBoard(boardId);
+  const brain = board ? getBrain(board.brainId) : undefined;
+  if (!board || !brain || !board.channelId) return false;
+  const where = await ctx.discord?.channels.fetch(board.channelId).catch(() => null);
+  if (!where) return false;
+  const w = where as unknown as { isThread?: () => boolean; parent?: unknown; messages?: { fetch(id: string): Promise<{ edit(o: unknown): Promise<unknown> }> } };
+  const parent = (w.isThread?.() ? w.parent : w) as (ThreadParent & { type?: ChannelType }) | null;
+  if (parent?.type !== ChannelType.GuildText || !parent.threads) return false;
+  const msg = await w.messages?.fetch(boardId).catch(() => null);
+  const redraw = () => msg?.edit({ components: taskBoardRows(board) }).catch(() => {}) ?? Promise.resolve();
+  if (board.busy || board.states[index]?.kind === "running") return false;
+  return (await runBoardTask(ctx as Ctx, brain, board, index, parent, user, redraw)) === true;
+});
+
+/** The plan's branch on `repo`: saved, being opened, or opened now (once, however many tasks ask). */
+async function planBranchFor(ctx: Ctx, board: TaskBoard, repo: string): Promise<PlanBranch> {
+  const known = board.plans?.[repo];
+  if (known) return known;
+  board.opening ??= new Map();
+  let opening = board.opening.get(repo);
+  if (!opening) {
+    opening = openPlanBranch(repo, join(ctx.DATA_DIR, "plans")).then((pb) => {
+      board.plans = { ...board.plans, [repo]: pb };
+      saveTaskBoards();
+      return pb;
+    });
+    opening.catch(() => {}).finally(() => board.opening?.delete(repo));
+    board.opening.set(repo, opening);
+  }
+  return opening;
+}
+
+/** Commit what a task handed back to its plan's branch, and say how it went in the thread. */
+async function landTask(
+  board: TaskBoard,
+  index: number,
+  pb: PlanBranch,
+  landing: Landing,
+  say: (content: string) => Promise<unknown>
+): Promise<boolean> {
+  const task = board.tasks[index];
+  const title = `Task ${task.n}: ${task.title}`;
+  try {
+    const landed =
+      landing.kind === "patch" ? await landPatch(pb, landing.files[0].data, title) : await landFiles(pb, landing.files, landing.folder, title);
+    saveTaskBoards(); // prUrl
+    await say(
+      `🌿 Committed to \`${pb.branch}\`${landing.kind === "files" ? ` (${landing.folder}/)` : ""}: <${landed.commitUrl}>` +
+        (landed.prOpened ? `\n📦 Draft PR for the whole plan: ${landed.prOpened}` : "") +
+        (landed.prError ? `\n⚠️ Couldn't open the plan's PR (the commit is in): ${landed.prError.slice(0, 500)}` : "")
+    );
+    return true;
+  } catch (e) {
+    await say(`❌ Couldn't commit it to \`${pb.branch}\`: ${errorText(e).slice(0, 1500)}`);
+    return false;
+  }
+}
+
+/**
+ * Send a task to its thread. A repo task (its mode works on a repo, and it or
+ * its plan names one) works on the plan's branch: it gets the branch as a
+ * bundle, and the patch it hands back is committed there — or the task fails,
+ * here, so Run all stops before the next task builds on something missing.
+ */
+async function runTaskInThread(
+  ctx: Ctx,
+  brain: NonNullable<ReturnType<typeof getBrain>>,
+  board: TaskBoard,
+  index: number,
+  thread: SendableChannel & { id: string },
+  user: { username: string; id: string }
+): Promise<boolean> {
+  const task = board.tasks[index];
+  const say = (content: string) => thread.send({ content, allowedMentions: { parse: [] } }).catch(() => {});
+  const message = {
+    chatKey: thread.id,
+    content: taskPrompt(task, board.context),
+    meta: { chat_id: thread.id, user: user.username, user_id: user.id, role: "owner" },
+    filePaths: [] as string[],
+  };
+  const mode = brain.modes?.find((m) => m.id === task.mode);
+  const repo = planTaskRepo(board, index);
+  if (!repo || !(mode?.repo || mode?.files)) {
+    const reply = await dispatchToBrain(ctx, brain, thread, message);
+    return !!reply && !reply.stopped;
+  }
+
+  let pb: PlanBranch;
+  try {
+    pb = await planBranchFor(ctx, board, repo);
+  } catch (e) {
+    await say(`❌ Couldn't set up a branch on **${repo}**: ${errorText(e).slice(0, 1500)}`);
+    return false;
+  }
+  let bundle: Awaited<ReturnType<typeof bundlePlanBranch>>;
+  try {
+    bundle = await bundlePlanBranch(pb);
+  } catch (e) {
+    await say(`❌ Couldn't bundle \`${pb.branch}\`: ${errorText(e).slice(0, 1500)}`);
+    return false;
+  }
+  try {
+    const name = bundle.path.split("/").pop()!;
+    const note = mode.repo ? planBranchNote(pb, name, bundle.snapshot) : planFilesNote(pb, name, mode.files!);
+    const caught = bundle.caughtUp;
+    await say(
+      `-# 🌿 works on \`${pb.branch}\` of **${pb.repo}**${pb.created ? " (new, private)" : ""}` +
+        (mode.repo ? ` — attached as ${name}` : ` — its files go in ${mode.files}/`) +
+        (caught && "merged" in caught ? ` · brought in ${caught.merged} new commit${caught.merged === 1 ? "" : "s"} from \`${caught.base}\`` : "")
+    );
+    if (caught && "conflict" in caught) {
+      await say(
+        `⚠️ \`${caught.base}\` has changes that conflict with \`${pb.branch}\` (${caught.conflict.slice(0, 300)}), so this task works without them. ` +
+          `Merge \`${caught.base}\` into the branch on GitHub to bring them in.`
+      );
+    }
+    const reply = await dispatchToBrain(
+      ctx,
+      brain,
+      thread,
+      { ...message, content: `${message.content}\n\n${note}`, filePaths: [bundle.path] },
+      { noPatchOffer: true }
+    );
+    if (!reply) return false;
+    if (reply.stopped) {
+      await say(`⏹ Stopped — nothing was committed to \`${pb.branch}\`.`);
+      return false;
+    }
+    const landing = landingFor(board, index, reply.files);
+    if (!landing && reply.background) {
+      await say(
+        `⏳ ${brain.label} is still on it. When it finishes, its answer is posted here with a **Commit to the plan's branch** button; ` +
+          `the next task waits for you to start it from the board.`
+      );
+      return false;
+    }
+    if (!landing) {
+      const cut = /stopping after (several|\d+) tool calls/i.test(reply.text);
+      await say(
+        `❌ No ${mode.repo ? "patch" : "files"} came back${cut ? ` (${brain.label} kept hitting its tool limit)` : ""}, so nothing was committed to \`${pb.branch}\`. ` +
+          `Reply here to carry on — what it sends then gets a commit button — or retry the task from the board.`
+      );
+      return false;
+    }
+    return await landTask(board, index, pb, landing, say);
+  } finally {
+    bundle.cleanup();
+  }
+}
+
+/** "Commit to the plan's branch" under a patch sent in a task thread after the task ended. */
+async function handleLandTask(interaction: ButtonInteraction, ctx: Ctx): Promise<void> {
+  if (!isOwner(ctx, interaction.user.id)) {
+    await interaction.reply({ content: "Only the owner can commit to a plan's branch~", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const pending = takeLand(interaction.message.id);
+  const board = pending && getTaskBoard(pending.boardId);
+  const repo = pending && board ? planTaskRepo(board, pending.index) : undefined;
+  if (!pending || !board || !repo) {
+    await interaction.reply({ content: "This patch expired (Choomfie restarted) — ask for it again.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  await interaction.update({ components: [] });
+  const say = (content: string) => interaction.followUp({ content, allowedMentions: { parse: [] } }).catch(() => {});
+  let ok = false;
+  try {
+    ok = await landTask(board, pending.index, await planBranchFor(ctx, board, repo), pending, say);
+  } catch (e) {
+    await say(`❌ Couldn't set up a branch on **${repo}**: ${errorText(e).slice(0, 1500)}`);
+  }
+  if (!ok) return;
+  const state = board.states[pending.index];
+  board.states[pending.index] = { kind: "done", url: state && state.kind !== "idle" ? state.url : interaction.message.url };
+  saveTaskBoards();
+  // Redraw the board, wherever it is.
+  const channel = board.channelId ? await ctx.discord?.channels.fetch(board.channelId).catch(() => null) : null;
+  const msg = channel && "messages" in channel ? await channel.messages.fetch(pending.boardId).catch(() => null) : null;
+  await msg?.edit({ components: taskBoardRows(board) }).catch(() => {});
+}
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * "Open draft PR" under a patch. Owner only: it pushes a branch and opens a PR
+ * as the owner's GitHub account.
+ */
+async function handlePatchPr(interaction: ButtonInteraction, ctx: Ctx): Promise<void> {
+  if (!isOwner(ctx, interaction.user.id)) {
+    await interaction.reply({ content: "Only the owner can open a PR from this~", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const offer = takePatch(interaction.message.id);
+  if (!offer) {
+    await interaction.reply({ content: "This patch expired (Choomfie restarted) — ask for it again.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  await interaction.update({ content: `${interaction.message.content}\n⏳ Opening a draft PR on **${offer.repo}**…`, components: [] });
+  try {
+    const opened = await openDraftPr(offer);
+    await interaction.editReply({
+      content:
+        opened.kind === "pr"
+          ? `📦 Patch for **${offer.repo}** → draft PR: ${opened.url}`
+          : `📦 **${offer.repo}** didn't exist, so I created it (private) with this patch as the first commit: ${opened.url}`,
+    });
+  } catch (e) {
+    await interaction.editReply({
+      content: `📦 Patch for **${offer.repo}** — couldn't open a PR: ${(e instanceof Error ? e.message : String(e)).slice(0, 1500)}`,
+    });
+  }
+}
 
 /**
  * Approve/decline a brain's pending action. Owner-only regardless of

@@ -83,7 +83,13 @@ function setup(
 ) {
   const queries: FakeQuery[] = [];
   const models: unknown[] = [];
-  const events = { sessionIds: [] as (string | null)[], cwds: [] as string[], compacted: [] as string[], logs: [] as string[] };
+  const events = {
+    sessionIds: [] as (string | null)[],
+    cwds: [] as string[],
+    compacted: [] as string[],
+    logs: [] as string[],
+    posted: [] as [string, string][],
+  };
   const deps: ChatSessionDeps = {
     location: "t1",
     chat: { id: "chat1", backendRef: opts.backendRef ?? null, cwd: opts.cwd === undefined ? "/tmp" : opts.cwd, model: opts.model ?? null, title: "arm" },
@@ -98,6 +104,7 @@ function setup(
     onUsage: () => {},
     onChange: () => {},
     log: (m) => events.logs.push(m),
+    postReply: async (chatId, text) => void events.posted.push([chatId, text]),
     createSession: ((prompt: AsyncGenerator<SDKUserMessage>, summary: string | undefined, m: unknown, placement: SessionPlacement) => {
       models.push(m);
       const q = new FakeQuery(prompt, summary, placement, opts.answer ?? ((t) => (t.includes("handoff summary") ? "SUMMARY" : "ok")));
@@ -110,6 +117,40 @@ function setup(
 }
 
 describe("ChatSession", () => {
+  test("a plain final answer is posted to the chat the message came from", async () => {
+    const { session, events } = setup({ answer: () => "  hi there  " });
+    session.start();
+    session.push("hello", "c1");
+    await tick();
+    expect(events.posted).toEqual([["c1", "hi there"]]);
+    void session.close();
+  });
+
+  test("no post when the model used reply, said nothing, or the prompt wasn't a Discord message", async () => {
+    const { session, queries, events } = setup({ answer: (t) => (t === "silent" ? "" : t === "via-tool" ? null : "text") });
+    session.start();
+    session.push("internal"); // no target: a daemon prompt
+    await tick();
+    session.push("silent", "c1"); // empty final text
+    await tick();
+    session.push("via-tool", "c1");
+    queries[0].emit({ type: "assistant", message: { content: [{ type: "tool_use", name: "mcp__choomfie__reply", input: {} }] } } as never);
+    queries[0].emit({ type: "result", subtype: "success", num_turns: 2, total_cost_usd: 0, result: "recap" } as never);
+    await tick();
+    expect(events.posted).toEqual([]);
+    void session.close();
+  });
+
+  test("an interrupted turn posts nothing", async () => {
+    const { session, queries, events } = setup({ answer: () => null });
+    session.start();
+    session.push("long job", "c1");
+    queries[0].emit({ type: "result", subtype: "error_during_execution", num_turns: 1, total_cost_usd: 0 } as never);
+    await tick();
+    expect(events.posted).toEqual([]);
+    void session.close();
+  });
+
   test("a chat with a session resumes it, with the summary it started from", () => {
     const { session, queries } = setup({ backendRef: "sdk-1", seed: "earlier summary" });
     session.start();

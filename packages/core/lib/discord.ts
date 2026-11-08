@@ -30,10 +30,14 @@ import {
 import { downloadAttachments, forwardToClaude } from "./inbound.ts";
 import { decideRoute, dispatchToBrain, installBrainPoster, parentChannelId } from "./brain-router.ts";
 import { isOwnThread, openThread, wantsThread } from "./chats/auto-thread.ts";
+import { replyExcerpt, replyPrompt, repliesToLatest } from "./ask-relay.ts";
 import {
   dispatchPluginMessage,
   initializePlugins,
 } from "./plugin-lifecycle.ts";
+
+/** How far past a replied-to bot message to look for a newer answer. */
+const QUOTE_LOOKAHEAD = 20;
 
 /** Channels already told that auto-thread lacks permission (once per worker). */
 const threadWarned = new Set<string>();
@@ -53,6 +57,14 @@ function generatePairingCode(): string {
   return code;
 }
 
+/**
+ * How long one Discord REST request may take before discord.js aborts and
+ * retries it. Its 15 s default is shorter than uploading ~9 MB of images on a
+ * home uplink, and an aborted upload Discord had already accepted is posted
+ * again by the retry — the same images twice (seen 2026-11-08).
+ */
+export const REST_TIMEOUT_MS = 120_000;
+
 export function createDiscordClient(ctx: AppContext): Client {
   // Merge core intents with plugin intents
   const pluginIntents = ctx.plugins.flatMap((p) => p.intents ?? []);
@@ -69,6 +81,7 @@ export function createDiscordClient(ctx: AppContext): Client {
       Partials.Channel, // Required for DM support
       Partials.Message,
     ],
+    rest: { timeout: REST_TIMEOUT_MS },
   });
 
   discord.once(Events.ClientReady, async (c) => {
@@ -217,18 +230,16 @@ export function createDiscordClient(ctx: AppContext): Client {
     const ownThread = isOwnThread(message.channel as never, botId);
     // An @mention in a text channel moves the conversation into a new thread.
     const threadIt = wantsThread(message, botId, ctx.config.getAutoThread(message.channelId));
-    let replyToUserId: string | null = null;
+    // The message this one replies to (a forward points at another channel, so skip it).
+    const ref = message.reference;
+    const repliedTo =
+      ref?.messageId && ref.channelId === message.channelId
+        ? await message.channel.messages.fetch(ref.messageId).catch(() => null)
+        : null;
+    const replyToUserId = repliedTo?.author.id ?? null;
+    const isReplyToBot = replyToUserId === botId;
     if (!isDM && !ownThread) {
       const isMentioned = message.mentions.has(discord.user!.id);
-      // Resolve who this message is replying to (if anyone)
-      let isReplyToBot = false;
-      if (message.reference?.messageId) {
-        try {
-          const refMsg = await message.channel.messages.fetch(message.reference.messageId);
-          replyToUserId = refMsg.author.id;
-          isReplyToBot = refMsg.author.id === discord.user!.id;
-        } catch {}
-      }
       const convoTimeout = ctx.config.getConvoTimeoutMs();
       const channelActive = isChannelActive(
         ctx.activeChannels,
@@ -339,8 +350,24 @@ export function createDiscordClient(ctx: AppContext): Client {
       .replace(new RegExp(`<@!?${botId}>`, "g"), "")
       .trim();
 
-    const content =
-      cleanContent || "(empty message — user may have just mentioned you)";
+    const typed = cleanContent || "(empty message — user may have just mentioned you)";
+    // Replying to one of the bot's older messages works like the 💬 Reply
+    // button: that answer rides along. Not for its latest answer — the brain
+    // just said it, so quoting it again only costs tokens.
+    let content = typed;
+    if (isReplyToBot && repliedTo) {
+      const after = await message.channel.messages
+        .fetch({ after: repliedTo.id, limit: QUOTE_LOOKAHEAD })
+        .then((page) =>
+          [...page.values()]
+            .filter((m) => m.id !== message.id)
+            .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+            .map((m) => ({ authorId: m.author.id }))
+        )
+        .catch(() => null);
+      const latest = after ? repliesToLatest(after, botId, QUOTE_LOOKAHEAD - 1) : false;
+      if (!latest) content = replyPrompt(replyExcerpt(repliedTo.content), typed);
+    }
 
     if (route.kind === "brain") {
       void dispatchToBrain(ctx, route.brain, where as never, {
@@ -360,7 +387,8 @@ export function createDiscordClient(ctx: AppContext): Client {
 
   // Handle interactions (buttons, slash commands, modals)
   discord.on(Events.InteractionCreate, async (interaction) => {
-    await handleInteraction(interaction, ctx);
+    // An event handler's rejection is unhandled, and that exits the worker.
+    await handleInteraction(interaction, ctx).catch((e) => console.error(`Interaction failed: ${errorMessage(e)}`));
   });
 
   return discord;

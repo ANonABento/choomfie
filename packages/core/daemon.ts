@@ -29,6 +29,7 @@ async function main(): Promise<void> {
     ...config.getDaemonConfig(),
     model: config.getModel(),
     fallbackModel: config.getFallbackModel(),
+    effort: config.getEffort(),
   };
 
   log("Choomfie daemon starting...");
@@ -37,7 +38,8 @@ async function main(): Promise<void> {
   log(`Thresholds: ${settings.tokenThreshold} tokens, ${settings.turnThreshold} turns; up to ${settings.maxSessions} sessions`);
   log(
     `Model: ${settings.model ?? "Claude Code default"}` +
-      (settings.fallbackModel ? ` (fallback: ${settings.fallbackModel})` : "")
+      (settings.fallbackModel ? ` (fallback: ${settings.fallbackModel})` : "") +
+      `, effort ${settings.effort}`
   );
   log(
     `Worker health: check every ${WORKER_HEALTH_INTERVAL / 1000}s, ` +

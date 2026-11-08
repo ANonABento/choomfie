@@ -1,4 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
+import { parseTaskList } from "@choomfie/shared";
 import {
   CONVERSATION_PATH_RE,
   conversationIdFromSend,
@@ -13,8 +16,16 @@ import {
   parseWorkspaceFile,
   workspaceFileUrl,
   workspaceLinks,
+  appActionDetail,
+  appActionUrl,
+  parseAppAction,
+  artifactFileName,
+  artifactRefs,
+  parseArtifact,
+  standaloneHtml,
 } from "../../../plugins/waymond/api.ts";
 import { withFiles } from "../../../plugins/waymond/adapter.ts";
+import { continueAfterToolCap, planContext, stripNarration, TOOLS_REF, toolUrl, WAYMOND_MODES } from "../../../plugins/waymond/modes.ts";
 import type { Page } from "@choomfie/webbrain";
 import { framePrompt, originalName, toApproval } from "../../../plugins/waymond/index.ts";
 
@@ -157,6 +168,66 @@ describe("framePrompt", () => {
   });
 });
 
+describe("artifacts (observed 2026-11-08)", () => {
+  test("refs in the text are found once each, with titles", () => {
+    const id = "56435411-0102-4e35-84c0-243ec7a609ae";
+    const text = `Sim:\n\n[[ref:artifact:${id}|RS3M twin — web sim]]\n\nagain [[ref:artifact:${id}|RS3M twin — web sim]]`;
+    expect(artifactRefs(text)).toEqual([{ token: `[[ref:artifact:${id}|RS3M twin — web sim]]`, id, title: "RS3M twin — web sim" }]);
+    expect(artifactRefs("[[ref:artifact:nope|x]]")).toEqual([]);
+  });
+
+  test("an html artifact becomes a page that loads the viewer's libraries itself", () => {
+    const a = parseArtifact({ id: "x", kind: "html", title: "Sim", document: "<!doctype html><html><head><style></style></head><body></body></html>", media_url: null, meta: { libs: ["three", "katex"] } })!;
+    const html = standaloneHtml(a);
+    expect(html).toContain('<head><script src="https://app.ambition.inc/vendor/three/three.global.js"></script>');
+    expect(html).toContain('<link rel="stylesheet" href="https://app.ambition.inc/vendor/katex/katex.min.css">');
+    expect(standaloneHtml({ ...a, libs: [], document: "<p>hi</p>" })).toBe("<p>hi</p>");
+    expect(standaloneHtml({ ...a, libs: ["d3"], document: "<p>hi</p>" })).toStartWith('<script src="https://app.ambition.inc/vendor/d3/d3.min.js">');
+    expect(parseArtifact({ title: "no kind" })).toBeNull();
+    expect(artifactFileName("RS3M twin — stickerless web sim", "html")).toBe("RS3M-twin-stickerless-web-sim.html");
+    expect(artifactFileName("///", "png")).toBe("artifact.png");
+  });
+});
+
+describe("app actions (propose_app_action observed 2026-11-08)", () => {
+  const msg = {
+    id: "m1",
+    role: "assistant",
+    content: "The fix is in a card waiting for you to approve.",
+    tool_calls: [
+      {
+        tool: "propose_app_action",
+        status: "completed",
+        data: { tool_name: "Create or update file contents", tier: "ask", app: "github", action_id: "af5f", summary: "Fix the workflow" },
+      },
+      { tool: "offer_replies", status: "completed", data: { options: ["I approved it"] } },
+    ],
+  };
+
+  test("a proposed app action becomes an approval, approved through app-actions", () => {
+    const [o] = parseMessages([msg])[0].offers;
+    expect(o).toMatchObject({ id: "app:af5f", title: "Fix the workflow", subtitle: "github · Create or update file contents", primary: "Approve" });
+    expect(openOffers(parseMessages([msg]))).toHaveLength(1);
+    expect(appActionUrl("af5f", "approve")).toEndWith("/api/waymond/app-actions/af5f/approve");
+  });
+
+  test("its preview lists the arguments, cutting a whole file short", () => {
+    const a = parseAppAction({
+      status: "pending",
+      tier: "ask_twice",
+      toolkit: "github",
+      tool_name: "Create or update file contents",
+      summary: "s",
+      arguments: { repo: "BentoSite", content: "x\n".repeat(500) },
+    })!;
+    const d = appActionDetail(a);
+    expect(d).toStartWith("⚠️ Can't be undone.");
+    expect(d).toContain("**repo:** BentoSite");
+    expect(d).toContain("(1000 chars)");
+    expect(parseAppAction({ nope: 1 })).toBeNull();
+  });
+});
+
 describe("approval cards (offer_post observed 2026-11-04)", () => {
   const card = (status: string) => ({
     id: "a9",
@@ -277,5 +348,92 @@ describe("workspace files (link shape observed 2026-11-06)", () => {
       ["make.py", [...new TextEncoder().encode("print(1)")]],
     ]);
     expect(out.text).toContain("(https://app.ambition.inc/chat?workspace=");
+  });
+});
+
+describe("modes", () => {
+  test("ids are /mode-safe and unique; every frame says what to hand back", () => {
+    const ids = WAYMOND_MODES.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const m of WAYMOND_MODES) {
+      expect(m.id).toMatch(/^[a-z0-9]+$/);
+      expect(m.frame).toMatch(/Reply with|End every reply|task list/);
+      expect(m.frame.length).toBeLessThan(2500); // rides on every message
+    }
+    expect(WAYMOND_MODES.find((m) => m.id === "code")!.frame).toContain("repo: <owner>/<name>");
+  });
+
+  test("research is a files mode (its report lands in research/ on a plan's branch) and plans can hand it tasks", () => {
+    const research = WAYMOND_MODES.find((m) => m.id === "research")!;
+    expect(research.files).toBe("research");
+    expect(research.frame).toContain("research/<short-name>/report.md");
+    expect(WAYMOND_MODES.find((m) => m.id === "plan")!.frame).toContain("research (");
+    // A turn that stops on narration carries on; the finished reply (with its report link) doesn't.
+    expect(continueAfterToolCap("Need more sources on licences.", "research")).toContain("mid-task");
+    expect(continueAfterToolCap("Answer: use X.\n[report.md](/chat?workspace=research%2Fx%2Freport.md&owner=o)", "research")).toBeNull();
+  });
+
+  test("a turn Ambition cut off at its tool limit is continued (observed 2026-11-08)", () => {
+    const cut = "Patches not applied by setup; apply manually.Read the code.\n\n_(Stopping after several tool calls - please re-ask if you want to continue.)_";
+    expect(continueAfterToolCap(cut)).toContain("continue");
+    expect(continueAfterToolCap("Added contact mode. All tests pass.")).toBeNull();
+    // A work mode's turn that ended on its own narration carries on; a real answer, a question, or chat doesn't.
+    expect(continueAfterToolCap("Output truncated; need params and mjcf.", "code")).toContain("mid-task");
+    expect(continueAfterToolCap("Output truncated; need params and mjcf.", "ask")).toBeNull();
+    expect(continueAfterToolCap("Output truncated; need params and mjcf.")).toBeNull();
+    expect(continueAfterToolCap("Which repo should this go in?", "code")).toBeNull();
+    expect(continueAfterToolCap("Done.\n\nrepo: a/b\n```\nPASS\n```", "code")).toBeNull();
+    expect(continueAfterToolCap("[part.step](/chat?workspace=x%2Fpart.step&owner=o)", "cad")).toBeNull();
+  });
+
+  test("stripNarration drops notes glued onto the answer, and leaves normal text alone", () => {
+    expect(stripNarration("No git; download tarball.No node/bun present. Let me look.I fixed `x`.\n\nMore."))
+      .toBe("I fixed `x`.\n\nMore.");
+    expect(stripNarration("Nested quotes; retry.```\n 22 pass\n```")).toBe("```\n 22 pass\n```");
+    expect(stripNarration("Checked the sources.**Stall current:** about 360 mA")).toBe("**Stall current:** about 360 mA");
+    expect(stripNarration("Short answer: **~360 mA.** TowerPro doesn't say.")).toBe("Short answer: **~360 mA.** TowerPro doesn't say.");
+    const normal = "I fixed it. Tests pass.\nSee README.md for details.";
+    expect(stripNarration(normal)).toBe(normal);
+  });
+});
+
+describe("sandbox tools", () => {
+  const tools = ["swe.sh", "cad_check.py"];
+
+  test("frames fetch tools that exist, pinned to TOOLS_REF", () => {
+    const frames = WAYMOND_MODES.map((m) => m.frame).join("\n");
+    for (const f of tools) {
+      expect(existsSync(join(import.meta.dir, "../../../plugins/waymond/tools", f))).toBe(true);
+      expect(frames).toContain(toolUrl(f));
+    }
+    expect(TOOLS_REF).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  test("TOOLS_REF has the same tools as this checkout (bump it when tools/ changes)", () => {
+    for (const f of tools) {
+      const path = `plugins/waymond/tools/${f}`;
+      const pinned = Bun.spawnSync(["git", "show", `${TOOLS_REF}:${path}`], { cwd: join(import.meta.dir, "../../..") });
+      if (pinned.exitCode !== 0) continue; // shallow clone without that commit: nothing to compare
+      expect(pinned.stdout.toString()).toBe(readFileSync(join(import.meta.dir, "../../..", path), "utf8"));
+    }
+  });
+});
+
+describe("plan mode", () => {
+  test("its example task line parses, and every mode it offers exists", () => {
+    const plan = WAYMOND_MODES.find((m) => m.id === "plan")!;
+    expect(plan.tasks).toBe(true);
+    const ids = WAYMOND_MODES.map((m) => m.id);
+    const example = plan.frame.split("\n").find((l) => /^1\. \[/.test(l))!;
+    expect(parseTaskList(`Tasks\n${example}`, ids)).toEqual([
+      expect.objectContaining({ n: 1, mode: "cad", title: "Motor mount" }),
+    ]);
+    for (const named of plan.frame.match(/\b(code|debug|cad|3d|research|plan) \(/g) ?? []) expect(ids).toContain(named.split(" ")[0]);
+  });
+
+  test("planContext points tasks at the plan file in the workspace", () => {
+    const answer = "Plan: [plan.md](https://app.ambition.inc/chat?workspace=plans%2Farm%2Fplan.md&owner=u1)\nTasks\n1. [cad] x";
+    expect(planContext(answer)).toContain("plans/arm/plan.md");
+    expect(planContext("[stl](https://app.ambition.inc/chat?workspace=cad%2Fa.stl&owner=u1)")).toBeUndefined();
   });
 });

@@ -64,6 +64,69 @@ export function replyRow() {
   );
 }
 
+/**
+ * The answer being replied to, minus our own question header, cut to a size
+ * worth resending. It rides along so a follow-up makes sense even if the
+ * Claude session cycled, or the reply is to an older answer. Used by the 💬
+ * Reply button and by a plain Discord reply to one of the bot's messages, so
+ * both ways of replying hand the brain the same prompt.
+ */
+export function replyExcerpt(answer: string, limit = 500): string {
+  const body = answer
+    .split("\n")
+    .filter((l) => !/^> \*\*[^*]+:\*\* /.test(l))
+    .join("\n")
+    .trim();
+  return body.length > limit ? `${body.slice(0, limit - 1)}…` : body;
+}
+
+/**
+ * Chat → ids of the messages making up its latest answer (chunks, files,
+ * late results). A reply to one of them needs no quote: the brain just said
+ * it. In memory, so after a restart every reply quotes — the safe side.
+ */
+const latestAnswer = new Map<string, Set<string>>();
+
+/** True when `messageId` is part of the newest answer in this chat. */
+export function isLatestAnswer(chatKey: string, messageId: string): boolean {
+  return latestAnswer.get(chatKey)?.has(messageId) ?? false;
+}
+
+/**
+ * Is a reply to `repliedTo` a reply to the brain's latest answer? `after` is
+ * the chat's messages after it (oldest first, the reply itself excluded),
+ * fetched with a limit of `limit`. A full page means the chat moved on; a bot
+ * message after someone else spoke means a newer answer exists.
+ */
+export function repliesToLatest(after: { authorId: string }[], botId: string, limit: number): boolean {
+  if (after.length >= limit) return false;
+  let someoneSpoke = false;
+  for (const m of after) {
+    if (m.authorId !== botId) someoneSpoke = true;
+    else if (someoneSpoke) return false;
+  }
+  return true;
+}
+
+/**
+ * Put 💬 Reply on a message's buttons: its own row when there's room, else
+ * the first button row with a free slot. Unchanged when all 25 are taken.
+ */
+export function withReplyButton(components: unknown[] | undefined): unknown[] {
+  const rows = (components ?? []).map((r) =>
+    typeof (r as { toJSON?: unknown }).toJSON === "function" ? (r as { toJSON(): unknown }).toJSON() : r
+  ) as { components?: { type?: number }[] }[];
+  const reply = replyRow().toJSON();
+  if (rows.length < 5) return [...rows, reply];
+  const open = rows.findIndex((r) => (r.components?.length ?? 5) < 5 && r.components!.every((c) => c.type === 2));
+  if (open < 0) return rows;
+  return rows.map((r, i) => (i === open ? { ...r, components: [...r.components!, ...reply.components] } : r));
+}
+
+export function replyPrompt(excerpt: string, text: string): string {
+  return excerpt ? `[Replying to your earlier answer: "${excerpt}"]\n${text.trim()}` : text.trim();
+}
+
 const DISCORD_LIMIT = 2000;
 
 export const NO_ANSWER = "⌛ No answer this time — try again.";
@@ -84,7 +147,7 @@ export function questionHeader(user: string, question: string): string {
  *
  * `header` is put above the first message (the question, since a modal's text
  * and a menu's target aren't visible to the chat). `replyButton` adds 💬 Reply
- * to every message that has no buttons of its own. `progress` shows a status
+ * to every message, beside any buttons it already has. `progress` shows a status
  * line in the "thinking…" reply until the answer replaces it. Sends and
  * progress run in order, so a late status line can never overwrite an answer.
  */
@@ -95,6 +158,8 @@ export function interactionChannel(
     ephemeral?: boolean;
     header?: string;
     replyButton?: boolean;
+    /** The chat this answers in: its posts become the chat's latest answer. */
+    chatKey?: string;
     now?: () => number;
   } = {}
 ): RelayChannel {
@@ -126,18 +191,25 @@ export function interactionChannel(
     (timer as { unref?: () => void }).unref?.();
   }
 
+  // A new relay is a new answer: replies to the previous one now quote it.
+  const answerIds = new Set<string>();
+  if (opts.chatKey) latestAnswer.set(opts.chatKey, answerIds);
+
   const post = async (body: Record<string, unknown>) => {
-    if (opts.replyButton && !(body.components as unknown[] | undefined)?.length) {
-      body = { ...body, components: [replyRow()] };
-    }
+    if (opts.replyButton) body = { ...body, components: withReplyButton(body.components as unknown[] | undefined) };
+    let sent: unknown;
     if (!edited) {
       edited = true;
       unanswered.delete(relay);
-      return interaction.editReply(body as never);
+      sent = await interaction.editReply(body as never);
+    } else {
+      sent = await interaction.followUp(
+        (opts.ephemeral ? { ...body, flags: MessageFlags.Ephemeral } : body) as never
+      );
     }
-    return interaction.followUp(
-      (opts.ephemeral ? { ...body, flags: MessageFlags.Ephemeral } : body) as never
-    );
+    const id = (sent as { id?: unknown } | undefined)?.id;
+    if (typeof id === "string") answerIds.add(id);
+    return sent;
   };
 
   const relay: RelayChannel = {

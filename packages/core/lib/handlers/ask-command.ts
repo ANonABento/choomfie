@@ -48,6 +48,9 @@ import {
   openAskRelay,
   questionHeader,
   rememberBrainRelay,
+  isLatestAnswer,
+  replyExcerpt,
+  replyPrompt,
 } from "../ask-relay.ts";
 import { registerButtonHandler, registerCommand, registerMessageMenu, registerModalHandler } from "../register.ts";
 import type { AppContext } from "../types.ts";
@@ -102,6 +105,7 @@ export async function runAsk(interaction: AskInteraction, ctx: AppContext, input
     header: input.header,
     // Where a normal reply can't reach Choomfie, give the chat a way to answer back.
     replyButton: botIsAbsent(interaction),
+    chatKey,
   });
 
   const meta: Record<string, string> = {
@@ -140,24 +144,6 @@ export function menuPrompt(author: string, text: string, attachmentCount: number
   const body = text.trim() || (attachmentCount ? "(attachments only)" : "(empty message)");
   const ask = instruction.trim();
   return `${ask ? `${ask}\n\n` : ""}${author} said:\n${body}`;
-}
-
-/**
- * The answer being replied to, minus our own question header, cut to a size
- * worth resending. It rides along so a follow-up makes sense even if the
- * Claude session cycled, or the reply is to an older answer.
- */
-export function replyExcerpt(answer: string, limit = 500): string {
-  const body = answer
-    .split("\n")
-    .filter((l) => !/^> \*\*[^*]+:\*\* /.test(l))
-    .join("\n")
-    .trim();
-  return body.length > limit ? `${body.slice(0, limit - 1)}…` : body;
-}
-
-export function replyPrompt(excerpt: string, text: string): string {
-  return excerpt ? `[Replying to your earlier answer: "${excerpt}"]\n${text.trim()}` : text.trim();
 }
 
 /** Discord's cap on files in one modal upload field. */
@@ -284,8 +270,10 @@ registerModalHandler("ask", async (interaction, parts, ctx) => {
 
   if (parts[1] === "reply") {
     const answer = interaction.isFromMessage() ? interaction.message : null;
+    // Quote the answer only when it isn't the latest one: that's already in the chat's context.
+    const latest = answer && interaction.channelId ? isLatestAnswer(interaction.channelId, answer.id) : false;
     await runAsk(interaction, ctx, {
-      prompt: replyPrompt(replyExcerpt(answer?.content ?? ""), text),
+      prompt: replyPrompt(latest ? "" : replyExcerpt(answer?.content ?? ""), text),
       attachments: uploadedFiles(interaction),
       ephemeral: answer?.flags.has(MessageFlags.Ephemeral) ?? false,
       header: questionHeader(interaction.user.username, text),

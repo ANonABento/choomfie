@@ -9,7 +9,7 @@ export function createInitialState(
   settings: DaemonSettings,
   chat: Omit<SessionChat, "sdkSessionId">
 ): MetaState {
-  const { tokenThreshold, turnThreshold, model, fallbackModel } = settings;
+  const { tokenThreshold, turnThreshold, model, fallbackModel, effort } = settings;
   return {
     state: "STARTING",
     session: null,
@@ -31,7 +31,7 @@ export function createInitialState(
     lastActivityAt: 0,
     pendingCycleReason: null,
     thresholds: { tokenThreshold, turnThreshold },
-    models: { model, fallbackModel },
+    models: { model, fallbackModel, ...(effort ? { effort } : {}) },
     resolved: { model: null, claudeCodeVersion: null },
     chat: { ...chat, sdkSessionId: null },
   };

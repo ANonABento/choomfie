@@ -10,7 +10,7 @@
 
 import type { EngineName } from "./engine/launch.ts";
 import type { Locator, Page } from "patchright";
-import type { BrainApproval, BrainFile } from "@choomfie/shared";
+import type { BrainApproval, BrainFile, BrainMode } from "@choomfie/shared";
 
 export type { Locator, Page };
 
@@ -19,6 +19,21 @@ export interface TurnInput {
   text: string;
   /** Attachments, copied under their original file names. */
   files: string[];
+  /** The chat's mode (`/mode`), already applied to `text`; lets the adapter tidy mode replies. */
+  mode?: string;
+}
+
+/**
+ * A per-chat working style. `frame` is put in front of every message while
+ * the chat is in this mode: the site keeps no instructions of ours, so the
+ * reminder rides along each time.
+ */
+export interface SiteMode extends BrainMode {
+  frame: string;
+  /** Replies end with a task list (`parseTaskList` format): post it as buttons that run each task in its own thread. */
+  tasks?: boolean;
+  /** A list of exactly one task runs right away, in this same chat, switched to that task's mode. */
+  runSingleTask?: boolean;
 }
 
 export interface TurnContext {
@@ -85,12 +100,23 @@ export interface SiteAdapter {
   label: string;
   /** Where `webbrain login <id>` opens. */
   loginUrl: string;
+  /** Modes a chat can be put in with `/mode`. */
+  modes?: SiteMode[];
+  /** The mode a chat runs in when none is set (`/mode off`). */
+  defaultMode?: string;
   /** Default browser engine; config.json `webbrain.<id>.engine` overrides. */
   engine?: EngineName;
   /** Link to a conversation, for messages that point the owner at the site. */
   chatUrl(ref?: string): string;
 
   turn(page: Page, input: TurnInput, ctx: TurnContext): Promise<TurnResult>;
+  /**
+   * The answer stopped short (a per-turn tool-call cap, or a work mode's
+   * turn that ended mid-task): the message to send so it carries on, or null
+   * when it finished. `mode` is the chat's mode, if any. The kit sends it in
+   * the same conversation, a few times at most — late answers included.
+   */
+  continueAfter?(answer: string, mode?: string): string | null;
 
   /** Interrupt the turn running in `ref`. Called on the same tab while `turn()` is in flight. */
   stop?(page: Page, ref: string): Promise<boolean>;
@@ -98,6 +124,8 @@ export interface SiteAdapter {
   readLate?(page: Page, ref: string, afterId: string, posted: Set<string>): Promise<LateResult | null>;
   /** Approve or decline an approval the site offered. Returns a short status. */
   resolveApproval?(page: Page, ref: string, approvalId: string, approve: boolean): Promise<string>;
+  /** For a task list: what every task needs to know first (where the full plan is). */
+  taskContext?(answer: string): string | undefined;
   /** Turn a Discord message into the prompt. Default: prefix who's talking when it isn't the owner. */
   framePrompt?(content: string, meta: Record<string, string>): string;
 }

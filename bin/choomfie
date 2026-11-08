@@ -79,6 +79,11 @@ if [ "$USE_DAEMON" = false ]; then
   if [ -n "$CONFIGURED_MODEL" ]; then
     CLAUDE_MODEL_ARGS=(--model "$CONFIGURED_MODEL")
   fi
+  # Reasoning effort, same source as the daemon's (default medium).
+  CONFIGURED_EFFORT="$(cd "$ROOT_DIR" && bun packages/core/scripts/resolve-model.ts effort 2>/dev/null || true)"
+  if [ -n "$CONFIGURED_EFFORT" ]; then
+    CLAUDE_MODEL_ARGS+=(--effort "$CONFIGURED_EFFORT")
+  fi
 fi
 
 # --- Permission mode ---

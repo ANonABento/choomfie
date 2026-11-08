@@ -72,11 +72,35 @@ export interface Offer {
   status: string;
 }
 
-/** Observed: `{tool: "offer_post", data: {offer: {offer_id, kind, title, subtitle, detail, primary, secondary, status}}}`. */
+/** An app action's offer id carries this prefix: it is approved through `app-actions`, not `cards`. */
+export const APP_ACTION_PREFIX = "app:";
+
+/**
+ * Observed: `{tool: "offer_post", data: {offer: {offer_id, kind, title, subtitle, detail, primary, secondary, status}}}`,
+ * and for a connected app's write (GitHub commit, …) `{tool: "propose_app_action",
+ * data: {action_id, app, tool_name, tier, summary}}` (2026-11-08) — its live
+ * status and arguments come from `app-actions/<id>`.
+ */
 function offersIn(toolCalls: unknown): Offer[] {
   if (!Array.isArray(toolCalls)) return [];
   const out: Offer[] = [];
   for (const call of toolCalls) {
+    const a = call as { tool?: unknown; status?: unknown; data?: Record<string, unknown> } | null;
+    if (a?.tool === "propose_app_action" && typeof a.data?.action_id === "string") {
+      const d = a.data;
+      const str = (v: unknown) => (typeof v === "string" ? v : "");
+      out.push({
+        id: APP_ACTION_PREFIX + d.action_id,
+        kind: "app_action",
+        title: str(d.summary) || str(d.tool_name) || "App action",
+        subtitle: [str(d.app), str(d.tool_name)].filter(Boolean).join(" · "),
+        detail: "",
+        primary: d.tier === "ask_twice" ? "Approve (can't be undone)" : "Approve",
+        secondary: "Cancel",
+        status: "open",
+      });
+      continue;
+    }
     const c = call as { tool?: unknown; data?: { offer?: Record<string, unknown> } } | null;
     const o = c?.data?.offer;
     if (typeof c?.tool !== "string" || !c.tool.startsWith("offer_") || !o || typeof o.offer_id !== "string") continue;
@@ -221,6 +245,44 @@ export function openOffers(messages: ChatMessage[]): Offer[] {
 export const offerActionUrl = (offerId: string, action: "send" | "decline") =>
   `${API_ORIGIN}/api/waymond/cards/${encodeURIComponent(offerId)}/${action}`;
 
+export const appActionUrl = (actionId: string, action?: "approve" | "decline") =>
+  `${API_ORIGIN}/api/waymond/app-actions/${encodeURIComponent(actionId)}${action ? `/${action}` : ""}`;
+
+export interface AppAction {
+  /** "pending" until approved or declined; then running / done / declined / failed. */
+  status: string;
+  tier: string;
+  toolkit: string;
+  toolName: string;
+  summary: string;
+  /** What the app will be called with, for the approval preview. */
+  args: Record<string, unknown>;
+}
+
+export function parseAppAction(raw: unknown): AppAction | null {
+  const r = raw as Record<string, unknown> | null;
+  if (!r || typeof r !== "object" || typeof r.status !== "string") return null;
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  return {
+    status: r.status,
+    tier: str(r.tier),
+    toolkit: str(r.toolkit),
+    toolName: str(r.tool_name),
+    summary: str(r.summary),
+    args: r.arguments && typeof r.arguments === "object" ? (r.arguments as Record<string, unknown>) : {},
+  };
+}
+
+/** The approval preview: each argument on its own line, long values (a whole file) cut. */
+export function appActionDetail(a: AppAction): string {
+  const lines = Object.entries(a.args).map(([k, v]) => {
+    const text = typeof v === "string" ? v : JSON.stringify(v);
+    const short = text.length > 600 ? `${text.slice(0, 600)}… (${text.length} chars)` : text;
+    return short.includes("\n") ? `**${k}**\n\`\`\`\n${short.replace(/```/g, "ʼʼʼ")}\n\`\`\`` : `**${k}:** ${short}`;
+  });
+  return [a.tier === "ask_twice" ? "⚠️ Can't be undone." : "", ...lines].filter(Boolean).join("\n").slice(0, 3900);
+}
+
 /** `cards/waiting` → whether this conversation has an approval parked. */
 export function hasWaitingCard(raw: unknown, conversationId: string): boolean {
   const convs = (raw as { conversations?: Record<string, unknown> })?.conversations;
@@ -286,4 +348,81 @@ export function parseWorkspaceFile(raw: unknown): { downloadUrl: string } | { co
     return r.download_url.startsWith("/api/waymond/workspace/download?") ? { downloadUrl: `${API_ORIGIN}${r.download_url}` } : null;
   }
   return typeof r.content === "string" ? { content: r.content } : null;
+}
+
+/**
+ * Artifacts: a page Waymond builds (a web sim, a chart) shows in its chat as
+ * `[[ref:artifact:<id>|<title>]]`. The record (`artifacts/<id>`, observed
+ * 2026-11-08) is `{kind, title, document, media_url, meta: {libs}}`; Ambition's
+ * viewer adds the libraries named in `libs` from its public /vendor folder.
+ */
+export interface ArtifactRef {
+  token: string;
+  id: string;
+  title: string;
+}
+
+const ARTIFACT_REF = /\[\[ref:artifact:([0-9a-f-]{36})(?:\|([^\]]*))?\]\]/g;
+
+export function artifactRefs(text: string): ArtifactRef[] {
+  const seen = new Set<string>();
+  const out: ArtifactRef[] = [];
+  for (const m of text.matchAll(ARTIFACT_REF)) {
+    if (seen.has(m[0])) continue;
+    seen.add(m[0]);
+    out.push({ token: m[0], id: m[1], title: (m[2] ?? "").trim() || "Artifact" });
+  }
+  return out;
+}
+
+export const artifactUrl = (id: string) => `${API_ORIGIN}/api/waymond/artifacts/${encodeURIComponent(id)}`;
+
+export interface Artifact {
+  kind: string;
+  title: string;
+  document?: string;
+  mediaUrl?: string;
+  libs: string[];
+}
+
+export function parseArtifact(raw: unknown): Artifact | null {
+  const r = raw as Record<string, unknown> | null;
+  if (!r || typeof r !== "object" || typeof r.kind !== "string") return null;
+  const meta = (r.meta ?? {}) as { libs?: unknown };
+  return {
+    kind: r.kind,
+    title: typeof r.title === "string" ? r.title : "Artifact",
+    document: typeof r.document === "string" ? r.document : undefined,
+    mediaUrl: typeof r.media_url === "string" && r.media_url ? r.media_url : undefined,
+    libs: Array.isArray(meta.libs) ? meta.libs.filter((l): l is string => typeof l === "string") : [],
+  };
+}
+
+/** The libraries Ambition's viewer injects, by `libs` name. */
+const VENDOR: Record<string, string[]> = {
+  p5: ["p5/p5.min.js"],
+  katex: ["katex/katex.min.css", "katex/katex.min.js", "katex/contrib/auto-render.min.js"],
+  three: ["three/three.global.js"],
+  d3: ["d3/d3.min.js"],
+  figure: ["ambition-figure/figure.js"],
+  leaflet: ["leaflet/leaflet.css", "leaflet/leaflet.js"],
+};
+
+/** An HTML artifact as a page that opens on its own: the viewer's libraries linked from Ambition's public /vendor. */
+export function standaloneHtml(a: Artifact): string {
+  const tags = a.libs
+    .flatMap((l) => VENDOR[l] ?? [])
+    .map((f) =>
+      f.endsWith(".css") ? `<link rel="stylesheet" href="${APP_ORIGIN}/vendor/${f}">` : `<script src="${APP_ORIGIN}/vendor/${f}"></script>`
+    )
+    .join("");
+  const doc = a.document ?? "";
+  if (!tags) return doc;
+  return /<head[^>]*>/i.test(doc) ? doc.replace(/<head[^>]*>/i, (h) => h + tags) : tags + doc;
+}
+
+/** A file name for an artifact: its title, made safe. */
+export function artifactFileName(title: string, ext: string): string {
+  const base = title.normalize("NFKD").replace(/[^\w .-]+/g, " ").replace(/\s+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  return `${base || "artifact"}.${ext}`;
 }

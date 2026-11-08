@@ -1,19 +1,34 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Brain } from "@choomfie/shared";
+import { fileBatches, type Brain } from "@choomfie/shared";
 import {
   chunkForDiscord,
   decideRoute,
   dispatchToBrain,
   getPendingApproval,
+  getTaskBoard,
+  landingFor,
+  planStatusNote,
+  setPlanTaskStarter,
+  loadTaskBoards,
+  planTaskRepo,
   postBrainReply,
+  resetTaskBoards,
+  saveTaskBoards,
+  takeLand,
+  taskForThread,
+  taskBoardRows,
+  taskPrompt,
   takeChoices,
   resolveBrainId,
   type RouteInput,
 } from "../lib/brain-router.ts";
 import { ConfigManager } from "../lib/config.ts";
+import { ChatStore } from "../lib/chats/store.ts";
+import { Database } from "bun:sqlite";
+import { takePatch } from "../lib/patch-pr.ts";
 import { findSetting } from "../lib/settings.ts";
 
 const fake = (id = "waymond", send: Brain["send"] = async (m) => ({ text: `echo ${m.content}` })): Brain => ({
@@ -105,6 +120,24 @@ describe("dispatchToBrain", () => {
     await dispatchToBrain({} as never, brain, { send: async (o: { content?: string }) => void sent.push(o.content!) }, msg("x"));
     expect(sent[0]).toContain("Waymond didn't answer: login expired");
   });
+  test("a single run-now task switches the chat to its mode and is sent next, in the same place", async () => {
+    const chats = new ChatStore(new Database(":memory:"));
+    const chat = chats.current("t1", "waymond", "make a spacer");
+    const seen: string[] = [];
+    const brain = fake("waymond", async (m) => {
+      seen.push(m.content);
+      return seen.length === 1
+        ? { text: "One spacer.", tasks: [{ n: 1, mode: "cad", title: "Spacer", spec: "Spacer — 10 mm" }], taskContext: "ctx", runNow: true }
+        : { text: "Done: spacer.stl" };
+    });
+    const sent: string[] = [];
+    const channel = { send: async (o: { content?: string }) => void sent.push(o.content ?? "") };
+    await dispatchToBrain({ chats } as never, brain, channel, { ...msg("make a spacer"), chatKey: "t1" });
+    for (let i = 0; i < 20 && seen.length < 2; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(chats.get(chat.id)!.mode).toBe("cad");
+    expect(seen[1]).toBe("Task 1 of a plan: Spacer — 10 mm\n\nctx");
+    expect(sent.some((c) => c.includes("**cad** mode"))).toBe(true);
+  });
 });
 
 describe("brain config", () => {
@@ -165,6 +198,230 @@ describe("files", () => {
     await postBrainReply(channel, "waymond", "c1", { text: "", files: [file] });
     expect(sent).toHaveLength(1);
     expect(sent[0].content).toBe("");
+  });
+
+  test("more than one message holds goes on in messages of their own — five 3 MB portraits all arrive", async () => {
+    const sent: { content?: string; files?: { attachment: Buffer; name: string }[] }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: "m" }) };
+    const big = (name: string) => ({ name, data: new Uint8Array(3 * 1024 * 1024) });
+    const files = ["seshat", "hathor", "hetepheres", "bastet", "cleopatra"].map((n) => big(`${n}.png`));
+    await postBrainReply(channel, "waymond", "c1", { text: "I made the 5 portraits.", files });
+    expect(sent.map((m) => m.files?.map((f) => f.name) ?? [])).toEqual([
+      ["seshat.png", "hathor.png", "hetepheres.png"],
+      ["bastet.png", "cleopatra.png"],
+    ]);
+    expect(sent[0].content).toBe("I made the 5 portraits.");
+  });
+
+  test("batches: at most 10 files and ~10 MB a message, in order", () => {
+    const small = Array.from({ length: 23 }, (_, i) => ({ name: `${i}`, data: new Uint8Array(10) }));
+    expect(fileBatches(small).map((b) => b.length)).toEqual([10, 10, 3]);
+    const sizes = [6, 6, 3, 9.5].map((mb) => ({ data: new Uint8Array(mb * 1024 * 1024) }));
+    expect(fileBatches(sizes).map((b) => b.length)).toEqual([1, 2, 1]);
+    expect(fileBatches([])).toEqual([]);
+  });
+});
+
+describe("patches", () => {
+  test("a reply with a .patch file and a repo line gets an Open draft PR button", async () => {
+    const sent: { content?: string; components?: unknown[] }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: `p${sent.length}` }) };
+    const file = { name: "fix.patch", data: new TextEncoder().encode("diff --git a/x b/x\n") };
+    await postBrainReply(channel, "waymond", "c1", { text: "Fixed the split.\nrepo: owner/name", files: [file] });
+    expect(sent).toHaveLength(2);
+    expect(sent[1].content).toContain("owner/name");
+    const ids = (sent[1].components![0] as { toJSON(): { components: { custom_id: string }[] } }).toJSON().components;
+    expect(ids.map((c) => c.custom_id)).toEqual(["brain:pr"]);
+    expect(takePatch("p2")).toMatchObject({ repo: "owner/name", title: "Fixed the split." });
+    expect(takePatch("p2")).toBeUndefined(); // one use
+
+    sent.length = 0;
+    await postBrainReply(channel, "waymond", "c1", { text: "no repo line", files: [file] });
+    expect(sent).toHaveLength(1);
+  });
+});
+
+describe("task board", () => {
+  test("a reply with tasks gets one button per task; started tasks become links to their thread", async () => {
+    const sent: { content?: string; components?: unknown[] }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: `b${sent.length}` }) };
+    const tasks = [
+      { n: 1, mode: "cad", title: "Mount", spec: "Mount — plate" },
+      { n: 2, mode: "code", title: "Driver", spec: "Driver — pwm" },
+    ];
+    await postBrainReply(channel, "waymond", "c1", { text: "Plan done.", tasks, taskContext: "see plan.md" });
+    expect(sent).toHaveLength(2);
+    const board = getTaskBoard("b2")!;
+    expect(board).toMatchObject({ brainId: "waymond", context: "see plan.md" });
+    const json = (rows: unknown[]) =>
+      rows.flatMap((r) => (r as { toJSON(): { components: { custom_id?: string; url?: string; label: string }[] } }).toJSON().components);
+    expect(json(sent[1].components!).map((c) => c.custom_id)).toEqual(["brain:task:0", "brain:task:1", "brain:taskall"]);
+    board.states[0] = { kind: "running", url: "https://discord.com/channels/g/t" };
+    const after = json(taskBoardRows(board));
+    expect(after[0]).toMatchObject({ url: "https://discord.com/channels/g/t", label: "⏳ 1 · cad · Mount" });
+    expect(after.map((c) => c.custom_id)).toEqual([undefined, "brain:task:1"]); // Run all needs 2+ idle
+    expect(json(taskBoardRows({ ...board, states: [{ kind: "idle" }, { kind: "idle" }], busy: true })).map((c) => c.custom_id)).toEqual([
+      "brain:task:0",
+      "brain:task:1",
+    ]);
+    // A failed task can be retried, and counts toward running the rest in order.
+    const failed = json(taskBoardRows({ ...board, states: [{ kind: "failed", url: "u" }, { kind: "idle" }] }));
+    expect(failed.map((c) => c.custom_id)).toEqual(["brain:task:0", "brain:task:1", "brain:taskall"]);
+    expect(failed[0].label).toContain("retry");
+    expect(failed[2].label).toBe("▶ Run the remaining 2, in order");
+  });
+
+  test("a single task to run now posts no board; the brain switches mode and starts it", async () => {
+    const sent: { content?: string; components?: unknown[] }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: `n${sent.length}` }) };
+    const tasks = [{ n: 1, mode: "cad", title: "Spacer", spec: "Spacer — 10 mm" }];
+    await postBrainReply(channel, "waymond", "c1", { text: "Making a spacer.", tasks, runNow: true });
+    expect(sent).toHaveLength(1);
+    expect(taskPrompt(tasks[0], "plan at x")).toBe("Task 1 of a plan: Spacer — 10 mm\n\nplan at x");
+  });
+});
+
+describe("task boards survive a restart", () => {
+  test("saved on change; a task the restart cut off comes back failed (retryable); old boards are dropped", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "boards-"));
+    mkdirSync(join(dir, "meta"));
+    loadTaskBoards(dir);
+    const channel = { send: async () => ({ id: "board1" }) };
+    const tasks = [
+      { n: 1, mode: "code", title: "A", spec: "A — in me/r: x", repo: "me/r" },
+      { n: 2, mode: "code", title: "B", spec: "B — y" },
+    ];
+    await postBrainReply(channel, "waymond", "chan", { text: "Plan.", tasks });
+    const board = getTaskBoard("board1")!;
+    expect(board.channelId).toBe("chan");
+    board.states[0] = { kind: "running", url: "https://t/1" };
+    board.threads = { thread1: 0 };
+    board.plans = { "me/r": { repo: "me/r", branch: "plan/r-1", dir: "/x", created: true } };
+    board.busy = true;
+    saveTaskBoards();
+    expect(JSON.parse(readFileSync(join(dir, "meta/task-boards.json"), "utf8")).board1.busy).toBeUndefined();
+
+    loadTaskBoards(dir); // restart
+    const back = getTaskBoard("board1")!;
+    expect(back.states[0]).toEqual({ kind: "failed", url: "https://t/1" });
+    expect(back.plans?.["me/r"].branch).toBe("plan/r-1");
+    expect(taskForThread("thread1")).toMatchObject({ boardId: "board1", index: 0 });
+    expect(planTaskRepo(back, 1)).toBe("me/r"); // the plan's one repo
+
+    loadTaskBoards(dir, Date.now() + 31 * 24 * 3600_000);
+    expect(getTaskBoard("board1")).toBeUndefined();
+    resetTaskBoards();
+  });
+
+  test("a patch sent in a task thread after the task offers a commit to the plan's branch, not a PR", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "boards-"));
+    mkdirSync(join(dir, "meta"));
+    loadTaskBoards(dir);
+    const { registerBrain, unregisterBrain } = await import("@choomfie/shared");
+    registerBrain({ id: "codebrain", label: "CodeBrain", send: async () => ({ text: "" }), modes: [{ id: "code", label: "Code", description: "", repo: true }] });
+    let id = 0;
+    const sent: { content?: string; components?: unknown[] }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: `m${++id}` }) };
+    try {
+      await postBrainReply(channel, "codebrain", "chan", { text: "Plan.", tasks: [{ n: 1, mode: "code", title: "A", spec: "A — in me/r: x", repo: "me/r" }] });
+      getTaskBoard("m2")!.threads = { th: 0 };
+      const patch = { name: "a.patch", data: new TextEncoder().encode("diff") };
+      await postBrainReply(channel, "codebrain", "th", { text: "Done.\nrepo: me/r", files: [{ name: "wip.patch", data: new Uint8Array() }, patch] });
+      const offer = sent.at(-1)!;
+      expect(offer.content).toContain("task 1");
+      expect(takeLand(`m${id}`)).toMatchObject({ boardId: "m2", index: 0, kind: "patch", files: [{ name: "a.patch" }] });
+      expect(sent.some((m) => m.content?.includes("Open draft PR"))).toBe(false);
+    } finally {
+      unregisterBrain("codebrain");
+      resetTaskBoards();
+    }
+  });
+});
+
+describe("what a plan task commits", () => {
+  test("a repo mode commits its patch, a files mode its files, other modes or no repo nothing", async () => {
+    const { registerBrain, unregisterBrain } = await import("@choomfie/shared");
+    registerBrain({
+      id: "planbrain",
+      label: "PlanBrain",
+      send: async () => ({ text: "" }),
+      modes: [
+        { id: "code", label: "Code", description: "", repo: true },
+        { id: "cad", label: "CAD", description: "", files: "cad" },
+        { id: "ask", label: "Ask", description: "" },
+      ],
+    });
+    try {
+      const f = (name: string) => ({ name, data: new Uint8Array() });
+      const board = {
+        brainId: "planbrain",
+        tasks: [
+          { n: 1, mode: "code", title: "A", spec: "", repo: "me/r" },
+          { n: 2, mode: "cad", title: "B", spec: "" },
+          { n: 3, mode: "ask", title: "C", spec: "" },
+        ],
+      };
+      expect(landingFor(board, 0, [f("wip.patch"), f("a.patch")])).toEqual({ kind: "patch", files: [f("a.patch")] });
+      expect(landingFor(board, 0, [f("a.png")])).toBeUndefined();
+      expect(landingFor(board, 1, [f("m.scad"), f("m.stl"), f("x.patch")])).toEqual({ kind: "files", files: [f("m.scad"), f("m.stl")], folder: "cad" });
+      expect(landingFor(board, 2, [f("m.scad")])).toBeUndefined();
+      expect(landingFor({ ...board, tasks: board.tasks.map((t) => ({ ...t, repo: undefined })) }, 1, [f("m.scad")])).toBeUndefined();
+    } finally {
+      unregisterBrain("planbrain");
+    }
+  });
+});
+
+describe("a plan's own chat", () => {
+  test("is told how its tasks went, and a new single job joins the plan instead of taking over the chat", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "boards-"));
+    mkdirSync(join(dir, "meta"));
+    loadTaskBoards(dir);
+    const channel = { send: async () => ({ id: "pb1" }) };
+    await postBrainReply(channel, "waymond", "planchat", {
+      text: "Plan.",
+      tasks: [
+        { n: 1, mode: "code", title: "Scaffold", spec: "Scaffold — in me/cube: x", repo: "me/cube" },
+        { n: 2, mode: "code", title: "Turning", spec: "Turning — y" },
+      ],
+    });
+    const board = getTaskBoard("pb1")!;
+    expect(planStatusNote("planchat")).toBeUndefined(); // nothing has run yet
+    board.states = [{ kind: "done", url: "u1" }, { kind: "failed", url: "u2" }];
+    board.plans = { "me/cube": { repo: "me/cube", branch: "plan/cube-1", dir: "/x", created: true, prUrl: "https://pr/2" } };
+    const note = planStatusNote("planchat")!;
+    expect(note).toContain("1. Scaffold [code] — done");
+    expect(note).toContain("2. Turning [code] — failed");
+    expect(note).toContain("me/cube (private");
+    expect(note).toContain("https://pr/2");
+
+    const started: { boardId: string; index: number }[] = [];
+    setPlanTaskStarter(async (_ctx, boardId, index) => (started.push({ boardId, index }), true));
+    const seen: string[] = [];
+    const brain = fake("waymond", async (m) => {
+      seen.push(m.content);
+      return { text: "Meshes.", tasks: [{ n: 1, mode: "code", title: "Meshes", spec: "Meshes — stickerless" }], runNow: true };
+    });
+    const sent: string[] = [];
+    const chats = new ChatStore(new Database(":memory:"));
+    const owner = { chatKey: "planchat", content: "make it stickerless", meta: { role: "owner", user_id: "u", user: "me" }, filePaths: [] };
+    await dispatchToBrain({ chats } as never, brain, { send: async (o: { content?: string }) => void sent.push(o.content ?? "") }, owner);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(seen[0]).toContain("[Plan status, from Choomfie");
+    expect(board.tasks.at(-1)).toMatchObject({ n: 3, title: "Meshes", repo: "me/cube" });
+    expect(started).toEqual([{ boardId: "pb1", index: 2 }]);
+    expect(sent.some((c) => c.includes("added to the plan as **task 3**"))).toBe(true);
+    expect(sent.some((c) => c.includes("mode ·"))).toBe(false); // the planning chat kept its mode
+    expect(chats.bound("planchat", "waymond")?.mode ?? null).toBeNull();
+
+    // Someone else's message gets no status, and their job doesn't touch the plan.
+    const plain: string[] = [];
+    const other = fake("waymond", async (m) => (plain.push(m.content), { text: "ok" }));
+    await dispatchToBrain({ chats } as never, other, { send: async () => {} }, { ...owner, meta: { role: "user" } });
+    expect(plain[0]).not.toContain("Plan status");
+    expect(board.tasks).toHaveLength(3);
+    setPlanTaskStarter(async () => false);
+    resetTaskBoards();
   });
 });
 

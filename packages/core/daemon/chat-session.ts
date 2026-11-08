@@ -38,6 +38,12 @@ export interface ChatSessionDeps {
   onUsage(inputTokens: number): void;
   /** Something the state file reports changed (rate limits, model). */
   onChange(): void;
+  /**
+   * Post a turn's plain final answer to Discord (the worker's `reply` tool).
+   * Saves the model a round-trip per answer: calling `reply` and then ending
+   * the turn is two calls, each re-reading the whole context.
+   */
+  postReply?(chatId: string, text: string): Promise<void>;
   log(message: string): void;
   /** Replaces the Agent SDK (tests). */
   createSession?: typeof createSession;
@@ -55,6 +61,10 @@ export class ChatSession implements LiveSession {
   private reportedSessionId: string | null;
   private contextTimer: ReturnType<typeof setInterval> | null = null;
   private compacting = false;
+  /** Where this turn's plain final answer goes; null = nowhere (internal prompt, conversation mode). */
+  private replyTarget: string | null = null;
+  /** The model already answered with `reply` this turn — its final text isn't the answer. */
+  private repliedThisTurn = false;
 
   constructor(private readonly deps: ChatSessionDeps) {
     this.chatId = deps.chat.id;
@@ -116,6 +126,7 @@ export class ChatSession implements LiveSession {
       for await (const message of query) {
         const before = this.state.tokenUsageToday.inputTokens;
         handleSessionMessage(this.state, message, this.deps.onChange);
+        this.watchForAnswer(message);
         const used = this.state.tokenUsageToday.inputTokens - before;
         if (used > 0) this.deps.onUsage(used);
         const sid = this.state.chat.sdkSessionId;
@@ -129,6 +140,27 @@ export class ChatSession implements LiveSession {
       if (this.closed || this.state.session !== query) return;
       await this.recover(error);
     }
+  }
+
+  /** Post a turn's final text when the model answered without calling `reply`. */
+  private watchForAnswer(message: { type: string; subtype?: string; message?: unknown; result?: unknown }) {
+    if (message.type === "assistant") {
+      const content = (message.message as { content?: unknown } | undefined)?.content;
+      if (Array.isArray(content) && content.some((b) => b?.type === "tool_use" && /(^|__)reply$/.test(String(b.name)))) {
+        this.repliedThisTurn = true;
+      }
+      return;
+    }
+    if (message.type !== "result") return;
+    const target = this.replyTarget;
+    const replied = this.repliedThisTurn;
+    this.replyTarget = null;
+    this.repliedThisTurn = false;
+    const text = message.subtype === "success" && typeof message.result === "string" ? message.result.trim() : "";
+    if (!target || replied || !text || !this.deps.postReply) return;
+    void this.deps.postReply(target, text).catch((e: unknown) =>
+      this.deps.log(`"${this.title}": couldn't post the answer: ${getErrorMessage(e)}`)
+    );
   }
 
   /** The stream broke: reopen on the same SDK session, backing off; give up on auth/billing. */
@@ -210,7 +242,8 @@ export class ChatSession implements LiveSession {
     return this.state.lastActivityAt;
   }
 
-  push(content: string): void {
+  push(content: string, replyTo: string | null = null): void {
+    this.replyTarget = replyTo;
     if (!this.state.pushMessage) {
       this.deps.log(`"${this.title}": no live session — message dropped`);
       return;
@@ -230,6 +263,8 @@ export class ChatSession implements LiveSession {
     this.compacting = true;
     try {
       this.deps.log(`"${this.title}": compacting (${this.state.lastCycleReason ?? "requested"})`);
+      // The handoff summary is a turn too; it must never be posted as an answer.
+      this.replyTarget = null;
       const summary = await captureHandoffSummary(this.state);
       this.teardownQuery();
       this.state.totalCycles++;

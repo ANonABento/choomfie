@@ -8,7 +8,7 @@
  */
 
 import { basename } from "node:path";
-import { errorMessage, type BrainApproval, type BrainFile } from "@choomfie/shared";
+import { DISCORD_MESSAGE_BYTES, errorMessage, type BrainApproval, type BrainFile } from "@choomfie/shared";
 import {
   LayoutChangedError,
   LoginRequiredError,
@@ -17,7 +17,9 @@ import {
   type Page,
   type SiteAdapter,
 } from "@choomfie/webbrain";
+import { AUTO_MODE, continueAfterToolCap, planContext, stripNarration, WAYMOND_MODES } from "./modes.ts";
 import {
+  API_ORIGIN,
   APP_ORIGIN,
   absoluteLinks,
   CHAT_SEND_URL,
@@ -29,8 +31,17 @@ import {
   lateMessages,
   memoryPrivateUrl,
   messagesUrl,
+  APP_ACTION_PREFIX,
+  appActionDetail,
+  artifactFileName,
+  artifactRefs,
+  artifactUrl,
+  parseArtifact,
+  standaloneHtml,
+  appActionUrl,
   offerActionUrl,
   openOffers,
+  parseAppAction,
   parseMessages,
   parseTurn,
   parseWorkspaceFile,
@@ -69,6 +80,25 @@ export function progressLine(turn: TurnState, elapsedMs: number): string {
 /** GET an Ambition endpoint from the logged-in page. */
 const getJson = (page: Page, url: string) => pageFetchOk(page, url, ID);
 
+/**
+ * App actions (a GitHub commit Waymond proposed) say only "proposed" in the
+ * message; their status and arguments live in `app-actions/<id>`. Fill in the
+ * preview, and drop ones already approved or cancelled in the app.
+ */
+async function withAppActions(page: Page, offers: Offer[]): Promise<Offer[]> {
+  const out: Offer[] = [];
+  for (const o of offers) {
+    if (!o.id.startsWith(APP_ACTION_PREFIX)) {
+      out.push(o);
+      continue;
+    }
+    const a = parseAppAction(await getJson(page, appActionUrl(o.id.slice(APP_ACTION_PREFIX.length))).catch(() => null));
+    if (!a) out.push(o); // couldn't look: still offer it; the site refuses a stale one
+    else if (a.status === "pending") out.push({ ...o, detail: appActionDetail(a) });
+  }
+  return out;
+}
+
 /** fetch() needs the app origin for the session cookie and CORS. */
 async function onApp(page: Page) {
   if (!page.url().startsWith(APP_ORIGIN)) await page.goto(`${APP_ORIGIN}/chat`, { waitUntil: "domcontentloaded" });
@@ -96,9 +126,13 @@ async function clearDraftAttachments(page: Page): Promise<void> {
   }
 }
 
-/** Discord's upload cap for a bot (10 attachments, ~10 MB on an unboosted server). */
-const MAX_FILES = 10;
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+/**
+ * How much one answer brings back. Discord takes 10 files / ~10 MB per
+ * message, so a bigger set goes over several messages; one file has to fit
+ * a message on its own.
+ */
+const MAX_FILES = 20;
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 /**
  * The answer with its workspace links made absolute, plus the files they
@@ -106,23 +140,58 @@ const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
  */
 export async function withFiles(page: Page, text: string): Promise<{ text: string; files: BrainFile[] }> {
   const files: BrainFile[] = [];
+  const left: string[] = [];
   let room = MAX_UPLOAD_BYTES;
-  for (const link of workspaceLinks(text).slice(0, MAX_FILES)) {
+  const links = workspaceLinks(text);
+  for (const link of links) {
+    const name = basename(link.path);
+    if (files.length >= MAX_FILES) {
+      left.push(name);
+      continue;
+    }
     try {
       const where = parseWorkspaceFile(await getJson(page, workspaceFileUrl(link)));
+      const cap = Math.min(room, DISCORD_MESSAGE_BYTES);
       const data = !where
         ? null
         : "content" in where
           ? new TextEncoder().encode(where.content)
-          : await pageFetchBytes(page, where.downloadUrl, room);
-      if (data && data.length <= room) {
-        files.push({ name: basename(link.path), data });
+          : await pageFetchBytes(page, where.downloadUrl, cap);
+      if (data && data.length <= cap) {
+        files.push({ name, data });
         room -= data.length;
-      }
+      } else left.push(name);
     } catch (e) {
+      left.push(name);
       console.error(`[waymond] couldn't fetch workspace file ${link.path}: ${errorMessage(e)}`);
     }
   }
+  // Artifacts (a web sim, a chart): attach a page that opens on its own, and say so where the ref was.
+  for (const ref of artifactRefs(text)) {
+    let line = `**${ref.title}** (open it in the Waymond chat)`;
+    try {
+      const a = parseArtifact(await getJson(page, artifactUrl(ref.id)));
+      let file: BrainFile | null = null;
+      if (a?.document) {
+        file = { name: artifactFileName(a.title, "html"), data: new TextEncoder().encode(standaloneHtml(a)) };
+      } else if (a?.mediaUrl) {
+        const ext = (/\.(\w{2,5})(?:\?|$)/.exec(a.mediaUrl)?.[1] ?? "bin").toLowerCase();
+        const data = await pageFetchBytes(page, new URL(a.mediaUrl, API_ORIGIN).href, room);
+        if (data) file = { name: artifactFileName(a.title, ext), data };
+      }
+      if (file && file.data.length <= Math.min(room, DISCORD_MESSAGE_BYTES) && files.length < MAX_FILES) {
+        if (files.some((f) => f.name === file.name)) file.name = file.name.replace(/(\.\w+)$/, `-${ref.id.slice(0, 4)}$1`);
+        files.push(file);
+        room -= file.data.length;
+        line = `📎 **${a!.title}** — attached as \`${file.name}\`${a!.document ? " (open it in a browser)" : ""}`;
+      }
+    } catch (e) {
+      console.error(`[waymond] couldn't fetch artifact ${ref.id}: ${errorMessage(e)}`);
+    }
+    text = text.split(ref.token).join(line);
+  }
+  // Say which links didn't come along, rather than dropping them quietly.
+  if (left.length) text += `\n\n-# Not attached (too big for Discord, or too many): ${left.join(", ")} — the links above open them in Waymond.`;
   return { text: absoluteLinks(text), files };
 }
 
@@ -145,8 +214,12 @@ export const waymondAdapter: SiteAdapter = {
   ...ID,
   loginUrl: `${APP_ORIGIN}/chat`,
   chatUrl,
+  modes: WAYMOND_MODES,
+  defaultMode: AUTO_MODE,
+  taskContext: planContext,
+  continueAfter: continueAfterToolCap,
 
-  async turn(page, { text, files }, t) {
+  async turn(page, { text, files, mode }, t) {
     await page.goto(chatUrl(t.ref), { waitUntil: "domcontentloaded" });
     const composer = page.getByPlaceholder(COMPOSER_PLACEHOLDER).first();
     try {
@@ -207,12 +280,12 @@ export const waymondAdapter: SiteAdapter = {
           throw new Error(`Waymond's turn ended without an answer (a tool may have failed on its side) — ${chatUrl(ref)}`);
         }
         if (state.done || t.stopRequested()) {
-          const answer = await withFiles(page, state.reply);
+          const answer = await withFiles(page, mode ? stripNarration(state.reply) : state.reply);
           return {
             ...answer,
             ref,
             choices: state.options,
-            approvals: state.offers.map(toApproval),
+            approvals: (await withAppActions(page, state.offers)).map(toApproval),
             stopped: t.stopRequested(),
             background: state.background,
             lastMessageId: state.lastMessageId,
@@ -227,7 +300,17 @@ export const waymondAdapter: SiteAdapter = {
         t.notice(`🔐 Waymond is waiting for your OK on something. Approve or decline it here: ${chatUrl(ref)}`);
       }
       if (elapsed > t.timeoutMs) {
-        throw new Error(`still working after ${Math.round(elapsed / 60_000)} min — follow it at ${chatUrl(ref)}`);
+        // Hand it to the late-result watch rather than lose the answer: it's posted when the turn ends.
+        const ours = parseMessages(await getJson(page, messagesUrl(ref))).find((m) => m.role === "user" && !baseline.has(m.id));
+        if (!ours) throw new Error(`still working after ${Math.round(elapsed / 60_000)} min — follow it at ${chatUrl(ref)}`);
+        return {
+          text: `⏳ Still working after ${Math.round(elapsed / 60_000)} min — follow it at ${chatUrl(ref)}`,
+          files: [],
+          ref,
+          background: true,
+          lastMessageId: ours.id,
+          messageIds: [],
+        };
       }
     }
   },
@@ -239,12 +322,14 @@ export const waymondAdapter: SiteAdapter = {
 
   async readLate(page, ref, afterId, posted) {
     await onApp(page);
+    // Mid-turn, the answer is still being written: wait for the turn to end.
+    if (parseTurn(await getJson(page, turnUrl(ref))).active) return null;
     const late = lateMessages(parseMessages(await getJson(page, messagesUrl(ref))), afterId, posted);
     if (!late.length) return null;
     return {
       ...(await withFiles(page, late.map((m) => m.content.trim()).filter(Boolean).join("\n\n"))),
       choices: [...late].reverse().find((m) => m.options.length)?.options ?? [],
-      approvals: openOffers(late).map(toApproval),
+      approvals: (await withAppActions(page, openOffers(late))).map(toApproval),
       ids: late.map((m) => m.id),
       more: late.some((m) => m.startsTask),
     };
@@ -253,6 +338,18 @@ export const waymondAdapter: SiteAdapter = {
   /** `POST cards/:id/send|decline`. Returns Ambition's status for the card. */
   async resolveApproval(page, ref, approvalId, approve) {
     await onApp(page);
+    if (approvalId.startsWith(APP_ACTION_PREFIX)) {
+      const id = approvalId.slice(APP_ACTION_PREFIX.length);
+      const a = parseAppAction(await getJson(page, appActionUrl(id)));
+      if (a && a.status !== "pending") return `already ${a.status}`;
+      // The Discord click is the confirmation; "ask_twice" asks the site for the second one too.
+      const json = await pageFetchOk(page, appActionUrl(id, approve ? "approve" : "decline"), ID, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(approve ? { confirm: true, twice: a?.tier === "ask_twice" } : {}),
+      });
+      return String((json as { status?: unknown } | undefined)?.status ?? (approve ? "approved" : "declined"));
+    }
     const action = approve ? "send" : "decline";
     const json = await pageFetchOk(page, offerActionUrl(approvalId, action), ID, {
       method: "POST",
