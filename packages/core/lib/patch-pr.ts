@@ -84,29 +84,58 @@ export function branchName(title: string, now = Date.now()): string {
   return `waymond/${slug || "patch"}-${now.toString(36)}`;
 }
 
-/** Apply the patch on a new branch and open a draft PR. Returns the PR URL. */
-export async function openDraftPr(offer: PatchOffer, run: Runner = runCommand): Promise<string> {
+export interface Opened {
+  url: string;
+  /** "pr": a draft PR on an existing repo. "repo": the repo didn't exist, so it was created private with the patch as its first commit. */
+  kind: "pr" | "repo";
+}
+
+/**
+ * Apply the patch on a new branch and open a draft PR. A repo that doesn't
+ * exist yet (a plan's new project) is created private, with the patch as its
+ * first commit on main — there is nothing to open a PR against.
+ */
+export async function openDraftPr(offer: PatchOffer, run: Runner = runCommand): Promise<Opened> {
   const dir = mkdtempSync(join(tmpdir(), "choomfie-pr-"));
   const repoDir = join(dir, "repo");
   const patchPath = join(dir, "change.patch");
   const noHooks = ["-c", "core.hooksPath=/dev/null"];
-  try {
-    writeFileSync(patchPath, offer.file.data);
-    await run(["gh", "repo", "clone", offer.repo, repoDir, "--", "--depth", "1", "-q"]);
-    const branch = branchName(offer.title);
-    await run(["git", "checkout", "-q", "-b", branch], repoDir);
+  const apply = async () => {
     try {
       await run(["git", "apply", "--index", "--whitespace=nowarn", patchPath], repoDir);
     } catch (e) {
-      throw new Error(`the patch doesn't apply to ${offer.repo}'s default branch (it may have moved on): ${e instanceof Error ? e.message : e}`);
+      throw new Error(
+        `the patch doesn't apply to ${offer.repo}'s default branch — it may build on an earlier task's PR (merge that first): ${e instanceof Error ? e.message : e}`
+      );
     }
+  };
+  try {
+    writeFileSync(patchPath, offer.file.data);
+    const exists = await run(["gh", "repo", "view", offer.repo, "--json", "name"]).then(
+      () => true,
+      () => false
+    );
+    if (!exists) {
+      const url = await run(["gh", "repo", "create", offer.repo, "--private"]);
+      await run(["git", "init", "-q", "-b", "main", repoDir]);
+      await apply();
+      await run(["git", ...noHooks, "commit", "-q", "-m", offer.title, "-m", "Written by Waymond, opened from Discord."], repoDir);
+      await run(["git", "remote", "add", "origin", `https://github.com/${offer.repo}.git`], repoDir);
+      await run(["git", ...noHooks, "push", "-q", "-u", "origin", "main"], repoDir);
+      return { url: url.trim() || `https://github.com/${offer.repo}`, kind: "repo" };
+    }
+    await run(["gh", "repo", "clone", offer.repo, repoDir, "--", "--depth", "1", "-q"]);
+    const branch = branchName(offer.title);
+    await run(["git", "checkout", "-q", "-b", branch], repoDir);
+    await apply();
     await run(["git", ...noHooks, "commit", "-q", "-m", offer.title, "-m", "Patch written by Waymond, opened from Discord."], repoDir);
     await run(["git", ...noHooks, "push", "-q", "-u", "origin", branch], repoDir);
     const body = `${offer.body.slice(0, 60_000)}\n\n---\nWritten by Waymond in its sandbox and opened from Discord as a draft. Review before merging.`;
-    return await run(
+    const url = await run(
       ["gh", "pr", "create", "--repo", offer.repo, "--head", branch, "--draft", "--title", offer.title, "--body", body],
       repoDir
     );
+    return { url, kind: "pr" };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

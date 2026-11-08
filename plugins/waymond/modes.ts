@@ -22,7 +22,7 @@ import type { SiteMode } from "@choomfie/webbrain";
  * the repo is public). Pinned, so a chat always runs scripts that match these
  * frames; bump it when tools/ changes.
  */
-export const TOOLS_REF = "5fd84786822a84958650f917b3ed7cb9fc0c28b4";
+export const TOOLS_REF = "96b7944e9f5443db591551f7ebf56f8b8ae60e65";
 export const toolUrl = (file: string) =>
   `https://raw.githubusercontent.com/ANonABento/choomfie/${TOOLS_REF}/plugins/waymond/tools/${file}`;
 
@@ -57,13 +57,30 @@ Loop: grep/read the code → smallest change in the repo's style, plus a test �
 Finish: \`bash /tmp/swe.sh diff /tmp/out/<short-name>.patch\`, save it to workspace patches/<short-name>.patch. Reply with exactly: one line on what changed; a line \`repo: <owner>/<name>\`; the check output in a code block; the patch link; assumptions. No commits or PRs unless asked.]`,
   },
   {
+    id: "debug",
+    label: "Debug",
+    description: "Bug hunter: reproduces it with a failing test, finds the root cause, then fixes it",
+    frame: `[debug mode — find the cause before fixing anything. Work it through yourself in run_python; no questions mid-task. Plain tone.
+Each run_python is a fresh container killed after ~150 s; nothing installed persists. Start EVERY run with:
+${fetchTool("swe.sh", 'sh("bash /tmp/swe.sh setup OWNER/REPO")  # add a wip.patch path as 3rd arg to restore earlier edits')}
+1. Reproduce: write the smallest failing test (or script) that shows the bug, run it, show it failing. Can't reproduce? Stop and say what you tried and what would help (logs, versions, exact steps).
+2. Cause: follow the code path, add temporary prints if needed, and state the root cause in one sentence with file and function.
+3. Fix the cause, not the symptom; remove the temporary prints. The failing test now passes and \`bash /tmp/swe.sh check\` is all PASS (a PASS noting failures that also happen without your change is fine).
+Finish: \`bash /tmp/swe.sh diff /tmp/out/<short-name>.patch\`, save it to workspace patches/<short-name>.patch. Reply with exactly: a line "Cause: …"; a line "Fix: …"; a line \`repo: <owner>/<name>\`; the check output in a code block; the patch link.]`,
+  },
+  {
     id: "plan",
     label: "Plan",
-    description: "Planner: reads the code or researches, writes a step-by-step plan, changes nothing",
-    frame: `[plan mode — investigate, then plan; change nothing (no commits, PRs, emails or posts). Plain tone, no questions mid-task.
-For a repo: in run_python (a fresh container each run, ~150 s) fetch and run the code-mode setup — urllib.request.urlretrieve("${toolUrl("swe.sh")}", "/tmp/swe.sh"), then bash /tmp/swe.sh setup OWNER/REPO — and read the real code; cite files and functions. For anything else: research first (web_search), cite sources.
-Write the plan to workspace plans/<short-name>.md: Goal · What exists now (with file/function refs) · Approach and why (alternatives briefly rejected) · Steps, each small and checkable · Risks / unknowns · How to verify.
-Reply with: a 3–5 line summary, the decisions I need to make (if any), and the plan link.]`,
+    description: "Planning partner: talks it through, writes requirements + design, splits it into tasks you can run",
+    tasks: true,
+    frame: `[plan mode — you're the planning partner of an engineer (software, robots, 3D-printed parts on a Bambu P1S, electronics). Plain tone. Change nothing: no commits, PRs, emails or posts.
+Talk first. While the goal, constraints or what "done" means are unclear, ask at most 3 short questions per reply and offer likely answers as quick replies. Don't ask what you can find out: read the code (run_python: urllib.request.urlretrieve("${toolUrl("swe.sh")}", "/tmp/swe.sh"), then bash /tmp/swe.sh setup OWNER/REPO) or research it (web_search, cite sources). Stop asking once you could write a test for every requirement, or when the user says go.
+Then write workspace plans/<short-name>/plan.md: Requirements (numbered, each testable) · Design (approach and why, alternatives rejected; cite files/functions for repos) · Tasks · Risks and unknowns.
+Tasks: each small enough for one agent in one sitting, and standalone — it goes to a fresh chat that sees only its own line and the plan file. Give each the mode that does it: code (change a GitHub repo, with tests), debug (find and fix a bug), cad (OpenSCAD printable part), 3d (Blender model), plan (a sub-plan). Name the repo for code/debug. End each with "Done when:" and a check that mode can run (firmware: native unit tests — device builds can't run in the sandbox, so say they're checked on the user's machine). Order by dependency.
+End every reply that has a plan with the plan link, then a line that says only "Tasks", then one line per task, exactly like:
+1. [cad] Motor mount — 40 x 30 x 5 mm plate for a NEMA 17, four M3 holes on 31 mm centres. Done when: cad_check passes with --expect 40,30,5 --hole 3.4
+2. [code] Step driver — in ANonABento/robot: … Done when: …
+When you change the plan, repeat the whole task list.]`,
   },
   {
     id: "cad",
@@ -103,4 +120,29 @@ export function stripNarration(text: string): string {
   let cut = -1;
   for (const m of head.matchAll(/[.!?](?=[A-Z`*#])/g)) cut = m.index! + 1;
   return cut === -1 ? text : text.slice(cut).trimStart();
+}
+
+/**
+ * Each plan task runs in a fresh chat, but it shares Waymond's workspace, so
+ * it can read the plan the planning chat wrote there. The link in the answer
+ * (`…/chat?workspace=plans%2Fx%2Fplan.md&owner=…`) names the file.
+ */
+export function planContext(answer: string): string | undefined {
+  for (const m of answer.matchAll(/[?&]workspace=([^&)\s]+)/g)) {
+    let path: string;
+    try {
+      path = decodeURIComponent(m[1]);
+    } catch {
+      continue;
+    }
+    if (/\.md$/i.test(path) && /plan/i.test(path)) {
+      const dir = path.replace(/\/[^/]*$/, "");
+      return (
+        `The full plan is in your workspace at ${path} — fs_read it first, but do only your task.\n` +
+        `If your task changes a repo: earlier tasks' patches are in ${dir}/patches/ — pass that folder to swe.sh setup after the repo so you build on them, ` +
+        `and also save your patch there as <your task number>-<short-name>.patch.`
+      );
+    }
+  }
+  return undefined;
 }

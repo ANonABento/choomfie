@@ -33,8 +33,9 @@ describe("openDraftPr", () => {
       if (cwd) dir = cwd;
       return cmd[1] === "pr" ? "https://github.com/a/b/pull/7" : "";
     };
-    expect(await openDraftPr(offer, run)).toBe("https://github.com/a/b/pull/7");
+    expect(await openDraftPr(offer, run)).toEqual({ url: "https://github.com/a/b/pull/7", kind: "pr" });
     expect(calls.map((c) => c.slice(0, 3).join(" "))).toEqual([
+      "gh repo view",
       "gh repo clone",
       "git checkout -q",
       "git apply --index",
@@ -42,7 +43,7 @@ describe("openDraftPr", () => {
       "git -c core.hooksPath=/dev/null",
       "gh pr create",
     ]);
-    expect(calls[5]).toContain("--draft");
+    expect(calls[6]).toContain("--draft");
     expect(existsSync(dir)).toBe(false);
   });
 
@@ -55,5 +56,18 @@ describe("openDraftPr", () => {
     };
     await expect(openDraftPr(offer, run)).rejects.toThrow(/doesn't apply to a\/b/);
     expect(calls).not.toContain("git -c");
+  });
+
+  test("a repo that doesn't exist yet is created private, with the patch as its first commit on main", async () => {
+    const calls: string[][] = [];
+    const run: Runner = async (cmd) => {
+      calls.push(cmd);
+      if (cmd.join(" ").startsWith("gh repo view")) throw new Error("not found");
+      return cmd[2] === "create" ? "https://github.com/a/b" : "";
+    };
+    expect(await openDraftPr(offer, run)).toEqual({ url: "https://github.com/a/b", kind: "repo" });
+    expect(calls.find((c) => c[2] === "create")).toEqual(["gh", "repo", "create", "a/b", "--private"]);
+    expect(calls.at(-1)).toEqual(["git", "-c", "core.hooksPath=/dev/null", "push", "-q", "-u", "origin", "main"]);
+    expect(calls.some((c) => c[1] === "pr")).toBe(false);
   });
 });

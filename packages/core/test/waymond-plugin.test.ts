@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
+import { parseTaskList } from "@choomfie/shared";
 import {
   CONVERSATION_PATH_RE,
   conversationIdFromSend,
@@ -17,7 +18,7 @@ import {
   workspaceLinks,
 } from "../../../plugins/waymond/api.ts";
 import { withFiles } from "../../../plugins/waymond/adapter.ts";
-import { stripNarration, TOOLS_REF, toolUrl, WAYMOND_MODES } from "../../../plugins/waymond/modes.ts";
+import { planContext, stripNarration, TOOLS_REF, toolUrl, WAYMOND_MODES } from "../../../plugins/waymond/modes.ts";
 import type { Page } from "@choomfie/webbrain";
 import { framePrompt, originalName, toApproval } from "../../../plugins/waymond/index.ts";
 
@@ -289,7 +290,7 @@ describe("modes", () => {
     expect(new Set(ids).size).toBe(ids.length);
     for (const m of WAYMOND_MODES) {
       expect(m.id).toMatch(/^[a-z0-9]+$/);
-      expect(m.frame).toMatch(/Reply with/);
+      expect(m.frame).toMatch(/Reply with|End every reply/);
       expect(m.frame.length).toBeLessThan(2000);
     }
     expect(WAYMOND_MODES.find((m) => m.id === "code")!.frame).toContain("repo: <owner>/<name>");
@@ -323,5 +324,24 @@ describe("sandbox tools", () => {
       if (pinned.exitCode !== 0) continue; // shallow clone without that commit: nothing to compare
       expect(pinned.stdout.toString()).toBe(readFileSync(join(import.meta.dir, "../../..", path), "utf8"));
     }
+  });
+});
+
+describe("plan mode", () => {
+  test("its example task line parses, and every mode it offers exists", () => {
+    const plan = WAYMOND_MODES.find((m) => m.id === "plan")!;
+    expect(plan.tasks).toBe(true);
+    const ids = WAYMOND_MODES.map((m) => m.id);
+    const example = plan.frame.split("\n").find((l) => /^1\. \[/.test(l))!;
+    expect(parseTaskList(`Tasks\n${example}`, ids)).toEqual([
+      expect.objectContaining({ n: 1, mode: "cad", title: "Motor mount" }),
+    ]);
+    for (const named of plan.frame.match(/\b(code|debug|cad|3d|plan) \(/g) ?? []) expect(ids).toContain(named.split(" ")[0]);
+  });
+
+  test("planContext points tasks at the plan file in the workspace", () => {
+    const answer = "Plan: [plan.md](https://app.ambition.inc/chat?workspace=plans%2Farm%2Fplan.md&owner=u1)\nTasks\n1. [cad] x";
+    expect(planContext(answer)).toContain("plans/arm/plan.md");
+    expect(planContext("[stl](https://app.ambition.inc/chat?workspace=cad%2Fa.stl&owner=u1)")).toBeUndefined();
   });
 });

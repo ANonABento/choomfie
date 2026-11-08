@@ -176,6 +176,24 @@ describe("modes", () => {
     }
   });
 
+  test("a tasks mode's reply carries its task list and the adapter's task context", async () => {
+    const { brain, chats, destroy } = await setup(
+      async (_i, t) => ({ text: "Plan.\nTasks\n1. [code] Fix it — in repo x. Done when: tests pass", ref: t.ref ?? "r" }),
+      { modes: [...modes, { id: "plan", label: "Plan", description: "d", frame: "[plan]", tasks: true }], taskContext: () => "ctx" }
+    );
+    try {
+      await brain.send(msg("c1", "hi"), {} as never);
+      chats.setMode(chats.bound("c1", "fakesite")!.id, "plan");
+      const reply = await brain.send(msg("c1", "plan it"), {} as never);
+      expect(reply.tasks).toEqual([{ n: 1, mode: "code", title: "Fix it", spec: "Fix it — in repo x. Done when: tests pass" }]);
+      expect(reply.taskContext).toBe("ctx");
+      chats.setMode(chats.bound("c1", "fakesite")!.id, "code");
+      expect((await brain.send(msg("c1", "again"), {} as never)).tasks).toBeUndefined();
+    } finally {
+      await destroy();
+    }
+  });
+
   test("a mode the adapter no longer has is ignored", () => {
     expect(modePrompt({ modes }, "gone", "hi")).toEqual({ text: "hi" });
     expect(modePrompt({}, "code", "hi")).toEqual({ text: "hi" });

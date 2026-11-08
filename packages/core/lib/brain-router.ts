@@ -21,6 +21,7 @@ import {
   type BrainApproval,
   type BrainMessage,
   type BrainReply,
+  type BrainTask,
 } from "@choomfie/shared";
 import type { BrainAccess } from "./config.ts";
 import type { AppContext } from "./types.ts";
@@ -185,6 +186,46 @@ export function choiceRows(choices: string[]) {
   return rows;
 }
 
+export type TaskState = { kind: "idle" } | { kind: "running" | "done" | "failed"; url: string };
+
+export interface TaskBoard {
+  brainId: string;
+  tasks: BrainTask[];
+  context?: string;
+  states: TaskState[];
+}
+
+/** Task-board message id → its plan's tasks and how each is going. In memory: a restart expires them. */
+const taskBoards = new Map<string, TaskBoard>();
+
+export function getTaskBoard(messageId: string): TaskBoard | undefined {
+  return taskBoards.get(messageId);
+}
+
+const TASK_ICON = { running: "⏳", done: "✅", failed: "❌" } as const;
+
+/** A button per task: runnable until started, then a link to its thread showing how it went. */
+export function taskBoardRows(board: Pick<TaskBoard, "tasks" | "states">) {
+  const rows = [];
+  for (let r = 0; r * 5 < board.tasks.length; r++) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        board.tasks.slice(r * 5, r * 5 + 5).map((t, j) => {
+          const i = r * 5 + j;
+          const state = board.states[i] ?? { kind: "idle" };
+          const label = `${t.n} · ${t.mode} · ${t.title}`;
+          const b = new ButtonBuilder();
+          if (state.kind === "idle") {
+            return b.setCustomId(`brain:task:${i}`).setLabel(`▶ ${label}`.slice(0, 80)).setStyle(ButtonStyle.Secondary);
+          }
+          return b.setURL(state.url).setLabel(`${TASK_ICON[state.kind]} ${label}`.slice(0, 80)).setStyle(ButtonStyle.Link);
+        })
+      )
+    );
+  }
+  return rows;
+}
+
 /** Post a brain's reply: chunked, threaded to `replyTo` when given, quick replies as buttons on the last chunk. */
 export async function postBrainReply(
   channel: SendableChannel,
@@ -210,6 +251,17 @@ export async function postBrainReply(
     });
     const id = (sent as { id?: unknown } | undefined)?.id;
     if (last && choices.length && typeof id === "string") pendingChoices.set(id, { brainId, chatKey, choices });
+  }
+  // A plan's tasks: one button each, which runs it in its own thread (owner only).
+  if (reply.tasks?.length) {
+    const board: TaskBoard = { brainId, tasks: reply.tasks, context: reply.taskContext, states: reply.tasks.map(() => ({ kind: "idle" })) };
+    const sent = await channel.send({
+      allowedMentions: NO_MENTIONS,
+      content: "📋 **Tasks** — click one to run it in its own thread.",
+      components: taskBoardRows(board),
+    });
+    const id = (sent as { id?: unknown } | undefined)?.id;
+    if (typeof id === "string") taskBoards.set(id, board);
   }
   // A patch made in the brain's sandbox: the owner can turn it into a draft PR.
   const patch = findPatch(reply.text, reply.files);
@@ -248,7 +300,7 @@ export function installBrainPoster(ctx: AppContext): void {
 }
 
 /** One in-flight request per backend conversation; later messages queue behind it. */
-const queues = new Map<string, Promise<void>>();
+const queues = new Map<string, Promise<unknown>>();
 
 export function dispatchToBrain(
   ctx: AppContext,
@@ -256,12 +308,13 @@ export function dispatchToBrain(
   channel: SendableChannel,
   /** `messageId` anchors the reply; omit it when the message is in another channel. */
   message: BrainMessage & { messageId?: string }
-): Promise<void> {
+): Promise<boolean> {
   const prev = queues.get(message.chatKey) ?? Promise.resolve();
   const run = prev.then(async () => {
     try {
       const reply = await brain.send(message, ctx);
       await postBrainReply(channel, brain.id, message.chatKey, reply, message.messageId);
+      return true;
     } catch (e) {
       console.error(`[brain:${brain.id}] ${errorMessage(e)}`);
       await channel
@@ -271,6 +324,7 @@ export function dispatchToBrain(
           ...(message.messageId ? { reply: { messageReference: message.messageId } } : {}),
         })
         .catch(() => {});
+      return false;
     } finally {
       onReplySent(message.chatKey);
     }

@@ -17,7 +17,7 @@ import {
   type Page,
   type SiteAdapter,
 } from "@choomfie/webbrain";
-import { stripNarration, WAYMOND_MODES } from "./modes.ts";
+import { planContext, stripNarration, WAYMOND_MODES } from "./modes.ts";
 import {
   APP_ORIGIN,
   absoluteLinks,
@@ -147,6 +147,7 @@ export const waymondAdapter: SiteAdapter = {
   loginUrl: `${APP_ORIGIN}/chat`,
   chatUrl,
   modes: WAYMOND_MODES,
+  taskContext: planContext,
 
   async turn(page, { text, files, mode }, t) {
     await page.goto(chatUrl(t.ref), { waitUntil: "domcontentloaded" });

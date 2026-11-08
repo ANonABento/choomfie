@@ -8,7 +8,9 @@ import {
   decideRoute,
   dispatchToBrain,
   getPendingApproval,
+  getTaskBoard,
   postBrainReply,
+  taskBoardRows,
   takeChoices,
   resolveBrainId,
   type RouteInput,
@@ -185,6 +187,28 @@ describe("patches", () => {
     sent.length = 0;
     await postBrainReply(channel, "waymond", "c1", { text: "no repo line", files: [file] });
     expect(sent).toHaveLength(1);
+  });
+});
+
+describe("task board", () => {
+  test("a reply with tasks gets one button per task; started tasks become links to their thread", async () => {
+    const sent: { content?: string; components?: unknown[] }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: `b${sent.length}` }) };
+    const tasks = [
+      { n: 1, mode: "cad", title: "Mount", spec: "Mount — plate" },
+      { n: 2, mode: "code", title: "Driver", spec: "Driver — pwm" },
+    ];
+    await postBrainReply(channel, "waymond", "c1", { text: "Plan done.", tasks, taskContext: "see plan.md" });
+    expect(sent).toHaveLength(2);
+    const board = getTaskBoard("b2")!;
+    expect(board).toMatchObject({ brainId: "waymond", context: "see plan.md" });
+    const json = (rows: unknown[]) =>
+      rows.flatMap((r) => (r as { toJSON(): { components: { custom_id?: string; url?: string; label: string }[] } }).toJSON().components);
+    expect(json(sent[1].components!).map((c) => c.custom_id)).toEqual(["brain:task:0", "brain:task:1"]);
+    board.states[0] = { kind: "running", url: "https://discord.com/channels/g/t" };
+    const after = json(taskBoardRows(board));
+    expect(after[0]).toMatchObject({ url: "https://discord.com/channels/g/t", label: "⏳ 1 · cad · Mount" });
+    expect(after[1].custom_id).toBe("brain:task:1");
   });
 });
 

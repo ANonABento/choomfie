@@ -12,6 +12,7 @@ import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
   errorMessage,
+  parseTaskList,
   pushBrainReply,
   registerBrain,
   unregisterBrain,
@@ -223,11 +224,14 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
           chats.setBackendRef(chat.id, result.ref);
           lateWatch.delivered(message.chatKey, result.messageIds ?? []);
           if (result.background && result.lastMessageId) lateWatch.start(message.chatKey, result.ref, result.lastMessageId);
+          const planMode = mode ? adapter.modes?.find((m) => m.id === mode && m.tasks) : undefined;
+          const tasks = planMode ? parseTaskList(result.text, adapter.modes!.map((m) => m.id)) : [];
           return {
             text: answerText(result, adapter.label),
             files: result.files,
             choices: result.choices,
             approvals: result.approvals,
+            ...(tasks.length ? { tasks, taskContext: adapter.taskContext?.(result.text) } : {}),
           };
         } finally {
           if (active.get(message.chatKey) === turn) active.delete(message.chatKey);

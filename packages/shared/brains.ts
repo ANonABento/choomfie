@@ -42,6 +42,52 @@ export interface BrainReply {
   choices?: string[];
   /** Actions the brain wants the owner to approve (send a post, an email, …). */
   approvals?: BrainApproval[];
+  /** A plan's task list: each becomes a button that runs the task in its own thread, in its mode. */
+  tasks?: BrainTask[];
+  /** Put in front of every task's prompt (where the full plan is, say). */
+  taskContext?: string;
+}
+
+/** One step of a plan, for the mode that should do it. */
+export interface BrainTask {
+  n: number;
+  /** A mode of the same brain (`code`, `cad`, …). */
+  mode: string;
+  /** Short name, for the button. */
+  title: string;
+  /** The whole task line: what to make and when it's done. Sent to a fresh chat, so it must stand alone. */
+  spec: string;
+}
+
+/**
+ * The task list at the end of a plan: a line saying "Tasks", then one task
+ * per line as `1. [cad] Motor mount — 40 x 30 plate … Done when: …`. Only
+ * modes in `modes` count; anything else is left as text.
+ */
+export function parseTaskList(text: string, modes: string[]): BrainTask[] {
+  const lines = text.split("\n");
+  const start = lines.findIndex((l) => /^[#*\s]*tasks\b[^a-z]*$/i.test(l.trim()));
+  if (start === -1) return [];
+  const tasks: BrainTask[] = [];
+  for (const raw of lines.slice(start + 1)) {
+    const line = raw.replace(/\*\*/g, "").trim();
+    if (!line) continue;
+    const m = /^(\d+)[.)]\s*\[([a-z0-9]+)\]\s*(.+)$/i.exec(line);
+    if (!m) {
+      if (tasks.length) break; // the list ended
+      continue;
+    }
+    const mode = m[2].toLowerCase();
+    if (!modes.includes(mode)) continue;
+    const spec = m[3].trim();
+    // "owner/repo — Scaffold: …" names the repo first; the title is what follows.
+    const parts = spec.split(/\s+[—–-]\s+|:\s/).map((p) => p.trim()).filter(Boolean);
+    const named = parts.length > 1 && /^[\w.-]+\/[\w.-]+$/.test(parts[0]) ? parts[1] : parts[0];
+    let title = (named ?? spec).split(/[(,;]/)[0].trim();
+    if (title.length > 40) title = title.slice(0, 40).replace(/\s+\S*$/, "") + "…";
+    tasks.push({ n: Number(m[1]), mode, title, spec });
+  }
+  return tasks.slice(0, 25);
 }
 
 export interface BrainApproval {

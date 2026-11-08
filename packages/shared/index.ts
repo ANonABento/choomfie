@@ -141,6 +141,8 @@ export {
   type BrainFile,
   type BrainApproval,
   type BrainMode,
+  type BrainTask,
+  parseTaskList,
 } from "./brains.ts";
 
 // Chats (location → conversation bindings)

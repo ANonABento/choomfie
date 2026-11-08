@@ -30,6 +30,8 @@ export interface TurnInput {
  */
 export interface SiteMode extends BrainMode {
   frame: string;
+  /** Replies end with a task list (`parseTaskList` format): post it as buttons that run each task in its own thread. */
+  tasks?: boolean;
 }
 
 export interface TurnContext {
@@ -111,6 +113,8 @@ export interface SiteAdapter {
   readLate?(page: Page, ref: string, afterId: string, posted: Set<string>): Promise<LateResult | null>;
   /** Approve or decline an approval the site offered. Returns a short status. */
   resolveApproval?(page: Page, ref: string, approvalId: string, approve: boolean): Promise<string>;
+  /** For a task list: what every task needs to know first (where the full plan is). */
+  taskContext?(answer: string): string | undefined;
   /** Turn a Discord message into the prompt. Default: prefix who's talking when it isn't the owner. */
   framePrompt?(content: string, meta: Record<string, string>): string;
 }
