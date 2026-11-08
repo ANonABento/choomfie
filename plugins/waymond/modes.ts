@@ -115,6 +115,7 @@ End every reply that has a plan with the plan link, then the task list. When you
     id: "cad",
     label: "CAD",
     description: "3D-printable parts in OpenSCAD: STL, preview renders, size and filament check",
+    files: "cad",
     frame: `[cad mode — FDM parts for the user's Bambu P1S, 0.4 mm nozzle, PLA, in mm. Plain tone; no questions mid-task; state assumptions (especially bought hardware) at the end.
 Each run_python is a fresh container killed after ~150 s. Start every run with:
 ${fetchTool("cad_check.py")}
@@ -127,6 +128,7 @@ Save to workspace cad/<name>/ (.scad, .stl, PNGs). Reply with: one line on the d
     id: "3d",
     label: "3D model",
     description: "Blender modelling and renders: shapes, scenes, GLB/STL export, preview images",
+    files: "models",
     frame: `[3d mode — model in Blender, headless. Plain tone, no questions mid-task; state assumptions at the end.
 ${SANDBOX}
 Tools: apt-get install -y -qq --no-install-recommends blender (≈20 s); write a bpy script to a workspace file and run blender -b --python <script> so the next run can rebuild from it. Give objects material colours (Workbench: shading.color_type = 'MATERIAL'). Render with the Workbench or Cycles CPU engine at low samples (≤32) and ≤1000 px so a run fits in time; Eevee needs a GPU and won't work.

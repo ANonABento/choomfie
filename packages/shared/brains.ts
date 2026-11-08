@@ -129,6 +129,8 @@ export interface BrainMode {
   description: string;
   /** Works on a git repo and hands back a `.patch` (a plan's tasks in it build on one branch). */
   repo?: boolean;
+  /** Makes files (parts, models): in a plan with a repo, they're committed to this folder of its branch. */
+  files?: string;
 }
 
 export interface Brain {

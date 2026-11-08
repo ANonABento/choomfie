@@ -28,7 +28,7 @@ import {
   SlashCommandBuilder,
   type ButtonInteraction,
 } from "discord.js";
-import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds, type BrainFile } from "@choomfie/shared";
+import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds } from "@choomfie/shared";
 import { join } from "node:path";
 import { botIsAbsent, interactionChannel, rememberBrainRelay, settleAskRelays } from "../ask-relay.ts";
 import { registerButtonHandler, registerCommand } from "../register.ts";
@@ -37,11 +37,13 @@ import {
   dispatchToBrain,
   getPendingApproval,
   getTaskBoard,
+  landingFor,
   planTaskRepo,
   saveTaskBoards,
   takeLand,
   taskBoardRows,
   taskPrompt,
+  type Landing,
   type TaskBoard,
   parentChannelId,
   resolveBrainId,
@@ -52,7 +54,7 @@ import { isAllowed, isOwner } from "../access.ts";
 import { onMessageReceived, onReplySent } from "../typing.ts";
 import { isDaemonMode, requestDaemonControl, waitForClaudeIdle } from "../daemon-status.ts";
 import { openDraftPr, takePatch } from "../patch-pr.ts";
-import { bundlePlanBranch, landPatch, openPlanBranch, pickPatch, planBranchNote, type PlanBranch } from "../plan-branch.ts";
+import { bundlePlanBranch, landFiles, landPatch, openPlanBranch, planBranchNote, planFilesNote, type PlanBranch } from "../plan-branch.ts";
 import { requireOwner } from "./shared.ts";
 
 function label(id: string): string {
@@ -389,20 +391,22 @@ async function planBranchFor(ctx: Ctx, board: TaskBoard, repo: string): Promise<
   return opening;
 }
 
-/** Commit a task's patch to its plan's branch and say how it went in the thread. */
-async function landTaskPatch(
+/** Commit what a task handed back to its plan's branch, and say how it went in the thread. */
+async function landTask(
   board: TaskBoard,
   index: number,
   pb: PlanBranch,
-  file: BrainFile,
+  landing: Landing,
   say: (content: string) => Promise<unknown>
 ): Promise<boolean> {
   const task = board.tasks[index];
+  const title = `Task ${task.n}: ${task.title}`;
   try {
-    const landed = await landPatch(pb, file.data, `Task ${task.n}: ${task.title}`);
+    const landed =
+      landing.kind === "patch" ? await landPatch(pb, landing.files[0].data, title) : await landFiles(pb, landing.files, landing.folder, title);
     saveTaskBoards(); // prUrl
     await say(
-      `🌿 Committed to \`${pb.branch}\`: <${landed.commitUrl}>` +
+      `🌿 Committed to \`${pb.branch}\`${landing.kind === "files" ? ` (${landing.folder}/)` : ""}: <${landed.commitUrl}>` +
         (landed.prOpened ? `\n📦 Draft PR for the whole plan: ${landed.prOpened}` : "") +
         (landed.prError ? `\n⚠️ Couldn't open the plan's PR (the commit is in): ${landed.prError.slice(0, 500)}` : "")
     );
@@ -435,9 +439,9 @@ async function runTaskInThread(
     meta: { chat_id: thread.id, user: user.username, user_id: user.id, role: "owner" },
     filePaths: [] as string[],
   };
-  const repoMode = brain.modes?.find((m) => m.id === task.mode)?.repo;
+  const mode = brain.modes?.find((m) => m.id === task.mode);
   const repo = planTaskRepo(board, index);
-  if (!repoMode || !repo) {
+  if (!repo || !(mode?.repo || mode?.files)) {
     const reply = await dispatchToBrain(ctx, brain, thread, message);
     return !!reply && !reply.stopped;
   }
@@ -458,12 +462,16 @@ async function runTaskInThread(
   }
   try {
     const name = bundle.path.split("/").pop()!;
-    await say(`-# 🌿 works on \`${pb.branch}\` of **${pb.repo}**${pb.created ? " (new, private)" : ""} — attached as ${name}`);
+    const note = mode.repo ? planBranchNote(pb, name, bundle.snapshot) : planFilesNote(pb, name, mode.files!);
+    await say(
+      `-# 🌿 works on \`${pb.branch}\` of **${pb.repo}**${pb.created ? " (new, private)" : ""}` +
+        (mode.repo ? ` — attached as ${name}` : ` — its files go in ${mode.files}/`)
+    );
     const reply = await dispatchToBrain(
       ctx,
       brain,
       thread,
-      { ...message, content: `${message.content}\n\n${planBranchNote(pb, name, bundle.snapshot)}`, filePaths: [bundle.path] },
+      { ...message, content: `${message.content}\n\n${note}`, filePaths: [bundle.path] },
       { noPatchOffer: true }
     );
     if (!reply) return false;
@@ -471,16 +479,16 @@ async function runTaskInThread(
       await say(`⏹ Stopped — nothing was committed to \`${pb.branch}\`.`);
       return false;
     }
-    const patch = pickPatch(reply.files);
-    if (!patch) {
+    const landing = landingFor(board, index, reply.files);
+    if (!landing) {
       const cut = /stopping after (several|\d+) tool calls/i.test(reply.text);
       await say(
-        `❌ No patch came back${cut ? ` (${brain.label} kept hitting its tool limit)` : ""}, so nothing was committed to \`${pb.branch}\`. ` +
-          `Reply here to carry on — a patch it sends then gets a commit button — or retry the task from the board.`
+        `❌ No ${mode.repo ? "patch" : "files"} came back${cut ? ` (${brain.label} kept hitting its tool limit)` : ""}, so nothing was committed to \`${pb.branch}\`. ` +
+          `Reply here to carry on — what it sends then gets a commit button — or retry the task from the board.`
       );
       return false;
     }
-    return await landTaskPatch(board, index, pb, patch, say);
+    return await landTask(board, index, pb, landing, say);
   } finally {
     bundle.cleanup();
   }
@@ -503,7 +511,7 @@ async function handleLandTask(interaction: ButtonInteraction, ctx: Ctx): Promise
   const say = (content: string) => interaction.followUp({ content, allowedMentions: { parse: [] } }).catch(() => {});
   let ok = false;
   try {
-    ok = await landTaskPatch(board, pending.index, await planBranchFor(ctx, board, repo), pending.file, say);
+    ok = await landTask(board, pending.index, await planBranchFor(ctx, board, repo), pending, say);
   } catch (e) {
     await say(`❌ Couldn't set up a branch on **${repo}**: ${errorText(e).slice(0, 1500)}`);
   }

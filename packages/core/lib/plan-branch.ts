@@ -15,7 +15,7 @@
  * commit with hooks off, push. Review and CI happen on the PR.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrainFile } from "@choomfie/shared";
@@ -150,27 +150,23 @@ export interface Landed {
 }
 
 /**
- * Commit a task's patch on the plan branch and push. Throws when it doesn't
- * apply, changes nothing, or won't push — and then the clone is back on
- * GitHub's branch, as if nothing happened.
+ * Stage a change on the synced clone (`stage` does `git add` itself), commit
+ * and push it. Throws when staging fails, nothing changed, or it won't push —
+ * and then the clone is back on GitHub's branch, as if nothing happened.
  */
-export async function landPatch(pb: PlanBranch, patch: Uint8Array, title: string, run: Runner = runCommand): Promise<Landed> {
+async function landChange(
+  pb: PlanBranch,
+  title: string,
+  run: Runner,
+  stage: (tmp: string) => Promise<void>,
+  nothing: string
+): Promise<Landed> {
   return locked(pb.dir, async () => {
     await syncClone(pb, run);
     const tmp = mkdtempSync(join(tmpdir(), "choomfie-land-"));
-    const restore = () => tryRun(run, ["git", "reset", "-q", "--hard", `origin/${pb.branch}`], pb.dir);
     try {
-      const file = join(tmp, "task.patch");
-      writeFileSync(file, patch);
-      if (!patch.length) throw new Error("the patch is empty");
-      try {
-        await run(["git", "apply", "--index", "--binary", "--whitespace=nowarn", file], pb.dir);
-      } catch (e) {
-        throw new Error(
-          `the patch doesn't apply to ${pb.branch} — it wasn't built on the branch it was given: ${e instanceof Error ? e.message : e}`
-        );
-      }
-      if (!(await run(["git", "diff", "--cached", "--name-only"], pb.dir)).trim()) throw new Error("the patch changes nothing");
+      await stage(tmp);
+      if (!(await run(["git", "diff", "--cached", "--name-only"], pb.dir)).trim()) throw new Error(nothing);
       await run(["git", ...NO_HOOKS, "commit", "-q", "-m", title.slice(0, 72), "-m", "Written by Waymond, committed from Discord."], pb.dir);
       const push = () => run(["git", ...NO_HOOKS, "push", "-q", "origin", `HEAD:refs/heads/${pb.branch}`], pb.dir);
       try {
@@ -191,12 +187,94 @@ export async function landPatch(pb: PlanBranch, patch: Uint8Array, title: string
       }
       return landed;
     } catch (e) {
-      await restore();
+      await tryRun(run, ["git", "reset", "-q", "--hard", `origin/${pb.branch}`], pb.dir);
+      await tryRun(run, ["git", "clean", "-qfdx"], pb.dir);
       throw e;
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
   });
+}
+
+/** Commit a task's patch on the plan branch and push. Throws when it doesn't apply, changes nothing, or won't push. */
+export function landPatch(pb: PlanBranch, patch: Uint8Array, title: string, run: Runner = runCommand): Promise<Landed> {
+  return landChange(
+    pb,
+    title,
+    run,
+    async (tmp) => {
+      if (!patch.length) throw new Error("the patch is empty");
+      const file = join(tmp, "task.patch");
+      writeFileSync(file, patch);
+      try {
+        await run(["git", "apply", "--index", "--binary", "--whitespace=nowarn", file], pb.dir);
+      } catch (e) {
+        throw new Error(`the patch doesn't apply to ${pb.branch} — it wasn't built on the branch it was given: ${e instanceof Error ? e.message : e}`);
+      }
+    },
+    "the patch changes nothing"
+  );
+}
+
+/** Previews and renders: kept apart from the part files. */
+const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
+
+/** A file name that's safe to write into the repo: its last path part, no dot files or traversal. */
+export function safeFileName(name: string): string | null {
+  const base = name.split(/[\\/]/).pop()!.trim();
+  return base && !base.startsWith(".") && /^[\w .()+-]+$/.test(base) ? base : null;
+}
+
+/**
+ * Commit a CAD / 3D task's files into `folder/` on the plan branch (renders
+ * in `folder/renders/`); a file of the same name is replaced. Throws when
+ * there is nothing to commit.
+ */
+export function landFiles(pb: PlanBranch, files: BrainFile[], folder: string, title: string, run: Runner = runCommand): Promise<Landed> {
+  return landChange(
+    pb,
+    title,
+    run,
+    async () => {
+      const written: string[] = [];
+      for (const f of files) {
+        const name = safeFileName(f.name);
+        if (!name || /\.(patch|diff)$/i.test(name)) continue;
+        const rel = IMAGE.test(name) ? join(folder, "renders", name) : join(folder, name);
+        mkdirSync(join(pb.dir, rel, ".."), { recursive: true });
+        writeFileSync(join(pb.dir, rel), f.data);
+        written.push(rel);
+      }
+      if (!written.length) throw new Error("no files came back to commit");
+      // The repo's .gitignore wins (it may keep STLs out on purpose).
+      const ignored = new Set(((await tryRun(run, ["git", "check-ignore", "--", ...written], pb.dir)) ?? "").split("\n").filter(Boolean));
+      const keep = written.filter((f) => !ignored.has(f));
+      if (!keep.length) throw new Error(`the repo's .gitignore excludes every file that came back (${written.join(", ")})`);
+      await run(["git", "add", "--", ...keep], pb.dir);
+    },
+    "the files are the same as on the branch already"
+  );
+}
+
+/**
+ * Delete plan clones nothing uses any more: not in `keep` and untouched for
+ * a day (so a branch being opened right now is left alone). A clone is only
+ * a cache — the branch on GitHub is the work.
+ */
+export function pruneClones(root: string, keep: Set<string>, now = Date.now(), minAgeMs = 24 * 3600_000): string[] {
+  if (!existsSync(root)) return [];
+  const removed: string[] = [];
+  for (const name of readdirSync(root)) {
+    const dir = join(root, name);
+    try {
+      if (keep.has(dir) || now - statSync(dir).mtimeMs < minAgeMs) continue;
+      rmSync(dir, { recursive: true, force: true });
+      removed.push(dir);
+    } catch {
+      // gone already, or not ours to read
+    }
+  }
+  return removed;
 }
 
 /** The plan's draft PR: an open one for the branch if there is one, else a new one. */
@@ -223,6 +301,16 @@ export function pickPatch(files: BrainFile[] | undefined): BrainFile | undefined
   const patches = (files ?? []).filter((f) => /\.(patch|diff)$/i.test(f.name));
   const final = patches.filter((f) => !/(^|[^a-z])wip([^a-z]|$)/i.test(f.name));
   return (final.length ? final : patches).at(-1);
+}
+
+/** The prompt line for a CAD / 3D task in a plan with a repo: where its files go, and the repo if it needs earlier ones. */
+export function planFilesNote(pb: PlanBranch, bundleName: string, folder: string): string {
+  return (
+    `This plan's repo is ${pb.repo} (branch ${pb.branch}); every file you link in your reply is committed to its ${folder}/ folder ` +
+    `(images to ${folder}/renders/), replacing files of the same name — so link the source and exports, not scratch files. ` +
+    `The repo so far is attached as ${bundleName} in run_python's working folder; if you need earlier files (to edit a part, or fit to one), ` +
+    `apt-get install -y git and git clone ${bundleName} /tmp/repo — keep an edited file's name.`
+  );
 }
 
 /** The prompt line that tells a task where its repo is. */

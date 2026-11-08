@@ -1,9 +1,21 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCommand, type Runner } from "../lib/patch-pr.ts";
-import { bundlePlanBranch, landPatch, openPlanBranch, pickPatch, planBranchName, planBranchNote, type PlanBranch } from "../lib/plan-branch.ts";
+import {
+  bundlePlanBranch,
+  landFiles,
+  landPatch,
+  openPlanBranch,
+  pickPatch,
+  planBranchName,
+  planBranchNote,
+  planFilesNote,
+  pruneClones,
+  safeFileName,
+  type PlanBranch,
+} from "../lib/plan-branch.ts";
 
 /**
  * A local stand-in for GitHub: bare repos under <root>/remote, reached through
@@ -237,5 +249,51 @@ describe("plan branch", () => {
     expect(pickPatch([f("wip.patch")])?.name).toBe("wip.patch");
     expect(pickPatch([f("a.patch"), f("b.diff")])?.name).toBe("b.diff");
     expect(pickPatch([f("x.md")])).toBeUndefined();
+  });
+
+  test("a CAD task's files go in its folder, renders apart; same name replaces; .gitignore and unsafe names respected", async () => {
+    const { run } = fakeGh();
+    const pb = await openPlanBranch(repoName(), join(root, "plans"), run);
+    const f = (name: string, data = "x") => ({ name, data: enc(data) });
+    await landFiles(pb, [f("mount.scad", "cube(10);"), f("mount.stl"), f("mount_iso.png"), f("wip.patch"), f(".env"), f("../evil.sh")], "cad", "Task 1: mount", run);
+    expect(readFileSync(join(pb.dir, "cad/mount.scad"), "utf8")).toBe("cube(10);");
+    expect(existsSync(join(pb.dir, "cad/renders/mount_iso.png"))).toBe(true);
+    expect(existsSync(join(pb.dir, "cad/wip.patch"))).toBe(false);
+    expect(existsSync(join(pb.dir, "cad/.env"))).toBe(false);
+    expect(existsSync(join(pb.dir, "cad/evil.sh"))).toBe(true); // its name only, inside cad/
+    expect(existsSync(join(pb.dir, "../evil.sh"))).toBe(false);
+
+    // A later task edits the part: same name, replaced.
+    await landFiles(pb, [f("mount.scad", "cube(12);")], "cad", "Task 2: bigger", run);
+    expect(await runCommand(["git", "show", "HEAD:cad/mount.scad"], pb.dir)).toBe("cube(12);");
+    await expect(landFiles(pb, [f("mount.scad", "cube(12);")], "cad", "t", run)).rejects.toThrow(/same as on the branch/);
+
+    // The repo keeps STLs out: they're skipped, the rest lands.
+    await landPatch(pb, await task(pb, run, (d) => writeFileSync(join(d, ".gitignore"), "*.stl\n")), "ignore stl", run);
+    await landFiles(pb, [f("arm.scad", "a"), f("arm.stl")], "cad", "Task 3: arm", run);
+    expect(await runCommand(["git", "ls-files", "cad"], pb.dir)).not.toContain("arm.stl");
+    await expect(landFiles(pb, [f("only.stl")], "cad", "t", run)).rejects.toThrow(/\.gitignore excludes/);
+    await expect(landFiles(pb, [f("x.patch")], "cad", "t", run)).rejects.toThrow(/no files/);
+    expect(await runCommand(["git", "status", "--porcelain"], pb.dir)).toBe("");
+  });
+
+  test("safe file names, and the CAD task note", () => {
+    expect(safeFileName("a/b/part v2.scad")).toBe("part v2.scad");
+    expect(safeFileName(".bashrc")).toBeNull();
+    expect(safeFileName("x;rm -rf.scad")).toBeNull();
+    const note = planFilesNote({ repo: "a/b", branch: "plan/b-1", dir: "/x", created: false }, "b.bundle", "cad");
+    expect(note).toContain("cad/ folder");
+    expect(note).toContain("git clone b.bundle");
+  });
+
+  test("old clones nothing uses are removed; kept and recent ones stay", () => {
+    const plans = mkdtempSync(join(root, "prune-"));
+    for (const d of ["old", "kept", "new"]) mkdirSync(join(plans, d));
+    const old = (Date.now() - 3 * 24 * 3600_000) / 1000;
+    utimesSync(join(plans, "old"), old, old);
+    utimesSync(join(plans, "kept"), old, old);
+    expect(pruneClones(plans, new Set([join(plans, "kept")]))).toEqual([join(plans, "old")]);
+    expect(existsSync(join(plans, "kept")) && existsSync(join(plans, "new"))).toBe(true);
+    expect(pruneClones(join(root, "nope"), new Set())).toEqual([]);
   });
 });

@@ -9,6 +9,7 @@ import {
   dispatchToBrain,
   getPendingApproval,
   getTaskBoard,
+  landingFor,
   loadTaskBoards,
   planTaskRepo,
   postBrainReply,
@@ -293,18 +294,58 @@ describe("task boards survive a restart", () => {
     const dir = mkdtempSync(join(tmpdir(), "boards-"));
     mkdirSync(join(dir, "meta"));
     loadTaskBoards(dir);
+    const { registerBrain, unregisterBrain } = await import("@choomfie/shared");
+    registerBrain({ id: "codebrain", label: "CodeBrain", send: async () => ({ text: "" }), modes: [{ id: "code", label: "Code", description: "", repo: true }] });
     let id = 0;
     const sent: { content?: string; components?: unknown[] }[] = [];
     const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: `m${++id}` }) };
-    await postBrainReply(channel, "waymond", "chan", { text: "Plan.", tasks: [{ n: 1, mode: "code", title: "A", spec: "A — in me/r: x", repo: "me/r" }] });
-    getTaskBoard("m2")!.threads = { th: 0 };
-    const patch = { name: "a.patch", data: new TextEncoder().encode("diff") };
-    await postBrainReply(channel, "waymond", "th", { text: "Done.\nrepo: me/r", files: [{ name: "wip.patch", data: new Uint8Array() }, patch] });
-    const offer = sent.at(-1)!;
-    expect(offer.content).toContain("task 1");
-    expect(takeLand(`m${id}`)).toMatchObject({ boardId: "m2", index: 0, file: { name: "a.patch" } });
-    expect(sent.some((m) => m.content?.includes("Open draft PR"))).toBe(false);
-    resetTaskBoards();
+    try {
+      await postBrainReply(channel, "codebrain", "chan", { text: "Plan.", tasks: [{ n: 1, mode: "code", title: "A", spec: "A — in me/r: x", repo: "me/r" }] });
+      getTaskBoard("m2")!.threads = { th: 0 };
+      const patch = { name: "a.patch", data: new TextEncoder().encode("diff") };
+      await postBrainReply(channel, "codebrain", "th", { text: "Done.\nrepo: me/r", files: [{ name: "wip.patch", data: new Uint8Array() }, patch] });
+      const offer = sent.at(-1)!;
+      expect(offer.content).toContain("task 1");
+      expect(takeLand(`m${id}`)).toMatchObject({ boardId: "m2", index: 0, kind: "patch", files: [{ name: "a.patch" }] });
+      expect(sent.some((m) => m.content?.includes("Open draft PR"))).toBe(false);
+    } finally {
+      unregisterBrain("codebrain");
+      resetTaskBoards();
+    }
+  });
+});
+
+describe("what a plan task commits", () => {
+  test("a repo mode commits its patch, a files mode its files, other modes or no repo nothing", async () => {
+    const { registerBrain, unregisterBrain } = await import("@choomfie/shared");
+    registerBrain({
+      id: "planbrain",
+      label: "PlanBrain",
+      send: async () => ({ text: "" }),
+      modes: [
+        { id: "code", label: "Code", description: "", repo: true },
+        { id: "cad", label: "CAD", description: "", files: "cad" },
+        { id: "ask", label: "Ask", description: "" },
+      ],
+    });
+    try {
+      const f = (name: string) => ({ name, data: new Uint8Array() });
+      const board = {
+        brainId: "planbrain",
+        tasks: [
+          { n: 1, mode: "code", title: "A", spec: "", repo: "me/r" },
+          { n: 2, mode: "cad", title: "B", spec: "" },
+          { n: 3, mode: "ask", title: "C", spec: "" },
+        ],
+      };
+      expect(landingFor(board, 0, [f("wip.patch"), f("a.patch")])).toEqual({ kind: "patch", files: [f("a.patch")] });
+      expect(landingFor(board, 0, [f("a.png")])).toBeUndefined();
+      expect(landingFor(board, 1, [f("m.scad"), f("m.stl"), f("x.patch")])).toEqual({ kind: "files", files: [f("m.scad"), f("m.stl")], folder: "cad" });
+      expect(landingFor(board, 2, [f("m.scad")])).toBeUndefined();
+      expect(landingFor({ ...board, tasks: board.tasks.map((t) => ({ ...t, repo: undefined })) }, 1, [f("m.scad")])).toBeUndefined();
+    } finally {
+      unregisterBrain("planbrain");
+    }
   });
 });
 

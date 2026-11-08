@@ -21,6 +21,7 @@ import {
   type BrainApproval,
   type BrainMessage,
   type BrainReply,
+  type BrainFile,
   type BrainTask,
   writeJsonAtomicSync,
 } from "@choomfie/shared";
@@ -31,7 +32,7 @@ import type { AppContext } from "./types.ts";
 import { onReplySent } from "./typing.ts";
 import { getBrainRelay } from "./ask-relay.ts";
 import { findPatch, offerPatch } from "./patch-pr.ts";
-import { pickPatch, type PlanBranch } from "./plan-branch.ts";
+import { pickPatch, pruneClones, type PlanBranch } from "./plan-branch.ts";
 
 export type RouteDecision =
   /** Forward to the Claude session as usual. */
@@ -248,9 +249,8 @@ export function saveTaskBoards(): void {
 export function loadTaskBoards(dataDir: string, now = Date.now()): void {
   boardsFile = join(dataDir, "meta", "task-boards.json");
   taskBoards.clear();
-  if (!existsSync(boardsFile)) return;
   try {
-    const saved = JSON.parse(readFileSync(boardsFile, "utf8")) as Record<string, TaskBoard>;
+    const saved = existsSync(boardsFile) ? (JSON.parse(readFileSync(boardsFile, "utf8")) as Record<string, TaskBoard>) : {};
     for (const [id, b] of Object.entries(saved)) {
       if (!b || !Array.isArray(b.tasks) || !Array.isArray(b.states) || now - (b.createdAt ?? 0) > BOARD_TTL_MS) continue;
       b.states = b.states.map((s) => (s.kind === "running" ? { kind: "failed", url: s.url } : s));
@@ -258,7 +258,12 @@ export function loadTaskBoards(dataDir: string, now = Date.now()): void {
     }
   } catch (e) {
     console.error(`[tasks] couldn't read saved task boards: ${errorMessage(e)}`);
+    return; // can't tell which clones are in use: keep them all
   }
+  // Clones no saved board uses any more are only taking space (the work is on GitHub).
+  const keep = new Set([...taskBoards.values()].flatMap((b) => Object.values(b.plans ?? {}).map((p) => p.dir)));
+  const removed = pruneClones(join(dataDir, "plans"), keep, now);
+  if (removed.length) console.error(`[tasks] removed ${removed.length} old plan clone(s)`);
 }
 
 /** Forget every board (tests). */
@@ -322,8 +327,30 @@ export function planTaskRepo(board: Pick<TaskBoard, "tasks">, index: number): st
   return task.repo ?? (repos.length === 1 ? repos[0] : undefined);
 }
 
-/** "Commit to the plan's branch" button message id → the patch. In memory: a restart expires them. */
-const pendingLands = new Map<string, { boardId: string; index: number; file: import("@choomfie/shared").BrainFile }>();
+export type Landing = { kind: "patch"; files: [BrainFile] } | { kind: "files"; files: BrainFile[]; folder: string };
+
+/**
+ * What a plan task's reply would put on the plan's branch: its patch (a repo
+ * mode), or its files (a files mode, like cad → cad/). Undefined when the
+ * task has no repo, or the reply has nothing for it.
+ */
+export function landingFor(board: Pick<TaskBoard, "brainId" | "tasks">, index: number, files: BrainFile[] | undefined): Landing | undefined {
+  const task = board.tasks[index];
+  if (!task || !planTaskRepo(board, index)) return undefined;
+  const mode = getBrain(board.brainId)?.modes?.find((m) => m.id === task.mode);
+  if (mode?.repo) {
+    const patch = pickPatch(files);
+    return patch ? { kind: "patch", files: [patch] } : undefined;
+  }
+  if (mode?.files) {
+    const out = (files ?? []).filter((f) => !/\.(patch|diff)$/i.test(f.name));
+    return out.length ? { kind: "files", files: out, folder: mode.files } : undefined;
+  }
+  return undefined;
+}
+
+/** "Commit to the plan's branch" button message id → what to commit. In memory: a restart expires them. */
+const pendingLands = new Map<string, Landing & { boardId: string; index: number }>();
 
 export function takeLand(messageId: string) {
   const p = pendingLands.get(messageId);
@@ -381,14 +408,14 @@ export async function postBrainReply(
     }
   }
   // A patch made in the brain's sandbox: the owner can turn it into a draft PR.
+  // A follow-up in a plan task's thread ("continue"): what it hands back goes on the plan's branch.
   const planTask = opts.noPatchOffer ? undefined : taskForThread(chatKey);
-  const planRepo = planTask && planTaskRepo(planTask.board, planTask.index);
-  const planPatch = planRepo ? pickPatch(reply.files) : undefined;
-  if (planTask && planRepo && planPatch) {
-    // A follow-up in a plan task's thread ("continue"): its patch goes on the plan's branch.
+  const land = planTask ? landingFor(planTask.board, planTask.index, reply.files) : undefined;
+  if (planTask && land) {
+    const what = land.kind === "patch" ? `Patch (\`${land.files[0].name}\`)` : `${land.files.length} file${land.files.length === 1 ? "" : "s"} for ${land.folder}/`;
     const sent = await channel.send({
       allowedMentions: NO_MENTIONS,
-      content: `📦 Patch for task ${planTask.board.tasks[planTask.index].n} (\`${planPatch.name}\`)`,
+      content: `📦 ${what} — task ${planTask.board.tasks[planTask.index].n} of the plan`,
       components: [
         new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder().setCustomId("brain:landtask").setLabel("Commit to the plan's branch").setStyle(ButtonStyle.Primary)
@@ -396,8 +423,9 @@ export async function postBrainReply(
       ],
     });
     const id = (sent as { id?: unknown } | undefined)?.id;
-    if (typeof id === "string") pendingLands.set(id, { boardId: planTask.boardId, index: planTask.index, file: planPatch });
+    if (typeof id === "string") pendingLands.set(id, { boardId: planTask.boardId, index: planTask.index, ...land });
   }
+  const planPatch = land?.kind === "patch";
   const patch = opts.noPatchOffer || planPatch ? null : findPatch(reply.text, reply.files);
   if (patch) {
     const sent = await channel.send({
