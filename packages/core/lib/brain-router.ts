@@ -266,6 +266,56 @@ export function loadTaskBoards(dataDir: string, now = Date.now()): void {
   if (removed.length) console.error(`[tasks] removed ${removed.length} old plan clone(s)`);
 }
 
+/** The newest board posted in this chat (the plan's own thread or channel), if any. */
+export function latestBoardIn(chatKey: string): { boardId: string; board: TaskBoard } | undefined {
+  let best: { boardId: string; board: TaskBoard } | undefined;
+  for (const [boardId, board] of taskBoards) {
+    if (board.channelId === chatKey && (!best || board.createdAt > best.board.createdAt)) best = { boardId, board };
+  }
+  return best;
+}
+
+/**
+ * What the planning chat can't see for itself: how its tasks went. Each task
+ * ran in its own chat, and the repo is private, so the brain would otherwise
+ * say none of them ran. Added to the owner's messages in a plan's chat once
+ * any task has started.
+ */
+export function planStatusNote(chatKey: string): string | undefined {
+  const plan = latestBoardIn(chatKey);
+  if (!plan || plan.board.states.every((s) => s.kind === "idle")) return undefined;
+  const { board } = plan;
+  const word = { idle: "not run yet", running: "running now", done: "done", failed: "failed" } as const;
+  const lines = board.tasks.map((t, i) => `${t.n}. ${t.title} [${t.mode}] — ${word[board.states[i]?.kind ?? "idle"]}`);
+  const branches = Object.values(board.plans ?? {}).map(
+    (p) => `${p.repo} (private — read it through the user's connected GitHub account), branch ${p.branch}${p.prUrl ? `, draft PR ${p.prUrl}` : ""}`
+  );
+  return [
+    "[Plan status, from Choomfie (not the user): each task ran in its own chat; finished code/cad tasks are committed to the plan's branch, one commit per task.",
+    ...lines,
+    ...(branches.length ? [`Repo: ${branches.join("; ")}`] : []),
+    "]",
+  ].join("\n");
+}
+
+/** Add a task to a plan's board (numbered after the last), and redraw it later. Returns its index. */
+export function appendTask(board: TaskBoard, task: BrainTask): number {
+  const n = Math.max(0, ...board.tasks.map((t) => t.n)) + 1;
+  const repos = [...new Set(board.tasks.flatMap((t) => (t.repo ? [t.repo] : [])))];
+  board.tasks.push({ ...task, n, ...(task.repo ? {} : repos.length === 1 ? { repo: repos[0] } : {}) });
+  board.states.push({ kind: "idle" });
+  saveTaskBoards();
+  return board.tasks.length - 1;
+}
+
+type PlanTaskStarter = (ctx: AppContext, boardId: string, index: number, user: { id: string; username: string }) => Promise<boolean>;
+let planTaskStarter: PlanTaskStarter | null = null;
+
+/** The task handlers register how to run a board task (its thread, its branch); the router only triggers it. */
+export function setPlanTaskStarter(fn: PlanTaskStarter): void {
+  planTaskStarter = fn;
+}
+
 /** Forget every board (tests). */
 export function resetTaskBoards(): void {
   taskBoards.clear();
@@ -476,10 +526,32 @@ export function dispatchToBrain(
   const prev = queues.get(message.chatKey) ?? Promise.resolve();
   const run = prev.then(async () => {
     try {
-      const reply = await brain.send(message, ctx);
+      const status = message.meta?.role === "owner" ? planStatusNote(message.chatKey) : undefined;
+      const reply = await brain.send(status ? { ...message, content: `${message.content}\n\n${status}` } : message, ctx);
       await postBrainReply(channel, brain.id, message.chatKey, reply, message.messageId, opts);
       const task = reply.runNow ? reply.tasks?.[0] : undefined;
-      if (task) {
+      const plan = task && message.meta?.role === "owner" && planTaskStarter ? latestBoardIn(message.chatKey) : undefined;
+      if (task && plan && plan.board.busy) {
+        // Run all is going: queue it on the board rather than run two things on the branch at once.
+        const added = plan.board.tasks[appendTask(plan.board, task)];
+        await channel
+          .send({ allowedMentions: NO_MENTIONS, content: `-# → added to the plan as **task ${added.n}** — start it from the board once Run all finishes` })
+          .catch(() => {});
+      } else if (task && plan) {
+        // The plan's own chat asked for one more job: it joins the plan, and runs as its next task.
+        const index = appendTask(plan.board, task);
+        const added = plan.board.tasks[index];
+        await channel
+          .send({ allowedMentions: NO_MENTIONS, content: `-# → added to the plan as **task ${added.n}** (\`${added.mode}\`) — running it in its own thread` })
+          .catch(() => {});
+        void planTaskStarter!(ctx, plan.boardId, index, { id: message.meta.user_id ?? "", username: message.meta.user ?? "" }).then(async (ok) => {
+          if (!ok) {
+            await channel
+              .send({ allowedMentions: NO_MENTIONS, content: `-# Couldn't start task ${added.n} — run it from the plan's board.` })
+              .catch(() => {});
+          }
+        });
+      } else if (task) {
         // One job for one mode: switch this chat to it and start, in this same thread.
         const chat = ctx.chats.bound(message.chatKey, brain.id);
         if (chat) ctx.chats.setMode(chat.id, task.mode);

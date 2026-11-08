@@ -349,3 +349,80 @@ export function parseWorkspaceFile(raw: unknown): { downloadUrl: string } | { co
   }
   return typeof r.content === "string" ? { content: r.content } : null;
 }
+
+/**
+ * Artifacts: a page Waymond builds (a web sim, a chart) shows in its chat as
+ * `[[ref:artifact:<id>|<title>]]`. The record (`artifacts/<id>`, observed
+ * 2026-11-08) is `{kind, title, document, media_url, meta: {libs}}`; Ambition's
+ * viewer adds the libraries named in `libs` from its public /vendor folder.
+ */
+export interface ArtifactRef {
+  token: string;
+  id: string;
+  title: string;
+}
+
+const ARTIFACT_REF = /\[\[ref:artifact:([0-9a-f-]{36})(?:\|([^\]]*))?\]\]/g;
+
+export function artifactRefs(text: string): ArtifactRef[] {
+  const seen = new Set<string>();
+  const out: ArtifactRef[] = [];
+  for (const m of text.matchAll(ARTIFACT_REF)) {
+    if (seen.has(m[0])) continue;
+    seen.add(m[0]);
+    out.push({ token: m[0], id: m[1], title: (m[2] ?? "").trim() || "Artifact" });
+  }
+  return out;
+}
+
+export const artifactUrl = (id: string) => `${API_ORIGIN}/api/waymond/artifacts/${encodeURIComponent(id)}`;
+
+export interface Artifact {
+  kind: string;
+  title: string;
+  document?: string;
+  mediaUrl?: string;
+  libs: string[];
+}
+
+export function parseArtifact(raw: unknown): Artifact | null {
+  const r = raw as Record<string, unknown> | null;
+  if (!r || typeof r !== "object" || typeof r.kind !== "string") return null;
+  const meta = (r.meta ?? {}) as { libs?: unknown };
+  return {
+    kind: r.kind,
+    title: typeof r.title === "string" ? r.title : "Artifact",
+    document: typeof r.document === "string" ? r.document : undefined,
+    mediaUrl: typeof r.media_url === "string" && r.media_url ? r.media_url : undefined,
+    libs: Array.isArray(meta.libs) ? meta.libs.filter((l): l is string => typeof l === "string") : [],
+  };
+}
+
+/** The libraries Ambition's viewer injects, by `libs` name. */
+const VENDOR: Record<string, string[]> = {
+  p5: ["p5/p5.min.js"],
+  katex: ["katex/katex.min.css", "katex/katex.min.js", "katex/contrib/auto-render.min.js"],
+  three: ["three/three.global.js"],
+  d3: ["d3/d3.min.js"],
+  figure: ["ambition-figure/figure.js"],
+  leaflet: ["leaflet/leaflet.css", "leaflet/leaflet.js"],
+};
+
+/** An HTML artifact as a page that opens on its own: the viewer's libraries linked from Ambition's public /vendor. */
+export function standaloneHtml(a: Artifact): string {
+  const tags = a.libs
+    .flatMap((l) => VENDOR[l] ?? [])
+    .map((f) =>
+      f.endsWith(".css") ? `<link rel="stylesheet" href="${APP_ORIGIN}/vendor/${f}">` : `<script src="${APP_ORIGIN}/vendor/${f}"></script>`
+    )
+    .join("");
+  const doc = a.document ?? "";
+  if (!tags) return doc;
+  return /<head[^>]*>/i.test(doc) ? doc.replace(/<head[^>]*>/i, (h) => h + tags) : tags + doc;
+}
+
+/** A file name for an artifact: its title, made safe. */
+export function artifactFileName(title: string, ext: string): string {
+  const base = title.normalize("NFKD").replace(/[^\w .-]+/g, " ").replace(/\s+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  return `${base || "artifact"}.${ext}`;
+}

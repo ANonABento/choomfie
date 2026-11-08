@@ -10,6 +10,8 @@ import {
   getPendingApproval,
   getTaskBoard,
   landingFor,
+  planStatusNote,
+  setPlanTaskStarter,
   loadTaskBoards,
   planTaskRepo,
   postBrainReply,
@@ -346,6 +348,59 @@ describe("what a plan task commits", () => {
     } finally {
       unregisterBrain("planbrain");
     }
+  });
+});
+
+describe("a plan's own chat", () => {
+  test("is told how its tasks went, and a new single job joins the plan instead of taking over the chat", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "boards-"));
+    mkdirSync(join(dir, "meta"));
+    loadTaskBoards(dir);
+    const channel = { send: async () => ({ id: "pb1" }) };
+    await postBrainReply(channel, "waymond", "planchat", {
+      text: "Plan.",
+      tasks: [
+        { n: 1, mode: "code", title: "Scaffold", spec: "Scaffold — in me/cube: x", repo: "me/cube" },
+        { n: 2, mode: "code", title: "Turning", spec: "Turning — y" },
+      ],
+    });
+    const board = getTaskBoard("pb1")!;
+    expect(planStatusNote("planchat")).toBeUndefined(); // nothing has run yet
+    board.states = [{ kind: "done", url: "u1" }, { kind: "failed", url: "u2" }];
+    board.plans = { "me/cube": { repo: "me/cube", branch: "plan/cube-1", dir: "/x", created: true, prUrl: "https://pr/2" } };
+    const note = planStatusNote("planchat")!;
+    expect(note).toContain("1. Scaffold [code] — done");
+    expect(note).toContain("2. Turning [code] — failed");
+    expect(note).toContain("me/cube (private");
+    expect(note).toContain("https://pr/2");
+
+    const started: { boardId: string; index: number }[] = [];
+    setPlanTaskStarter(async (_ctx, boardId, index) => (started.push({ boardId, index }), true));
+    const seen: string[] = [];
+    const brain = fake("waymond", async (m) => {
+      seen.push(m.content);
+      return { text: "Meshes.", tasks: [{ n: 1, mode: "code", title: "Meshes", spec: "Meshes — stickerless" }], runNow: true };
+    });
+    const sent: string[] = [];
+    const chats = new ChatStore(new Database(":memory:"));
+    const owner = { chatKey: "planchat", content: "make it stickerless", meta: { role: "owner", user_id: "u", user: "me" }, filePaths: [] };
+    await dispatchToBrain({ chats } as never, brain, { send: async (o: { content?: string }) => void sent.push(o.content ?? "") }, owner);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(seen[0]).toContain("[Plan status, from Choomfie");
+    expect(board.tasks.at(-1)).toMatchObject({ n: 3, title: "Meshes", repo: "me/cube" });
+    expect(started).toEqual([{ boardId: "pb1", index: 2 }]);
+    expect(sent.some((c) => c.includes("added to the plan as **task 3**"))).toBe(true);
+    expect(sent.some((c) => c.includes("mode ·"))).toBe(false); // the planning chat kept its mode
+    expect(chats.bound("planchat", "waymond")?.mode ?? null).toBeNull();
+
+    // Someone else's message gets no status, and their job doesn't touch the plan.
+    const plain: string[] = [];
+    const other = fake("waymond", async (m) => (plain.push(m.content), { text: "ok" }));
+    await dispatchToBrain({ chats } as never, other, { send: async () => {} }, { ...owner, meta: { role: "user" } });
+    expect(plain[0]).not.toContain("Plan status");
+    expect(board.tasks).toHaveLength(3);
+    setPlanTaskStarter(async () => false);
+    resetTaskBoards();
   });
 });
 

@@ -19,6 +19,10 @@ import {
   appActionDetail,
   appActionUrl,
   parseAppAction,
+  artifactFileName,
+  artifactRefs,
+  parseArtifact,
+  standaloneHtml,
 } from "../../../plugins/waymond/api.ts";
 import { withFiles } from "../../../plugins/waymond/adapter.ts";
 import { continueAfterToolCap, planContext, stripNarration, TOOLS_REF, toolUrl, WAYMOND_MODES } from "../../../plugins/waymond/modes.ts";
@@ -161,6 +165,27 @@ describe("framePrompt", () => {
   test("inbox prefixes are stripped from attachment names", () => {
     expect(originalName("/x/inbox/1793824118401_ab12cd_photo.png")).toBe("photo.png");
     expect(originalName("/x/inbox/plain.txt")).toBe("plain.txt");
+  });
+});
+
+describe("artifacts (observed 2026-11-08)", () => {
+  test("refs in the text are found once each, with titles", () => {
+    const id = "56435411-0102-4e35-84c0-243ec7a609ae";
+    const text = `Sim:\n\n[[ref:artifact:${id}|RS3M twin — web sim]]\n\nagain [[ref:artifact:${id}|RS3M twin — web sim]]`;
+    expect(artifactRefs(text)).toEqual([{ token: `[[ref:artifact:${id}|RS3M twin — web sim]]`, id, title: "RS3M twin — web sim" }]);
+    expect(artifactRefs("[[ref:artifact:nope|x]]")).toEqual([]);
+  });
+
+  test("an html artifact becomes a page that loads the viewer's libraries itself", () => {
+    const a = parseArtifact({ id: "x", kind: "html", title: "Sim", document: "<!doctype html><html><head><style></style></head><body></body></html>", media_url: null, meta: { libs: ["three", "katex"] } })!;
+    const html = standaloneHtml(a);
+    expect(html).toContain('<head><script src="https://app.ambition.inc/vendor/three/three.global.js"></script>');
+    expect(html).toContain('<link rel="stylesheet" href="https://app.ambition.inc/vendor/katex/katex.min.css">');
+    expect(standaloneHtml({ ...a, libs: [], document: "<p>hi</p>" })).toBe("<p>hi</p>");
+    expect(standaloneHtml({ ...a, libs: ["d3"], document: "<p>hi</p>" })).toStartWith('<script src="https://app.ambition.inc/vendor/d3/d3.min.js">');
+    expect(parseArtifact({ title: "no kind" })).toBeNull();
+    expect(artifactFileName("RS3M twin — stickerless web sim", "html")).toBe("RS3M-twin-stickerless-web-sim.html");
+    expect(artifactFileName("///", "png")).toBe("artifact.png");
   });
 });
 

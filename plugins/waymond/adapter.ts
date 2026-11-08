@@ -19,6 +19,7 @@ import {
 } from "@choomfie/webbrain";
 import { AUTO_MODE, continueAfterToolCap, planContext, stripNarration, WAYMOND_MODES } from "./modes.ts";
 import {
+  API_ORIGIN,
   APP_ORIGIN,
   absoluteLinks,
   CHAT_SEND_URL,
@@ -32,6 +33,11 @@ import {
   messagesUrl,
   APP_ACTION_PREFIX,
   appActionDetail,
+  artifactFileName,
+  artifactRefs,
+  artifactUrl,
+  parseArtifact,
+  standaloneHtml,
   appActionUrl,
   offerActionUrl,
   openOffers,
@@ -146,6 +152,30 @@ export async function withFiles(page: Page, text: string): Promise<{ text: strin
     } catch (e) {
       console.error(`[waymond] couldn't fetch workspace file ${link.path}: ${errorMessage(e)}`);
     }
+  }
+  // Artifacts (a web sim, a chart): attach a page that opens on its own, and say so where the ref was.
+  for (const ref of artifactRefs(text)) {
+    let line = `**${ref.title}** (open it in the Waymond chat)`;
+    try {
+      const a = parseArtifact(await getJson(page, artifactUrl(ref.id)));
+      let file: BrainFile | null = null;
+      if (a?.document) {
+        file = { name: artifactFileName(a.title, "html"), data: new TextEncoder().encode(standaloneHtml(a)) };
+      } else if (a?.mediaUrl) {
+        const ext = (/\.(\w{2,5})(?:\?|$)/.exec(a.mediaUrl)?.[1] ?? "bin").toLowerCase();
+        const data = await pageFetchBytes(page, new URL(a.mediaUrl, API_ORIGIN).href, room);
+        if (data) file = { name: artifactFileName(a.title, ext), data };
+      }
+      if (file && file.data.length <= room && files.length < MAX_FILES) {
+        if (files.some((f) => f.name === file.name)) file.name = file.name.replace(/(\.\w+)$/, `-${ref.id.slice(0, 4)}$1`);
+        files.push(file);
+        room -= file.data.length;
+        line = `📎 **${a!.title}** — attached as \`${file.name}\`${a!.document ? " (open it in a browser)" : ""}`;
+      }
+    } catch (e) {
+      console.error(`[waymond] couldn't fetch artifact ${ref.id}: ${errorMessage(e)}`);
+    }
+    text = text.split(ref.token).join(line);
   }
   return { text: absoluteLinks(text), files };
 }

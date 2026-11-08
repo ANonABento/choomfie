@@ -38,6 +38,7 @@ import {
   getPendingApproval,
   getTaskBoard,
   landingFor,
+  setPlanTaskStarter,
   planTaskRepo,
   saveTaskBoards,
   takeLand,
@@ -329,35 +330,13 @@ async function handleTask(interaction: ButtonInteraction, which: number | "all",
   };
   const redraw = () => interaction.message.edit({ components: taskBoardRows(board) }).catch(() => {});
 
-  /** One task in its own thread; resolves when its answer is posted (and committed, for a repo task). */
   const runOne = async (index: number): Promise<boolean> => {
-    const task = board.tasks[index];
-    let thread: SendableChannel & { id: string; url: string; members?: { add(id: string): Promise<unknown> } };
-    try {
-      thread = (await parent.threads!.create({ name: `${task.n} · ${task.mode} · ${task.title}`.slice(0, 100) })) as typeof thread;
-    } catch (e) {
-      await interaction.followUp({ content: `Couldn't open a thread: ${errorText(e)}`, flags: MessageFlags.Ephemeral }).catch(() => {});
+    const ok = await runBoardTask(ctx, brain, board, index, parent, interaction.user, redraw);
+    if (ok === null) {
+      await interaction.followUp({ content: "Couldn't open a thread for that task.", flags: MessageFlags.Ephemeral }).catch(() => {});
       release(index);
       return false;
     }
-    await thread.members?.add(interaction.user.id).catch(() => {});
-    ctx.config.setChannelBrain(thread.id, brain.id);
-    ctx.chats.setMode(ctx.chats.start(thread.id, brain.id).id, task.mode);
-    board.states[index] = { kind: "running", url: thread.url };
-    board.threads = { ...board.threads, [thread.id]: index };
-    saveTaskBoards();
-    await redraw();
-    await thread.send({ content: `**Task ${task.n}** · \`${task.mode}\` mode\n${task.spec}`.slice(0, 2000), allowedMentions: { parse: [] } });
-    onMessageReceived(thread.id, thread as never, false);
-    let ok = false;
-    try {
-      ok = await runTaskInThread(ctx, brain, board, index, thread, interaction.user);
-    } catch (e) {
-      await thread.send({ content: `❌ ${errorText(e).slice(0, 1500)}`, allowedMentions: { parse: [] } }).catch(() => {});
-    }
-    board.states[index] = { kind: ok ? "done" : "failed", url: thread.url };
-    saveTaskBoards();
-    await redraw();
     return ok;
   };
 
@@ -372,6 +351,70 @@ async function handleTask(interaction: ButtonInteraction, which: number | "all",
     await redraw();
   }
 }
+
+type ThreadParent = { threads?: { create(o: { name: string }): Promise<unknown> } };
+
+/**
+ * One plan task in its own thread off `parent`; resolves when its answer is
+ * posted (and committed, for a repo task). Null when the thread couldn't open.
+ */
+async function runBoardTask(
+  ctx: Ctx,
+  brain: NonNullable<ReturnType<typeof getBrain>>,
+  board: TaskBoard,
+  index: number,
+  parent: ThreadParent,
+  user: { username: string; id: string },
+  redraw: () => Promise<unknown>
+): Promise<boolean | null> {
+  const task = board.tasks[index];
+  let thread: SendableChannel & { id: string; url: string; members?: { add(id: string): Promise<unknown> } };
+  try {
+    thread = (await parent.threads!.create({ name: `${task.n} · ${task.mode} · ${task.title}`.slice(0, 100) })) as typeof thread;
+  } catch (e) {
+    console.error(`[tasks] couldn't open a thread: ${errorText(e)}`);
+    return null;
+  }
+  await thread.members?.add(user.id).catch(() => {});
+  ctx.config.setChannelBrain(thread.id, brain.id);
+  ctx.chats.setMode(ctx.chats.start(thread.id, brain.id).id, task.mode);
+  board.states[index] = { kind: "running", url: thread.url };
+  board.threads = { ...board.threads, [thread.id]: index };
+  saveTaskBoards();
+  await redraw();
+  await thread.send({ content: `**Task ${task.n}** · \`${task.mode}\` mode\n${task.spec}`.slice(0, 2000), allowedMentions: { parse: [] } });
+  onMessageReceived(thread.id, thread as never, false);
+  let ok = false;
+  try {
+    ok = await runTaskInThread(ctx, brain, board, index, thread, user);
+  } catch (e) {
+    await thread.send({ content: `❌ ${errorText(e).slice(0, 1500)}`, allowedMentions: { parse: [] } }).catch(() => {});
+  }
+  board.states[index] = { kind: ok ? "done" : "failed", url: thread.url };
+  saveTaskBoards();
+  await redraw();
+  return ok;
+}
+
+/**
+ * A plan's chat asked for one more job ("make the meshes stickerless"): it
+ * joined the plan's board (the router added it), and runs like a clicked
+ * task — its own thread, on the plan's branch — not in the planning chat.
+ */
+setPlanTaskStarter(async (ctx, boardId, index, user) => {
+  const board = getTaskBoard(boardId);
+  const brain = board ? getBrain(board.brainId) : undefined;
+  if (!board || !brain || !board.channelId) return false;
+  const where = await ctx.discord?.channels.fetch(board.channelId).catch(() => null);
+  if (!where) return false;
+  const w = where as unknown as { isThread?: () => boolean; parent?: unknown; messages?: { fetch(id: string): Promise<{ edit(o: unknown): Promise<unknown> }> } };
+  const parent = (w.isThread?.() ? w.parent : w) as (ThreadParent & { type?: ChannelType }) | null;
+  if (parent?.type !== ChannelType.GuildText || !parent.threads) return false;
+  const msg = await w.messages?.fetch(boardId).catch(() => null);
+  const redraw = () => msg?.edit({ components: taskBoardRows(board) }).catch(() => {}) ?? Promise.resolve();
+  if (board.busy || board.states[index]?.kind === "running") return false;
+  return (await runBoardTask(ctx as Ctx, brain, board, index, parent, user, redraw)) === true;
+});
 
 /** The plan's branch on `repo`: saved, being opened, or opened now (once, however many tasks ask). */
 async function planBranchFor(ctx: Ctx, board: TaskBoard, repo: string): Promise<PlanBranch> {
