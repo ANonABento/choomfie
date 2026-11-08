@@ -16,6 +16,9 @@ import {
   parseWorkspaceFile,
   workspaceFileUrl,
   workspaceLinks,
+  appActionDetail,
+  appActionUrl,
+  parseAppAction,
 } from "../../../plugins/waymond/api.ts";
 import { withFiles } from "../../../plugins/waymond/adapter.ts";
 import { continueAfterToolCap, planContext, stripNarration, TOOLS_REF, toolUrl, WAYMOND_MODES } from "../../../plugins/waymond/modes.ts";
@@ -158,6 +161,45 @@ describe("framePrompt", () => {
   test("inbox prefixes are stripped from attachment names", () => {
     expect(originalName("/x/inbox/1793824118401_ab12cd_photo.png")).toBe("photo.png");
     expect(originalName("/x/inbox/plain.txt")).toBe("plain.txt");
+  });
+});
+
+describe("app actions (propose_app_action observed 2026-11-08)", () => {
+  const msg = {
+    id: "m1",
+    role: "assistant",
+    content: "The fix is in a card waiting for you to approve.",
+    tool_calls: [
+      {
+        tool: "propose_app_action",
+        status: "completed",
+        data: { tool_name: "Create or update file contents", tier: "ask", app: "github", action_id: "af5f", summary: "Fix the workflow" },
+      },
+      { tool: "offer_replies", status: "completed", data: { options: ["I approved it"] } },
+    ],
+  };
+
+  test("a proposed app action becomes an approval, approved through app-actions", () => {
+    const [o] = parseMessages([msg])[0].offers;
+    expect(o).toMatchObject({ id: "app:af5f", title: "Fix the workflow", subtitle: "github · Create or update file contents", primary: "Approve" });
+    expect(openOffers(parseMessages([msg]))).toHaveLength(1);
+    expect(appActionUrl("af5f", "approve")).toEndWith("/api/waymond/app-actions/af5f/approve");
+  });
+
+  test("its preview lists the arguments, cutting a whole file short", () => {
+    const a = parseAppAction({
+      status: "pending",
+      tier: "ask_twice",
+      toolkit: "github",
+      tool_name: "Create or update file contents",
+      summary: "s",
+      arguments: { repo: "BentoSite", content: "x\n".repeat(500) },
+    })!;
+    const d = appActionDetail(a);
+    expect(d).toStartWith("⚠️ Can't be undone.");
+    expect(d).toContain("**repo:** BentoSite");
+    expect(d).toContain("(1000 chars)");
+    expect(parseAppAction({ nope: 1 })).toBeNull();
   });
 });
 

@@ -72,11 +72,35 @@ export interface Offer {
   status: string;
 }
 
-/** Observed: `{tool: "offer_post", data: {offer: {offer_id, kind, title, subtitle, detail, primary, secondary, status}}}`. */
+/** An app action's offer id carries this prefix: it is approved through `app-actions`, not `cards`. */
+export const APP_ACTION_PREFIX = "app:";
+
+/**
+ * Observed: `{tool: "offer_post", data: {offer: {offer_id, kind, title, subtitle, detail, primary, secondary, status}}}`,
+ * and for a connected app's write (GitHub commit, …) `{tool: "propose_app_action",
+ * data: {action_id, app, tool_name, tier, summary}}` (2026-11-08) — its live
+ * status and arguments come from `app-actions/<id>`.
+ */
 function offersIn(toolCalls: unknown): Offer[] {
   if (!Array.isArray(toolCalls)) return [];
   const out: Offer[] = [];
   for (const call of toolCalls) {
+    const a = call as { tool?: unknown; status?: unknown; data?: Record<string, unknown> } | null;
+    if (a?.tool === "propose_app_action" && typeof a.data?.action_id === "string") {
+      const d = a.data;
+      const str = (v: unknown) => (typeof v === "string" ? v : "");
+      out.push({
+        id: APP_ACTION_PREFIX + d.action_id,
+        kind: "app_action",
+        title: str(d.summary) || str(d.tool_name) || "App action",
+        subtitle: [str(d.app), str(d.tool_name)].filter(Boolean).join(" · "),
+        detail: "",
+        primary: d.tier === "ask_twice" ? "Approve (can't be undone)" : "Approve",
+        secondary: "Cancel",
+        status: "open",
+      });
+      continue;
+    }
     const c = call as { tool?: unknown; data?: { offer?: Record<string, unknown> } } | null;
     const o = c?.data?.offer;
     if (typeof c?.tool !== "string" || !c.tool.startsWith("offer_") || !o || typeof o.offer_id !== "string") continue;
@@ -220,6 +244,44 @@ export function openOffers(messages: ChatMessage[]): Offer[] {
 
 export const offerActionUrl = (offerId: string, action: "send" | "decline") =>
   `${API_ORIGIN}/api/waymond/cards/${encodeURIComponent(offerId)}/${action}`;
+
+export const appActionUrl = (actionId: string, action?: "approve" | "decline") =>
+  `${API_ORIGIN}/api/waymond/app-actions/${encodeURIComponent(actionId)}${action ? `/${action}` : ""}`;
+
+export interface AppAction {
+  /** "pending" until approved or declined; then running / done / declined / failed. */
+  status: string;
+  tier: string;
+  toolkit: string;
+  toolName: string;
+  summary: string;
+  /** What the app will be called with, for the approval preview. */
+  args: Record<string, unknown>;
+}
+
+export function parseAppAction(raw: unknown): AppAction | null {
+  const r = raw as Record<string, unknown> | null;
+  if (!r || typeof r !== "object" || typeof r.status !== "string") return null;
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  return {
+    status: r.status,
+    tier: str(r.tier),
+    toolkit: str(r.toolkit),
+    toolName: str(r.tool_name),
+    summary: str(r.summary),
+    args: r.arguments && typeof r.arguments === "object" ? (r.arguments as Record<string, unknown>) : {},
+  };
+}
+
+/** The approval preview: each argument on its own line, long values (a whole file) cut. */
+export function appActionDetail(a: AppAction): string {
+  const lines = Object.entries(a.args).map(([k, v]) => {
+    const text = typeof v === "string" ? v : JSON.stringify(v);
+    const short = text.length > 600 ? `${text.slice(0, 600)}… (${text.length} chars)` : text;
+    return short.includes("\n") ? `**${k}**\n\`\`\`\n${short.replace(/```/g, "ʼʼʼ")}\n\`\`\`` : `**${k}:** ${short}`;
+  });
+  return [a.tier === "ask_twice" ? "⚠️ Can't be undone." : "", ...lines].filter(Boolean).join("\n").slice(0, 3900);
+}
 
 /** `cards/waiting` → whether this conversation has an approval parked. */
 export function hasWaitingCard(raw: unknown, conversationId: string): boolean {

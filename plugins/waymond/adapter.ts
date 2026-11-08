@@ -30,8 +30,12 @@ import {
   lateMessages,
   memoryPrivateUrl,
   messagesUrl,
+  APP_ACTION_PREFIX,
+  appActionDetail,
+  appActionUrl,
   offerActionUrl,
   openOffers,
+  parseAppAction,
   parseMessages,
   parseTurn,
   parseWorkspaceFile,
@@ -69,6 +73,25 @@ export function progressLine(turn: TurnState, elapsedMs: number): string {
 
 /** GET an Ambition endpoint from the logged-in page. */
 const getJson = (page: Page, url: string) => pageFetchOk(page, url, ID);
+
+/**
+ * App actions (a GitHub commit Waymond proposed) say only "proposed" in the
+ * message; their status and arguments live in `app-actions/<id>`. Fill in the
+ * preview, and drop ones already approved or cancelled in the app.
+ */
+async function withAppActions(page: Page, offers: Offer[]): Promise<Offer[]> {
+  const out: Offer[] = [];
+  for (const o of offers) {
+    if (!o.id.startsWith(APP_ACTION_PREFIX)) {
+      out.push(o);
+      continue;
+    }
+    const a = parseAppAction(await getJson(page, appActionUrl(o.id.slice(APP_ACTION_PREFIX.length))).catch(() => null));
+    if (!a) out.push(o); // couldn't look: still offer it; the site refuses a stale one
+    else if (a.status === "pending") out.push({ ...o, detail: appActionDetail(a) });
+  }
+  return out;
+}
 
 /** fetch() needs the app origin for the session cookie and CORS. */
 async function onApp(page: Page) {
@@ -217,7 +240,7 @@ export const waymondAdapter: SiteAdapter = {
             ...answer,
             ref,
             choices: state.options,
-            approvals: state.offers.map(toApproval),
+            approvals: (await withAppActions(page, state.offers)).map(toApproval),
             stopped: t.stopRequested(),
             background: state.background,
             lastMessageId: state.lastMessageId,
@@ -249,7 +272,7 @@ export const waymondAdapter: SiteAdapter = {
     return {
       ...(await withFiles(page, late.map((m) => m.content.trim()).filter(Boolean).join("\n\n"))),
       choices: [...late].reverse().find((m) => m.options.length)?.options ?? [],
-      approvals: openOffers(late).map(toApproval),
+      approvals: (await withAppActions(page, openOffers(late))).map(toApproval),
       ids: late.map((m) => m.id),
       more: late.some((m) => m.startsTask),
     };
@@ -258,6 +281,18 @@ export const waymondAdapter: SiteAdapter = {
   /** `POST cards/:id/send|decline`. Returns Ambition's status for the card. */
   async resolveApproval(page, ref, approvalId, approve) {
     await onApp(page);
+    if (approvalId.startsWith(APP_ACTION_PREFIX)) {
+      const id = approvalId.slice(APP_ACTION_PREFIX.length);
+      const a = parseAppAction(await getJson(page, appActionUrl(id)));
+      if (a && a.status !== "pending") return `already ${a.status}`;
+      // The Discord click is the confirmation; "ask_twice" asks the site for the second one too.
+      const json = await pageFetchOk(page, appActionUrl(id, approve ? "approve" : "decline"), ID, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(approve ? { confirm: true, twice: a?.tier === "ask_twice" } : {}),
+      });
+      return String((json as { status?: unknown } | undefined)?.status ?? (approve ? "approved" : "declined"));
+    }
     const action = approve ? "send" : "decline";
     const json = await pageFetchOk(page, offerActionUrl(approvalId, action), ID, {
       method: "POST",
