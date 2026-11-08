@@ -134,7 +134,7 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
     return {
       id: adapter.id,
       label: adapter.label,
-      modes: adapter.modes?.map(({ id, label, description }) => ({ id, label, description })),
+      modes: adapter.modes?.map(({ id, label, description, repo }) => ({ id, label, description, ...(repo ? { repo } : {}) })),
       defaultMode: adapter.defaultMode,
 
       // Core has already bound a fresh chat here; only the background watch is ours to drop.

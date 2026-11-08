@@ -22,7 +22,7 @@ import type { SiteMode } from "@choomfie/webbrain";
  * the repo is public). Pinned, so a chat always runs scripts that match these
  * frames; bump it when tools/ changes.
  */
-export const TOOLS_REF = "ab2e4d4f85f2043ff5e6554adc023cf18a93a7a6";
+export const TOOLS_REF = "16729dc51a9525d7ca8a6d4bb64c9428a3b64d0c";
 export const toolUrl = (file: string) =>
   `https://raw.githubusercontent.com/ANonABento/choomfie/${TOOLS_REF}/plugins/waymond/tools/${file}`;
 
@@ -78,6 +78,7 @@ ${TASKS}]`,
     id: "code",
     label: "Code",
     description: "Coding agent: edits a GitHub repo in its sandbox, runs the tests, hands back a patch",
+    repo: true,
     frame: `[code mode — work it through yourself in run_python before replying; no questions mid-task, state assumptions at the end. Plain tone.
 Each run_python is a fresh container killed after ~150 s; nothing installed persists. Start EVERY run with:
 ${fetchTool("swe.sh", 'sh("bash /tmp/swe.sh setup OWNER/REPO")  # add a wip.patch path as 3rd arg to restore earlier edits')}
@@ -89,6 +90,7 @@ Finish: \`bash /tmp/swe.sh diff /tmp/out/<short-name>.patch\`, save it to worksp
     id: "debug",
     label: "Debug",
     description: "Bug hunter: reproduces it with a failing test, finds the root cause, then fixes it",
+    repo: true,
     frame: `[debug mode — find the cause before fixing anything. Work it through yourself in run_python; no questions mid-task. Plain tone.
 Each run_python is a fresh container killed after ~150 s; nothing installed persists. Start EVERY run with:
 ${fetchTool("swe.sh", 'sh("bash /tmp/swe.sh setup OWNER/REPO")  # add a wip.patch path as 3rd arg to restore earlier edits')}
@@ -178,9 +180,7 @@ export function planContext(answer: string): string | undefined {
     if (/\.md$/i.test(path) && /plan/i.test(path)) {
       const dir = path.replace(/\/[^/]*$/, "");
       return (
-        `The full plan is in your workspace at ${path} — fs_read it first, but do only your task.\n` +
-        `If your task changes a repo: earlier tasks' patches are in ${dir}/patches/ — pass that folder to swe.sh setup after the repo so you build on them, ` +
-        `and also save your patch there as <your task number>-<short-name>.patch.`
+        `The full plan is in your workspace at ${path} — fs_read it first, but do only your task. Save your own files under ${dir}/.`
       );
     }
   }

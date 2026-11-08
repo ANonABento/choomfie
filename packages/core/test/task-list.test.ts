@@ -26,4 +26,12 @@ describe("parseTaskList", () => {
     expect(parseTaskList("## Tasks:\n1. [cad] a — b\nNotes\n3. [cad] c — d", modes).map((t) => t.n)).toEqual([1]);
     expect(parseTaskList("Tasks\n" + Array.from({ length: 30 }, (_, i) => `${i + 1}. [code] t${i} — s`).join("\n"), modes)).toHaveLength(25);
   });
+
+  test("a task line that names its repo carries it", () => {
+    const t = parseTaskList(
+      "Tasks\n1. [code] Fast mode — in ANonABento/rs3m-twin: `model.build(\"fast\")`. Done when: pytest passes\n2. [code] a/b — Scaffold: x\n3. [code] Docs — in the README: y",
+      modes
+    );
+    expect(t.map((x) => x.repo)).toEqual(["ANonABento/rs3m-twin", "a/b", undefined]);
+  });
 });

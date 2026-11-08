@@ -28,6 +28,7 @@ import type { AppContext } from "./types.ts";
 import { onReplySent } from "./typing.ts";
 import { getBrainRelay } from "./ask-relay.ts";
 import { findPatch, offerPatch } from "./patch-pr.ts";
+import type { PlanBranch } from "./plan-branch.ts";
 
 export type RouteDecision =
   /** Forward to the Claude session as usual. */
@@ -195,6 +196,8 @@ export interface TaskBoard {
   states: TaskState[];
   /** "Run all" is working through the list. */
   busy?: boolean;
+  /** Repo → the plan's branch on it, opened by its first repo task. */
+  branches?: Map<string, Promise<PlanBranch>>;
 }
 
 /** Task-board message id → its plan's tasks and how each is going. In memory: a restart expires them. */
@@ -242,13 +245,19 @@ export function taskBoardRows(board: Pick<TaskBoard, "tasks" | "states" | "busy"
   return rows;
 }
 
+export interface PostOptions {
+  /** No "Open draft PR" button: the caller commits the patch itself (a plan's branch). */
+  noPatchOffer?: boolean;
+}
+
 /** Post a brain's reply: chunked, threaded to `replyTo` when given, quick replies as buttons on the last chunk. */
 export async function postBrainReply(
   channel: SendableChannel,
   brainId: string,
   chatKey: string,
   reply: BrainReply,
-  replyTo?: string
+  replyTo?: string,
+  opts: PostOptions = {}
 ): Promise<void> {
   const choices = (reply.choices ?? []).filter(Boolean).slice(0, MAX_CHOICES);
   const fallback = choices.length ? "(pick one)" : reply.approvals?.length || reply.files?.length ? "" : "(no reply)";
@@ -281,7 +290,7 @@ export async function postBrainReply(
     if (typeof id === "string") taskBoards.set(id, board);
   }
   // A patch made in the brain's sandbox: the owner can turn it into a draft PR.
-  const patch = findPatch(reply.text, reply.files);
+  const patch = opts.noPatchOffer ? null : findPatch(reply.text, reply.files);
   if (patch) {
     const sent = await channel.send({
       allowedMentions: NO_MENTIONS,
@@ -324,13 +333,14 @@ export function dispatchToBrain(
   brain: Brain,
   channel: SendableChannel,
   /** `messageId` anchors the reply; omit it when the message is in another channel. */
-  message: BrainMessage & { messageId?: string }
-): Promise<boolean> {
+  message: BrainMessage & { messageId?: string },
+  opts: PostOptions = {}
+): Promise<BrainReply | null> {
   const prev = queues.get(message.chatKey) ?? Promise.resolve();
   const run = prev.then(async () => {
     try {
       const reply = await brain.send(message, ctx);
-      await postBrainReply(channel, brain.id, message.chatKey, reply, message.messageId);
+      await postBrainReply(channel, brain.id, message.chatKey, reply, message.messageId, opts);
       const task = reply.runNow ? reply.tasks?.[0] : undefined;
       if (task) {
         // One job for one mode: switch this chat to it and start, in this same thread.
@@ -339,7 +349,7 @@ export function dispatchToBrain(
         await channel.send({ allowedMentions: NO_MENTIONS, content: `-# → **${task.mode}** mode · \`/mode off\` to go back to auto` }).catch(() => {});
         void dispatchToBrain(ctx, brain, channel, { ...message, messageId: undefined, content: taskPrompt(task, reply.taskContext), filePaths: [] });
       }
-      return true;
+      return reply;
     } catch (e) {
       console.error(`[brain:${brain.id}] ${errorMessage(e)}`);
       await channel
@@ -349,7 +359,7 @@ export function dispatchToBrain(
           ...(message.messageId ? { reply: { messageReference: message.messageId } } : {}),
         })
         .catch(() => {});
-      return false;
+      return null;
     } finally {
       onReplySent(message.chatKey);
     }

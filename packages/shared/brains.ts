@@ -59,6 +59,8 @@ export interface BrainTask {
   title: string;
   /** The whole task line: what to make and when it's done. Sent to a fresh chat, so it must stand alone. */
   spec: string;
+  /** `owner/name` the task works in, when its line names one ("— in owner/name: …"). */
+  repo?: string;
 }
 
 /**
@@ -87,7 +89,8 @@ export function parseTaskList(text: string, modes: string[]): BrainTask[] {
     const named = parts.length > 1 && /^[\w.-]+\/[\w.-]+$/.test(parts[0]) ? parts[1] : parts[0];
     let title = (named ?? spec).split(/[(,;]/)[0].trim();
     if (title.length > 40) title = title.slice(0, 40).replace(/\s+\S*$/, "") + "…";
-    tasks.push({ n: Number(m[1]), mode, title, spec });
+    const repo = (/\bin\s+`?([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)`?\s*:/.exec(spec) ?? /^`?([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)`?\s+[—–-]\s/.exec(spec))?.[1];
+    tasks.push({ n: Number(m[1]), mode, title, spec, ...(repo && !repo.includes("..") ? { repo } : {}) });
   }
   return tasks.slice(0, 25);
 }
@@ -109,6 +112,8 @@ export interface BrainMode {
   label: string;
   /** One line for `/mode` and autocomplete. */
   description: string;
+  /** Works on a git repo and hands back a `.patch` (a plan's tasks in it build on one branch). */
+  repo?: boolean;
 }
 
 export interface Brain {

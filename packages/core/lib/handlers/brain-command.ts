@@ -28,7 +28,8 @@ import {
   SlashCommandBuilder,
   type ButtonInteraction,
 } from "discord.js";
-import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds } from "@choomfie/shared";
+import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds, type BrainTask } from "@choomfie/shared";
+import { join } from "node:path";
 import { botIsAbsent, interactionChannel, rememberBrainRelay, settleAskRelays } from "../ask-relay.ts";
 import { registerButtonHandler, registerCommand } from "../register.ts";
 import {
@@ -47,6 +48,7 @@ import { isAllowed, isOwner } from "../access.ts";
 import { onMessageReceived, onReplySent } from "../typing.ts";
 import { isDaemonMode, requestDaemonControl } from "../daemon-status.ts";
 import { openDraftPr, takePatch } from "../patch-pr.ts";
+import { bundlePlanBranch, landPatch, openPlanBranch, planBranchNote, type PlanBranch } from "../plan-branch.ts";
 import { requireOwner } from "./shared.ts";
 
 function label(id: string): string {
@@ -320,12 +322,7 @@ async function handleTask(interaction: ButtonInteraction, which: number | "all",
     await redraw();
     await thread.send({ content: `**Task ${task.n}** · \`${task.mode}\` mode\n${task.spec}`.slice(0, 2000), allowedMentions: { parse: [] } });
     onMessageReceived(thread.id, thread as never, false);
-    const ok = await dispatchToBrain(ctx, brain, thread, {
-      chatKey: thread.id,
-      content: taskPrompt(task, board.context),
-      meta: { chat_id: thread.id, user: interaction.user.username, user_id: interaction.user.id, role: "owner" },
-      filePaths: [],
-    });
+    const ok = await runTaskInThread(ctx, brain, board, task, thread, interaction.user);
     board.states[index] = { kind: ok ? "done" : "failed", url: thread.url };
     await redraw();
     return ok;
@@ -340,6 +337,82 @@ async function handleTask(interaction: ButtonInteraction, which: number | "all",
     await redraw();
   }
 }
+
+/**
+ * Send a task to its thread. A repo task (its mode works on a repo and its line
+ * names one) works on the plan's branch: it gets the branch as a bundle, and
+ * the patch it hands back is committed there — or the task fails, here, so
+ * Run all stops before the next task builds on something that isn't there.
+ */
+async function runTaskInThread(
+  ctx: Ctx,
+  brain: NonNullable<ReturnType<typeof getBrain>>,
+  board: NonNullable<ReturnType<typeof getTaskBoard>>,
+  task: BrainTask,
+  thread: SendableChannel & { id: string },
+  user: { username: string; id: string }
+): Promise<boolean> {
+  const say = (content: string) => thread.send({ content, allowedMentions: { parse: [] } }).catch(() => {});
+  const message = {
+    chatKey: thread.id,
+    content: taskPrompt(task, board.context),
+    meta: { chat_id: thread.id, user: user.username, user_id: user.id, role: "owner" },
+    filePaths: [] as string[],
+  };
+  const repoMode = brain.modes?.find((m) => m.id === task.mode)?.repo;
+  if (!repoMode || !task.repo) return !!(await dispatchToBrain(ctx, brain, thread, message));
+
+  let pb: PlanBranch;
+  try {
+    board.branches ??= new Map();
+    let opening = board.branches.get(task.repo);
+    if (!opening) {
+      opening = openPlanBranch(task.repo, join(ctx.DATA_DIR, "plans"));
+      board.branches.set(task.repo, opening);
+      opening.catch(() => board.branches?.delete(task.repo!));
+    }
+    pb = await opening;
+  } catch (e) {
+    await say(`❌ Couldn't set up a branch on **${task.repo}**: ${errorText(e).slice(0, 1500)}`);
+    return false;
+  }
+  const bundle = await bundlePlanBranch(pb).catch(async (e) => {
+    await say(`❌ Couldn't bundle \`${pb.branch}\`: ${errorText(e).slice(0, 1500)}`);
+    return null;
+  });
+  if (!bundle) return false;
+  try {
+    const name = bundle.path.split("/").pop()!;
+    await say(`-# 🌿 works on \`${pb.branch}\` of **${pb.repo}**${pb.created ? " (new, private)" : ""} — attached as ${name}`);
+    const reply = await dispatchToBrain(
+      ctx,
+      brain,
+      thread,
+      { ...message, content: `${message.content}\n\n${planBranchNote(pb, name)}`, filePaths: [bundle.path] },
+      { noPatchOffer: true }
+    );
+    if (!reply) return false;
+    const patch = reply.files?.find((f) => /\.(patch|diff)$/i.test(f.name));
+    if (!patch) {
+      await say(`❌ No patch came back, so nothing was committed to \`${pb.branch}\`.`);
+      return false;
+    }
+    try {
+      const landed = await landPatch(pb, patch.data, `Task ${task.n}: ${task.title}`);
+      await say(
+        `🌿 Committed to \`${pb.branch}\`: <${landed.commitUrl}>` + (landed.prOpened ? `\n📦 Draft PR for the whole plan: ${landed.prOpened}` : "")
+      );
+      return true;
+    } catch (e) {
+      await say(`❌ Couldn't commit it to \`${pb.branch}\`: ${errorText(e).slice(0, 1500)}`);
+      return false;
+    }
+  } finally {
+    bundle.cleanup();
+  }
+}
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
  * "Open draft PR" under a patch. Owner only: it pushes a branch and opens a PR
