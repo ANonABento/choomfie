@@ -33,6 +33,12 @@ describe("callerIsOwner", () => {
     // a session can't borrow another chat's role through chat_id
     expect(callerIsOwner({ via: "session", location: "c2" }, { chat_id: "c1" })).toBe(false);
     expect(callerIsOwner({ via: "remote" }, {})).toBe(true);
+    // foreground: a non-owner's message anywhere can't name a chat where the owner spoke
+    recordTurn({ chat_id: "c2", role: "user" });
+    expect(callerIsOwner({ via: "local" }, { chat_id: "c1" })).toBe(false);
+    expect(callerIsOwner({ via: "session", location: "thread-3" }, {})).toBe(true);
+    recordTurn({ chat_id: "c1", role: "owner" });
+    expect(callerIsOwner({ via: "local" }, { chat_id: "c1" })).toBe(true);
     recordTurn({ chat_id: "c1", role: "user" });
     expect(callerIsOwner({ via: "local" }, { chat_id: "c1" })).toBe(false);
   });
