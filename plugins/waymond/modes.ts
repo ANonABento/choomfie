@@ -22,7 +22,7 @@ import type { SiteMode } from "@choomfie/webbrain";
  * the repo is public). Pinned, so a chat always runs scripts that match these
  * frames; bump it when tools/ changes.
  */
-export const TOOLS_REF = "97d5f83c5c4efe10aad47b51199b19e7ca4e386e";
+export const TOOLS_REF = "67fa68d1fdde0a23d241b4a236c0c0e0794e0f6a";
 export const toolUrl = (file: string) =>
   `https://raw.githubusercontent.com/ANonABento/choomfie/${TOOLS_REF}/plugins/waymond/tools/${file}`;
 
@@ -51,7 +51,7 @@ const AGENT =
 
 const RESEARCH = `Research before your first reply: read the repo if one is involved (run_python: urllib.request.urlretrieve("${toolUrl("swe.sh")}", "/tmp/swe.sh"), then bash /tmp/swe.sh setup OWNER/REPO), web_search the parts, standards, libraries and prior art (several searches, cite sources), and check your workspace for earlier work. Then ask only what research can't answer — preferences and constraints only the user knows — at most 3 short questions, with likely answers as quick replies. Where a sensible default exists, take it and list it under Assumptions instead of asking.`;
 
-const TASKS = `Tasks: each small enough for one agent in one sitting, and standalone — it goes to a fresh chat that sees only its own line and the plan file. Give each the mode that does it: code (change a GitHub repo, with tests), debug (find and fix a bug), cad (OpenSCAD printable part), 3d (Blender model), plan (a sub-plan). Name the repo for code/debug. End each with "Done when:" and a check that mode can run (firmware: native unit tests — device builds can't run in the sandbox, so say they're checked on the user's machine). Order by dependency.
+const TASKS = `Tasks: each small enough for one agent in one sitting, and standalone — it goes to a fresh chat that sees only its own line and the plan file. Give each the mode that does it: code (change a GitHub repo, with tests), debug (find and fix a bug), cad (OpenSCAD printable part), 3d (Blender model), plan (a sub-plan). Name the repo for code/debug as "in owner/name" (each task gets that repo with every earlier task's work already in it — never point a task at patch files). End each with "Done when:" and a check that mode can run (firmware: native unit tests — device builds can't run in the sandbox, so say they're checked on the user's machine). Order by dependency.
 The task list is a line that says only "Tasks", then one line per task, exactly like:
 1. [cad] Motor mount — 40 x 30 x 5 mm plate for a NEMA 17, four M3 holes on 31 mm centres. Done when: cad_check passes with --expect 40,30,5 --hole 3.4
 2. [code] Step driver — in ANonABento/robot: … Done when: …`;

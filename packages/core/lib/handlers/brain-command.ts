@@ -28,7 +28,7 @@ import {
   SlashCommandBuilder,
   type ButtonInteraction,
 } from "discord.js";
-import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds, type BrainTask } from "@choomfie/shared";
+import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds, type BrainFile } from "@choomfie/shared";
 import { join } from "node:path";
 import { botIsAbsent, interactionChannel, rememberBrainRelay, settleAskRelays } from "../ask-relay.ts";
 import { registerButtonHandler, registerCommand } from "../register.ts";
@@ -37,8 +37,12 @@ import {
   dispatchToBrain,
   getPendingApproval,
   getTaskBoard,
+  planTaskRepo,
+  saveTaskBoards,
+  takeLand,
   taskBoardRows,
   taskPrompt,
+  type TaskBoard,
   parentChannelId,
   resolveBrainId,
   takeChoices,
@@ -48,7 +52,7 @@ import { isAllowed, isOwner } from "../access.ts";
 import { onMessageReceived, onReplySent } from "../typing.ts";
 import { isDaemonMode, requestDaemonControl, waitForClaudeIdle } from "../daemon-status.ts";
 import { openDraftPr, takePatch } from "../patch-pr.ts";
-import { bundlePlanBranch, landPatch, openPlanBranch, planBranchNote, type PlanBranch } from "../plan-branch.ts";
+import { bundlePlanBranch, landPatch, openPlanBranch, pickPatch, planBranchNote, type PlanBranch } from "../plan-branch.ts";
 import { requireOwner } from "./shared.ts";
 
 function label(id: string): string {
@@ -218,6 +222,7 @@ registerCommand("stop", {
 registerButtonHandler("brain", async (interaction, parts, ctx) => {
   if (parts[1] === "approval") return handleApproval(interaction, parts[2] === "yes", ctx);
   if (parts[1] === "pr") return handlePatchPr(interaction, ctx);
+  if (parts[1] === "landtask") return handleLandTask(interaction, ctx);
   if (parts[1] === "task") return handleTask(interaction, Number(parts[2]), ctx);
   if (parts[1] === "taskall") return handleTask(interaction, "all", ctx);
   if (parts[1] !== "choice") return;
@@ -289,9 +294,10 @@ type Ctx = Parameters<Parameters<typeof registerButtonHandler>[1]>[2];
 async function handleTask(interaction: ButtonInteraction, which: number | "all", ctx: Ctx): Promise<void> {
   const ephemeral = (content: string) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
   if (!isOwner(ctx, interaction.user.id)) return void (await ephemeral("Only the owner can start plan tasks~"));
-  const board = getTaskBoard(interaction.message.id);
+  const boardId = interaction.message.id;
+  const board = getTaskBoard(boardId);
   const brain = board ? getBrain(board.brainId) : undefined;
-  if (!board || !brain) return void (await ephemeral("These tasks expired (Choomfie restarted) — ask for the task list again."));
+  if (!board || !brain) return void (await ephemeral("These tasks expired — ask for the task list again."));
   if (board.busy) return void (await ephemeral("Run all is already working through these — one at a time."));
   const runnable = (i: number) => board.states[i]?.kind === "idle" || board.states[i]?.kind === "failed";
   const indices = which === "all" ? board.states.flatMap((_, i) => (runnable(i) ? [i] : [])) : [which];
@@ -308,56 +314,120 @@ async function handleTask(interaction: ButtonInteraction, which: number | "all",
   if (!interaction.guildId || parent?.type !== ChannelType.GuildText || !parent.threads) {
     return void (await ephemeral("Plan tasks run in threads, so they need a server text channel — not a DM."));
   }
-  await interaction.deferUpdate();
+  // Claim before the first await, so a double click can't start the same work twice:
+  // Run all holds the whole board; one task holds itself.
+  const claimed = indices;
+  const before = claimed.map((i) => board.states[i]);
+  board.busy = which === "all";
+  if (which !== "all") board.states[which] = { kind: "running", url: interaction.message.url };
+  /** Undo a claim that never turned into a running thread. */
+  const release = (i: number) => {
+    const s = board.states[i];
+    if (s?.kind === "running" && s.url === interaction.message.url) board.states[i] = before[claimed.indexOf(i)] ?? { kind: "idle" };
+  };
   const redraw = () => interaction.message.edit({ components: taskBoardRows(board) }).catch(() => {});
 
-  /** One task in its own thread; resolves when its answer is posted. */
+  /** One task in its own thread; resolves when its answer is posted (and committed, for a repo task). */
   const runOne = async (index: number): Promise<boolean> => {
     const task = board.tasks[index];
     let thread: SendableChannel & { id: string; url: string; members?: { add(id: string): Promise<unknown> } };
     try {
       thread = (await parent.threads!.create({ name: `${task.n} · ${task.mode} · ${task.title}`.slice(0, 100) })) as typeof thread;
     } catch (e) {
-      await interaction.followUp({ content: `Couldn't open a thread: ${e instanceof Error ? e.message : e}`, flags: MessageFlags.Ephemeral });
+      await interaction.followUp({ content: `Couldn't open a thread: ${errorText(e)}`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      release(index);
       return false;
     }
     await thread.members?.add(interaction.user.id).catch(() => {});
     ctx.config.setChannelBrain(thread.id, brain.id);
     ctx.chats.setMode(ctx.chats.start(thread.id, brain.id).id, task.mode);
     board.states[index] = { kind: "running", url: thread.url };
+    board.threads = { ...board.threads, [thread.id]: index };
+    saveTaskBoards();
     await redraw();
     await thread.send({ content: `**Task ${task.n}** · \`${task.mode}\` mode\n${task.spec}`.slice(0, 2000), allowedMentions: { parse: [] } });
     onMessageReceived(thread.id, thread as never, false);
-    const ok = await runTaskInThread(ctx, brain, board, task, thread, interaction.user);
+    let ok = false;
+    try {
+      ok = await runTaskInThread(ctx, brain, board, index, thread, interaction.user);
+    } catch (e) {
+      await thread.send({ content: `❌ ${errorText(e).slice(0, 1500)}`, allowedMentions: { parse: [] } }).catch(() => {});
+    }
     board.states[index] = { kind: ok ? "done" : "failed", url: thread.url };
+    saveTaskBoards();
     await redraw();
     return ok;
   };
 
-  // In order, one at a time: later tasks build on earlier ones. A failure stops the run.
-  board.busy = which === "all";
   try {
-    for (const i of indices) if (!(await runOne(i))) break;
+    await interaction.deferUpdate();
+    // In order, one at a time: later tasks build on earlier ones. A failure stops the run.
+    for (const i of claimed) if (!(await runOne(i))) break;
   } finally {
+    claimed.forEach(release);
     board.busy = false;
+    saveTaskBoards();
     await redraw();
   }
 }
 
+/** The plan's branch on `repo`: saved, being opened, or opened now (once, however many tasks ask). */
+async function planBranchFor(ctx: Ctx, board: TaskBoard, repo: string): Promise<PlanBranch> {
+  const known = board.plans?.[repo];
+  if (known) return known;
+  board.opening ??= new Map();
+  let opening = board.opening.get(repo);
+  if (!opening) {
+    opening = openPlanBranch(repo, join(ctx.DATA_DIR, "plans")).then((pb) => {
+      board.plans = { ...board.plans, [repo]: pb };
+      saveTaskBoards();
+      return pb;
+    });
+    opening.catch(() => {}).finally(() => board.opening?.delete(repo));
+    board.opening.set(repo, opening);
+  }
+  return opening;
+}
+
+/** Commit a task's patch to its plan's branch and say how it went in the thread. */
+async function landTaskPatch(
+  board: TaskBoard,
+  index: number,
+  pb: PlanBranch,
+  file: BrainFile,
+  say: (content: string) => Promise<unknown>
+): Promise<boolean> {
+  const task = board.tasks[index];
+  try {
+    const landed = await landPatch(pb, file.data, `Task ${task.n}: ${task.title}`);
+    saveTaskBoards(); // prUrl
+    await say(
+      `🌿 Committed to \`${pb.branch}\`: <${landed.commitUrl}>` +
+        (landed.prOpened ? `\n📦 Draft PR for the whole plan: ${landed.prOpened}` : "") +
+        (landed.prError ? `\n⚠️ Couldn't open the plan's PR (the commit is in): ${landed.prError.slice(0, 500)}` : "")
+    );
+    return true;
+  } catch (e) {
+    await say(`❌ Couldn't commit it to \`${pb.branch}\`: ${errorText(e).slice(0, 1500)}`);
+    return false;
+  }
+}
+
 /**
- * Send a task to its thread. A repo task (its mode works on a repo and its line
- * names one) works on the plan's branch: it gets the branch as a bundle, and
- * the patch it hands back is committed there — or the task fails, here, so
- * Run all stops before the next task builds on something that isn't there.
+ * Send a task to its thread. A repo task (its mode works on a repo, and it or
+ * its plan names one) works on the plan's branch: it gets the branch as a
+ * bundle, and the patch it hands back is committed there — or the task fails,
+ * here, so Run all stops before the next task builds on something missing.
  */
 async function runTaskInThread(
   ctx: Ctx,
   brain: NonNullable<ReturnType<typeof getBrain>>,
-  board: NonNullable<ReturnType<typeof getTaskBoard>>,
-  task: BrainTask,
+  board: TaskBoard,
+  index: number,
   thread: SendableChannel & { id: string },
   user: { username: string; id: string }
 ): Promise<boolean> {
+  const task = board.tasks[index];
   const say = (content: string) => thread.send({ content, allowedMentions: { parse: [] } }).catch(() => {});
   const message = {
     chatKey: thread.id,
@@ -366,9 +436,7 @@ async function runTaskInThread(
     filePaths: [] as string[],
   };
   const repoMode = brain.modes?.find((m) => m.id === task.mode)?.repo;
-  // A line that doesn't name its repo is still in the plan's repo, when the plan has just one.
-  const planRepos = [...new Set(board.tasks.flatMap((t) => (t.repo ? [t.repo] : [])))];
-  const repo = task.repo ?? (planRepos.length === 1 ? planRepos[0] : undefined);
+  const repo = planTaskRepo(board, index);
   if (!repoMode || !repo) {
     const reply = await dispatchToBrain(ctx, brain, thread, message);
     return !!reply && !reply.stopped;
@@ -376,23 +444,18 @@ async function runTaskInThread(
 
   let pb: PlanBranch;
   try {
-    board.branches ??= new Map();
-    let opening = board.branches.get(repo);
-    if (!opening) {
-      opening = openPlanBranch(repo, join(ctx.DATA_DIR, "plans"));
-      board.branches.set(repo, opening);
-      opening.catch(() => board.branches?.delete(repo));
-    }
-    pb = await opening;
+    pb = await planBranchFor(ctx, board, repo);
   } catch (e) {
     await say(`❌ Couldn't set up a branch on **${repo}**: ${errorText(e).slice(0, 1500)}`);
     return false;
   }
-  const bundle = await bundlePlanBranch(pb).catch(async (e) => {
+  let bundle: Awaited<ReturnType<typeof bundlePlanBranch>>;
+  try {
+    bundle = await bundlePlanBranch(pb);
+  } catch (e) {
     await say(`❌ Couldn't bundle \`${pb.branch}\`: ${errorText(e).slice(0, 1500)}`);
-    return null;
-  });
-  if (!bundle) return false;
+    return false;
+  }
   try {
     const name = bundle.path.split("/").pop()!;
     await say(`-# 🌿 works on \`${pb.branch}\` of **${pb.repo}**${pb.created ? " (new, private)" : ""} — attached as ${name}`);
@@ -400,7 +463,7 @@ async function runTaskInThread(
       ctx,
       brain,
       thread,
-      { ...message, content: `${message.content}\n\n${planBranchNote(pb, name)}`, filePaths: [bundle.path] },
+      { ...message, content: `${message.content}\n\n${planBranchNote(pb, name, bundle.snapshot)}`, filePaths: [bundle.path] },
       { noPatchOffer: true }
     );
     if (!reply) return false;
@@ -408,24 +471,50 @@ async function runTaskInThread(
       await say(`⏹ Stopped — nothing was committed to \`${pb.branch}\`.`);
       return false;
     }
-    const patch = reply.files?.find((f) => /\.(patch|diff)$/i.test(f.name));
+    const patch = pickPatch(reply.files);
     if (!patch) {
-      await say(`❌ No patch came back, so nothing was committed to \`${pb.branch}\`.`);
-      return false;
-    }
-    try {
-      const landed = await landPatch(pb, patch.data, `Task ${task.n}: ${task.title}`);
+      const cut = /stopping after (several|\d+) tool calls/i.test(reply.text);
       await say(
-        `🌿 Committed to \`${pb.branch}\`: <${landed.commitUrl}>` + (landed.prOpened ? `\n📦 Draft PR for the whole plan: ${landed.prOpened}` : "")
+        `❌ No patch came back${cut ? ` (${brain.label} kept hitting its tool limit)` : ""}, so nothing was committed to \`${pb.branch}\`. ` +
+          `Reply here to carry on — a patch it sends then gets a commit button — or retry the task from the board.`
       );
-      return true;
-    } catch (e) {
-      await say(`❌ Couldn't commit it to \`${pb.branch}\`: ${errorText(e).slice(0, 1500)}`);
       return false;
     }
+    return await landTaskPatch(board, index, pb, patch, say);
   } finally {
     bundle.cleanup();
   }
+}
+
+/** "Commit to the plan's branch" under a patch sent in a task thread after the task ended. */
+async function handleLandTask(interaction: ButtonInteraction, ctx: Ctx): Promise<void> {
+  if (!isOwner(ctx, interaction.user.id)) {
+    await interaction.reply({ content: "Only the owner can commit to a plan's branch~", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const pending = takeLand(interaction.message.id);
+  const board = pending && getTaskBoard(pending.boardId);
+  const repo = pending && board ? planTaskRepo(board, pending.index) : undefined;
+  if (!pending || !board || !repo) {
+    await interaction.reply({ content: "This patch expired (Choomfie restarted) — ask for it again.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  await interaction.update({ components: [] });
+  const say = (content: string) => interaction.followUp({ content, allowedMentions: { parse: [] } }).catch(() => {});
+  let ok = false;
+  try {
+    ok = await landTaskPatch(board, pending.index, await planBranchFor(ctx, board, repo), pending.file, say);
+  } catch (e) {
+    await say(`❌ Couldn't set up a branch on **${repo}**: ${errorText(e).slice(0, 1500)}`);
+  }
+  if (!ok) return;
+  const state = board.states[pending.index];
+  board.states[pending.index] = { kind: "done", url: state && state.kind !== "idle" ? state.url : interaction.message.url };
+  saveTaskBoards();
+  // Redraw the board, wherever it is.
+  const channel = board.channelId ? await ctx.discord?.channels.fetch(board.channelId).catch(() => null) : null;
+  const msg = channel && "messages" in channel ? await channel.messages.fetch(pending.boardId).catch(() => null) : null;
+  await msg?.edit({ components: taskBoardRows(board) }).catch(() => {});
 }
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));

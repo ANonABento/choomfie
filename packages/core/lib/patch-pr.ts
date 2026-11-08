@@ -103,7 +103,7 @@ export async function openDraftPr(offer: PatchOffer, run: Runner = runCommand): 
   const noHooks = ["-c", "core.hooksPath=/dev/null"];
   const apply = async () => {
     try {
-      await run(["git", "apply", "--index", "--whitespace=nowarn", patchPath], repoDir);
+      await run(["git", "apply", "--index", "--binary", "--whitespace=nowarn", patchPath], repoDir);
     } catch (e) {
       throw new Error(
         `the patch doesn't apply to ${offer.repo}'s default branch — it may build on an earlier task's PR (merge that first): ${e instanceof Error ? e.message : e}`

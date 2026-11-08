@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Brain } from "@choomfie/shared";
@@ -9,7 +9,13 @@ import {
   dispatchToBrain,
   getPendingApproval,
   getTaskBoard,
+  loadTaskBoards,
+  planTaskRepo,
   postBrainReply,
+  resetTaskBoards,
+  saveTaskBoards,
+  takeLand,
+  taskForThread,
   taskBoardRows,
   taskPrompt,
   takeChoices,
@@ -248,6 +254,57 @@ describe("task board", () => {
     await postBrainReply(channel, "waymond", "c1", { text: "Making a spacer.", tasks, runNow: true });
     expect(sent).toHaveLength(1);
     expect(taskPrompt(tasks[0], "plan at x")).toBe("Task 1 of a plan: Spacer — 10 mm\n\nplan at x");
+  });
+});
+
+describe("task boards survive a restart", () => {
+  test("saved on change; a task the restart cut off comes back failed (retryable); old boards are dropped", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "boards-"));
+    mkdirSync(join(dir, "meta"));
+    loadTaskBoards(dir);
+    const channel = { send: async () => ({ id: "board1" }) };
+    const tasks = [
+      { n: 1, mode: "code", title: "A", spec: "A — in me/r: x", repo: "me/r" },
+      { n: 2, mode: "code", title: "B", spec: "B — y" },
+    ];
+    await postBrainReply(channel, "waymond", "chan", { text: "Plan.", tasks });
+    const board = getTaskBoard("board1")!;
+    expect(board.channelId).toBe("chan");
+    board.states[0] = { kind: "running", url: "https://t/1" };
+    board.threads = { thread1: 0 };
+    board.plans = { "me/r": { repo: "me/r", branch: "plan/r-1", dir: "/x", created: true } };
+    board.busy = true;
+    saveTaskBoards();
+    expect(JSON.parse(readFileSync(join(dir, "meta/task-boards.json"), "utf8")).board1.busy).toBeUndefined();
+
+    loadTaskBoards(dir); // restart
+    const back = getTaskBoard("board1")!;
+    expect(back.states[0]).toEqual({ kind: "failed", url: "https://t/1" });
+    expect(back.plans?.["me/r"].branch).toBe("plan/r-1");
+    expect(taskForThread("thread1")).toMatchObject({ boardId: "board1", index: 0 });
+    expect(planTaskRepo(back, 1)).toBe("me/r"); // the plan's one repo
+
+    loadTaskBoards(dir, Date.now() + 31 * 24 * 3600_000);
+    expect(getTaskBoard("board1")).toBeUndefined();
+    resetTaskBoards();
+  });
+
+  test("a patch sent in a task thread after the task offers a commit to the plan's branch, not a PR", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "boards-"));
+    mkdirSync(join(dir, "meta"));
+    loadTaskBoards(dir);
+    let id = 0;
+    const sent: { content?: string; components?: unknown[] }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: `m${++id}` }) };
+    await postBrainReply(channel, "waymond", "chan", { text: "Plan.", tasks: [{ n: 1, mode: "code", title: "A", spec: "A — in me/r: x", repo: "me/r" }] });
+    getTaskBoard("m2")!.threads = { th: 0 };
+    const patch = { name: "a.patch", data: new TextEncoder().encode("diff") };
+    await postBrainReply(channel, "waymond", "th", { text: "Done.\nrepo: me/r", files: [{ name: "wip.patch", data: new Uint8Array() }, patch] });
+    const offer = sent.at(-1)!;
+    expect(offer.content).toContain("task 1");
+    expect(takeLand(`m${id}`)).toMatchObject({ boardId: "m2", index: 0, file: { name: "a.patch" } });
+    expect(sent.some((m) => m.content?.includes("Open draft PR"))).toBe(false);
+    resetTaskBoards();
   });
 });
 

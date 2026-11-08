@@ -22,13 +22,16 @@ import {
   type BrainMessage,
   type BrainReply,
   type BrainTask,
+  writeJsonAtomicSync,
 } from "@choomfie/shared";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { BrainAccess } from "./config.ts";
 import type { AppContext } from "./types.ts";
 import { onReplySent } from "./typing.ts";
 import { getBrainRelay } from "./ask-relay.ts";
 import { findPatch, offerPatch } from "./patch-pr.ts";
-import type { PlanBranch } from "./plan-branch.ts";
+import { pickPatch, type PlanBranch } from "./plan-branch.ts";
 
 export type RouteDecision =
   /** Forward to the Claude session as usual. */
@@ -194,17 +197,74 @@ export interface TaskBoard {
   tasks: BrainTask[];
   context?: string;
   states: TaskState[];
-  /** "Run all" is working through the list. */
-  busy?: boolean;
+  createdAt: number;
+  /** The channel the board message is in (to redraw it from a task's thread). */
+  channelId?: string;
   /** Repo → the plan's branch on it, opened by its first repo task. */
-  branches?: Map<string, Promise<PlanBranch>>;
+  plans?: Record<string, PlanBranch>;
+  /** Task thread id → task index. */
+  threads?: Record<string, number>;
+  /** Not saved: "Run all" is working through the list. */
+  busy?: boolean;
+  /** Not saved: branches being opened right now. */
+  opening?: Map<string, Promise<PlanBranch>>;
 }
 
-/** Task-board message id → its plan's tasks and how each is going. In memory: a restart expires them. */
+/**
+ * Task-board message id → its plan's tasks and how each is going. Saved to
+ * `meta/task-boards.json`, so a restart doesn't strand a plan halfway: its
+ * buttons keep working, and a task the restart cut off shows as failed
+ * (retry it).
+ */
 const taskBoards = new Map<string, TaskBoard>();
+let boardsFile: string | null = null;
+const BOARD_TTL_MS = 30 * 24 * 3600_000;
 
 export function getTaskBoard(messageId: string): TaskBoard | undefined {
   return taskBoards.get(messageId);
+}
+
+/** The plan task a thread is running, if it's a task thread. */
+export function taskForThread(threadId: string): { boardId: string; board: TaskBoard; index: number } | undefined {
+  for (const [boardId, board] of taskBoards) {
+    const index = board.threads?.[threadId];
+    if (index !== undefined) return { boardId, board, index };
+  }
+  return undefined;
+}
+
+export function saveTaskBoards(): void {
+  if (!boardsFile) return;
+  const out: Record<string, Omit<TaskBoard, "busy" | "opening">> = {};
+  for (const [id, { busy: _b, opening: _o, ...rest }] of taskBoards) out[id] = rest;
+  try {
+    writeJsonAtomicSync(boardsFile, out);
+  } catch (e) {
+    console.error(`[tasks] couldn't save task boards: ${errorMessage(e)}`);
+  }
+}
+
+/** Load saved boards (once, at startup). Tasks a restart cut off become failed; old boards are dropped. */
+export function loadTaskBoards(dataDir: string, now = Date.now()): void {
+  boardsFile = join(dataDir, "meta", "task-boards.json");
+  taskBoards.clear();
+  if (!existsSync(boardsFile)) return;
+  try {
+    const saved = JSON.parse(readFileSync(boardsFile, "utf8")) as Record<string, TaskBoard>;
+    for (const [id, b] of Object.entries(saved)) {
+      if (!b || !Array.isArray(b.tasks) || !Array.isArray(b.states) || now - (b.createdAt ?? 0) > BOARD_TTL_MS) continue;
+      b.states = b.states.map((s) => (s.kind === "running" ? { kind: "failed", url: s.url } : s));
+      taskBoards.set(id, b);
+    }
+  } catch (e) {
+    console.error(`[tasks] couldn't read saved task boards: ${errorMessage(e)}`);
+  }
+}
+
+/** Forget every board (tests). */
+export function resetTaskBoards(): void {
+  taskBoards.clear();
+  boardsFile = null;
 }
 
 const TASK_ICON = { running: "⏳", done: "✅", failed: "❌" } as const;
@@ -254,6 +314,23 @@ export interface PostOptions {
   noPatchOffer?: boolean;
 }
 
+/** The repo a plan task works in: its own, or the plan's one repo when its line doesn't say. */
+export function planTaskRepo(board: Pick<TaskBoard, "tasks">, index: number): string | undefined {
+  const task = board.tasks[index];
+  if (!task) return undefined;
+  const repos = [...new Set(board.tasks.flatMap((t) => (t.repo ? [t.repo] : [])))];
+  return task.repo ?? (repos.length === 1 ? repos[0] : undefined);
+}
+
+/** "Commit to the plan's branch" button message id → the patch. In memory: a restart expires them. */
+const pendingLands = new Map<string, { boardId: string; index: number; file: import("@choomfie/shared").BrainFile }>();
+
+export function takeLand(messageId: string) {
+  const p = pendingLands.get(messageId);
+  pendingLands.delete(messageId);
+  return p;
+}
+
 /** Post a brain's reply: chunked, threaded to `replyTo` when given, quick replies as buttons on the last chunk. */
 export async function postBrainReply(
   channel: SendableChannel,
@@ -284,17 +361,44 @@ export async function postBrainReply(
   // A plan's tasks: one button each, which runs it in its own thread (owner only).
   // A single task the brain will run right away needs no buttons.
   if (reply.tasks?.length && !reply.runNow) {
-    const board: TaskBoard = { brainId, tasks: reply.tasks, context: reply.taskContext, states: reply.tasks.map(() => ({ kind: "idle" })) };
+    const board: TaskBoard = {
+      brainId,
+      tasks: reply.tasks,
+      context: reply.taskContext,
+      states: reply.tasks.map(() => ({ kind: "idle" })),
+      createdAt: Date.now(),
+      channelId: chatKey,
+    };
     const sent = await channel.send({
       allowedMentions: NO_MENTIONS,
       content: "📋 **Tasks** — click one to run it in its own thread.",
       components: taskBoardRows(board),
     });
     const id = (sent as { id?: unknown } | undefined)?.id;
-    if (typeof id === "string") taskBoards.set(id, board);
+    if (typeof id === "string") {
+      taskBoards.set(id, board);
+      saveTaskBoards();
+    }
   }
   // A patch made in the brain's sandbox: the owner can turn it into a draft PR.
-  const patch = opts.noPatchOffer ? null : findPatch(reply.text, reply.files);
+  const planTask = opts.noPatchOffer ? undefined : taskForThread(chatKey);
+  const planRepo = planTask && planTaskRepo(planTask.board, planTask.index);
+  const planPatch = planRepo ? pickPatch(reply.files) : undefined;
+  if (planTask && planRepo && planPatch) {
+    // A follow-up in a plan task's thread ("continue"): its patch goes on the plan's branch.
+    const sent = await channel.send({
+      allowedMentions: NO_MENTIONS,
+      content: `📦 Patch for task ${planTask.board.tasks[planTask.index].n} (\`${planPatch.name}\`)`,
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId("brain:landtask").setLabel("Commit to the plan's branch").setStyle(ButtonStyle.Primary)
+        ),
+      ],
+    });
+    const id = (sent as { id?: unknown } | undefined)?.id;
+    if (typeof id === "string") pendingLands.set(id, { boardId: planTask.boardId, index: planTask.index, file: planPatch });
+  }
+  const patch = opts.noPatchOffer || planPatch ? null : findPatch(reply.text, reply.files);
   if (patch) {
     const sent = await channel.send({
       allowedMentions: NO_MENTIONS,
@@ -319,6 +423,7 @@ export async function postBrainReply(
 
 /** Lets plugins post late results (background jobs) through the same formatting. */
 export function installBrainPoster(ctx: AppContext): void {
+  loadTaskBoards(ctx.DATA_DIR);
   setBrainPoster(async (brainId, chatKey, reply) => {
     const fetched = await ctx.discord?.channels.fetch(chatKey).catch(() => null);
     // A chat the bot isn't in (group DM /choomfie) can still be answered while its
