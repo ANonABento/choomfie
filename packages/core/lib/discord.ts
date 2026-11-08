@@ -30,11 +30,14 @@ import {
 import { downloadAttachments, forwardToClaude } from "./inbound.ts";
 import { decideRoute, dispatchToBrain, installBrainPoster, parentChannelId } from "./brain-router.ts";
 import { isOwnThread, openThread, wantsThread } from "./chats/auto-thread.ts";
-import { replyExcerpt, replyPrompt } from "./ask-relay.ts";
+import { replyExcerpt, replyPrompt, repliesToLatest } from "./ask-relay.ts";
 import {
   dispatchPluginMessage,
   initializePlugins,
 } from "./plugin-lifecycle.ts";
+
+/** How far past a replied-to bot message to look for a newer answer. */
+const QUOTE_LOOKAHEAD = 20;
 
 /** Channels already told that auto-thread lacks permission (once per worker). */
 const threadWarned = new Set<string>();
@@ -339,9 +342,23 @@ export function createDiscordClient(ctx: AppContext): Client {
       .trim();
 
     const typed = cleanContent || "(empty message — user may have just mentioned you)";
-    // Replying to one of the bot's messages works like the 💬 Reply button:
-    // the answer being replied to rides along, so "this part" makes sense.
-    const content = isReplyToBot && repliedTo ? replyPrompt(replyExcerpt(repliedTo.content), typed) : typed;
+    // Replying to one of the bot's older messages works like the 💬 Reply
+    // button: that answer rides along. Not for its latest answer — the brain
+    // just said it, so quoting it again only costs tokens.
+    let content = typed;
+    if (isReplyToBot && repliedTo) {
+      const after = await message.channel.messages
+        .fetch({ after: repliedTo.id, limit: QUOTE_LOOKAHEAD })
+        .then((page) =>
+          [...page.values()]
+            .filter((m) => m.id !== message.id)
+            .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+            .map((m) => ({ authorId: m.author.id }))
+        )
+        .catch(() => null);
+      const latest = after ? repliesToLatest(after, botId, QUOTE_LOOKAHEAD - 1) : false;
+      if (!latest) content = replyPrompt(replyExcerpt(repliedTo.content), typed);
+    }
 
     if (route.kind === "brain") {
       void dispatchToBrain(ctx, route.brain, where as never, {

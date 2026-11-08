@@ -266,6 +266,7 @@ registerButtonHandler("brain", async (interaction, parts, ctx) => {
       first: "followUp",
       ephemeral: interaction.message.flags.has(MessageFlags.Ephemeral),
       replyButton: true,
+      chatKey: pending.chatKey,
     });
     rememberBrainRelay(pending.chatKey, relay);
     channel = relay;

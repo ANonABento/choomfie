@@ -48,6 +48,7 @@ import {
   openAskRelay,
   questionHeader,
   rememberBrainRelay,
+  isLatestAnswer,
   replyExcerpt,
   replyPrompt,
 } from "../ask-relay.ts";
@@ -104,6 +105,7 @@ export async function runAsk(interaction: AskInteraction, ctx: AppContext, input
     header: input.header,
     // Where a normal reply can't reach Choomfie, give the chat a way to answer back.
     replyButton: botIsAbsent(interaction),
+    chatKey,
   });
 
   const meta: Record<string, string> = {
@@ -268,8 +270,10 @@ registerModalHandler("ask", async (interaction, parts, ctx) => {
 
   if (parts[1] === "reply") {
     const answer = interaction.isFromMessage() ? interaction.message : null;
+    // Quote the answer only when it isn't the latest one: that's already in the chat's context.
+    const latest = answer && interaction.channelId ? isLatestAnswer(interaction.channelId, answer.id) : false;
     await runAsk(interaction, ctx, {
-      prompt: replyPrompt(replyExcerpt(answer?.content ?? ""), text),
+      prompt: replyPrompt(latest ? "" : replyExcerpt(answer?.content ?? ""), text),
       attachments: uploadedFiles(interaction),
       ephemeral: answer?.flags.has(MessageFlags.Ephemeral) ?? false,
       header: questionHeader(interaction.user.username, text),

@@ -12,7 +12,8 @@ import {
 } from "../lib/ask-relay.ts";
 import { postBrainReply } from "../lib/brain-router.ts";
 import { menuPrompt } from "../lib/handlers/ask-command.ts";
-import { replyExcerpt, replyPrompt } from "../lib/ask-relay.ts";
+import { isLatestAnswer, repliesToLatest, replyExcerpt, replyPrompt, withReplyButton } from "../lib/ask-relay.ts";
+import { choiceRows } from "../lib/brain-router.ts";
 import { NO_ANSWER, REPLY_BUTTON_ID, RESTARTED, questionHeader, settleAllRelays, settleAskRelays } from "../lib/ask-relay.ts";
 import { MODAL_MAX_FILES, askModal } from "../lib/handlers/ask-command.ts";
 import { jest } from "bun:test";
@@ -135,9 +136,10 @@ describe("tools on an ask chat", () => {
 });
 
 describe("keeping a group-DM conversation going", () => {
+  type Row = { components: { custom_id: string }[] };
   const ids = (body: Record<string, unknown>) =>
-    ((body.components as { toJSON(): { components: { custom_id: string }[] } }[]) ?? []).flatMap((r) =>
-      r.toJSON().components.map((c) => c.custom_id)
+    ((body.components as (Row | { toJSON(): Row })[]) ?? []).flatMap((r) =>
+      ("toJSON" in r ? r.toJSON() : r).components.map((c) => c.custom_id)
     );
 
   test("the question is quoted above the first message only, and can't ping", async () => {
@@ -162,12 +164,45 @@ describe("keeping a group-DM conversation going", () => {
     expect(h.endsWith("…")).toBe(true);
   });
 
-  test("💬 Reply goes on every message without buttons of its own, not on quick replies", async () => {
+  test("💬 Reply goes on every message, quick replies included", async () => {
     const i = fakeInteraction();
     await postBrainReply(interactionChannel(i, { replyButton: true }), "tb", "gdm", { text: "pick", choices: ["a"] });
     await interactionChannel(i, { replyButton: true }).send({ content: "plain" });
-    expect(ids(i.calls[0].body)).toEqual(["brain:choice:0"]);
+    expect(ids(i.calls[0].body)).toEqual(["brain:choice:0", REPLY_BUTTON_ID]);
     expect(ids(i.calls[1].body)).toEqual([REPLY_BUTTON_ID]);
+  });
+
+  test("💬 Reply still fits beside the most quick replies a brain can offer", async () => {
+    const many = Array.from({ length: 30 }, (_, n) => `option ${n}`);
+    const rows = withReplyButton(choiceRows(many)) as Row[];
+    expect(rows.length).toBe(5);
+    const all = rows.flatMap((r) => r.components.map((c) => c.custom_id));
+    expect(all.length).toBe(25);
+    expect(all.at(-1)).toBe(REPLY_BUTTON_ID);
+    expect(all.filter((c) => c.startsWith("brain:choice:")).length).toBe(24);
+  });
+
+  test("a reply to the latest answer needs no quote; to an older one it does", async () => {
+    const i = fakeInteraction();
+    const first = interactionChannel(i, { chatKey: "gdm-q" });
+    await first.send({ content: "answer one, part 1" });
+    await first.send({ content: "answer one, part 2" });
+    expect(isLatestAnswer("gdm-q", "m1")).toBe(true);
+    expect(isLatestAnswer("gdm-q", "m2")).toBe(true);
+    await interactionChannel(i, { chatKey: "gdm-q" }).send({ content: "answer two" });
+    expect(isLatestAnswer("gdm-q", "m1")).toBe(false);
+    expect(isLatestAnswer("gdm-q", "m3")).toBe(true);
+    expect(isLatestAnswer("elsewhere", "m3")).toBe(false);
+  });
+
+  test("native reply: latest answer when nobody spoke and the bot hasn't answered since", () => {
+    const bot = { authorId: "bot" };
+    const user = { authorId: "u" };
+    expect(repliesToLatest([], "bot", 19)).toBe(true);
+    expect(repliesToLatest([bot, bot], "bot", 19)).toBe(true); // later chunks of the same answer
+    expect(repliesToLatest([user], "bot", 19)).toBe(true); // someone spoke, no newer answer
+    expect(repliesToLatest([user, bot], "bot", 19)).toBe(false); // a newer answer exists
+    expect(repliesToLatest(Array(19).fill(user), "bot", 19)).toBe(false); // the chat moved on a lot
   });
 
   test("progress fills the placeholder, and never overwrites the answer", async () => {

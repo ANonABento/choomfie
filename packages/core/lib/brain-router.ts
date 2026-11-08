@@ -157,8 +157,11 @@ export function approvalMessage(brainLabel: string, approval: BrainApproval) {
   };
 }
 
-/** Discord: 5 buttons per row, 5 rows, 80-char labels, 100-char custom ids. */
-const MAX_CHOICES = 25;
+/**
+ * Discord: 5 buttons per row, 5 rows, 80-char labels, 100-char custom ids.
+ * 24, not 25, so 💬 Reply always has a slot beside them.
+ */
+const MAX_CHOICES = 24;
 
 export interface PendingChoices {
   brainId: string;
@@ -175,9 +178,10 @@ export function takeChoices(messageId: string): PendingChoices | undefined {
   return p;
 }
 
-export function choiceRows(choices: string[]) {
+export function choiceRows(all: string[]) {
+  const choices = all.slice(0, MAX_CHOICES);
   const rows = [];
-  for (let r = 0; r * 5 < Math.min(choices.length, MAX_CHOICES); r++) {
+  for (let r = 0; r * 5 < choices.length; r++) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         choices.slice(r * 5, r * 5 + 5).map((label, i) =>
