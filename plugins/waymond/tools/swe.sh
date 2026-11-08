@@ -46,6 +46,21 @@ case "${1:-}" in
     # Earlier-work paths are relative to where setup was run from; setup cd's into the repo below.
     base_args=()
     for arg in "$@"; do [[ "$arg" == /* ]] && base_args+=("$arg") || base_args+=("$PWD/$arg"); done
+    # A plan task's repo comes attached as <name>.bundle. Find it even when it's
+    # named by its GitHub name or a path that isn't here (the workspace is a volume).
+    find_bundle() {
+      local b="$1"
+      for d in "$PWD" "$HOME" /tmp; do [ -f "$d/$b" ] && { echo "$d/$b"; return; }; done
+      find / -maxdepth 6 -name "$b" -not -path '/proc/*' -not -path '/sys/*' 2>/dev/null | head -1
+    }
+    if [[ "$src" == *.bundle && ! -f "$src" ]]; then
+      found=$(find_bundle "$(basename "$src")")
+      [ -n "$found" ] || { say "can't find $src — it's attached to the task message; ls your working folder for *.bundle"; exit 1; }
+      say "using $found"; src="$found"
+    elif [[ "$src" != *.bundle && "$src" != http* && "$src" != git@* && ! -f "$src" ]]; then
+      found=$(find_bundle "$(basename "$src").bundle")
+      [ -n "$found" ] && { say "using the attached $(basename "$found") for $src (its plan branch)"; src="$found"; }
+    fi
     # A git bundle (a plan's branch, attached to the task) clones like a remote.
     if [ -f "$src" ]; then src="$(cd "$(dirname "$src")" && pwd)/$(basename "$src")"
     elif [[ "$src" != http* && "$src" != git@* ]]; then src="https://github.com/$src.git"; fi
@@ -135,7 +150,7 @@ case "${1:-}" in
     ;;
   diff)
     out="${2:?out.patch}"; cd "$REPO_DIR" || exit 1
-    git add -A && git diff --cached > "$out"
+    git add -A && git diff --cached --binary > "$out"
     say "saved $out:$(git diff --cached --shortstat)"
     git reset -q
     ;;
