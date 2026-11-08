@@ -51,7 +51,7 @@ const AGENT =
 
 const RESEARCH = `Research before your first reply: read the repo if one is involved (run_python: urllib.request.urlretrieve("${toolUrl("swe.sh")}", "/tmp/swe.sh"), then bash /tmp/swe.sh setup OWNER/REPO), web_search the parts, standards, libraries and prior art (several searches, cite sources), and check your workspace for earlier work. Then ask only what research can't answer — preferences and constraints only the user knows — at most 3 short questions, with likely answers as quick replies. Where a sensible default exists, take it and list it under Assumptions instead of asking.`;
 
-const TASKS = `Tasks: each small enough for one agent in one sitting, and standalone — it goes to a fresh chat that sees only its own line and the plan file. Give each the mode that does it: code (change a GitHub repo, with tests), debug (find and fix a bug), cad (OpenSCAD printable part), 3d (Blender model), plan (a sub-plan). Name the repo for code/debug as "in owner/name" (each task gets that repo with every earlier task's work already in it — never point a task at patch files). End each with "Done when:" and a check that mode can run (firmware: native unit tests — device builds can't run in the sandbox, so say they're checked on the user's machine). Order by dependency.
+const TASKS = `Tasks: each small enough for one agent in one sitting, and standalone — it goes to a fresh chat that sees only its own line and the plan file. Give each the mode that does it: code (change a GitHub repo, with tests), debug (find and fix a bug), cad (OpenSCAD printable part), 3d (Blender model), research (find out and write a sourced report), plan (a sub-plan). Name the repo for code/debug as "in owner/name" (each task gets that repo with every earlier task's work already in it — never point a task at patch files). End each with "Done when:" and a check that mode can run (firmware: native unit tests — device builds can't run in the sandbox, so say they're checked on the user's machine). Order by dependency.
 The task list is a line that says only "Tasks", then one line per task, exactly like:
 1. [cad] Motor mount — 40 x 30 x 5 mm plate for a NEMA 17, four M3 holes on 31 mm centres. Done when: cad_check passes with --expect 40,30,5 --hole 3.4
 2. [code] Step driver — in ANonABento/robot: … Done when: …`;
@@ -110,6 +110,18 @@ Change nothing: no commits, PRs, emails or posts. Stop asking once you could wri
 Then write workspace plans/<short-name>/plan.md: Requirements (numbered, each testable) · Design (approach and why, alternatives rejected; cite files/functions for repos, sources for the rest) · Tasks · Risks and unknowns.
 ${TASKS}
 End every reply that has a plan with the plan link, then the task list. When you change the plan, repeat the whole list.]`,
+  },
+  {
+    id: "research",
+    label: "Research",
+    description: "Deep research: primary sources, tests what it can, writes a sourced report",
+    files: "research",
+    frame: `[research mode — find things out, don't build. Plain tone; no questions: decide the scope yourself and list assumptions at the end.
+Break the question into sub-questions first. Search widely (many web_search calls, different phrasings), then read primary sources: official docs, specs, datasheets, source code, papers, practitioners with a track record. Skip SEO listicles and AI-written roundups. Check dates and versions; when sources disagree, say which you trust and why.
+Test what you can in run_python — code snippets, download commands, APIs, calculations — and mark each finding tested or untested. ${SANDBOX}
+Cut anything generic: a finding earns its place only if it changes what someone would do.
+Write workspace research/<short-name>/report.md: Answer (≤5 lines) · Findings (claim, source URL, tested/untested) · Recommendations · Disagreements and unknowns · Sources. Long material (snippets, site lists) goes in extra .md files beside it.
+Reply with exactly: the Answer; up to 5 key findings, one line each; links to report.md and any extra files; assumptions.]`,
   },
   {
     id: "cad",

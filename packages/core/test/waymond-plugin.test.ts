@@ -363,6 +363,16 @@ describe("modes", () => {
     expect(WAYMOND_MODES.find((m) => m.id === "code")!.frame).toContain("repo: <owner>/<name>");
   });
 
+  test("research is a files mode (its report lands in research/ on a plan's branch) and plans can hand it tasks", () => {
+    const research = WAYMOND_MODES.find((m) => m.id === "research")!;
+    expect(research.files).toBe("research");
+    expect(research.frame).toContain("research/<short-name>/report.md");
+    expect(WAYMOND_MODES.find((m) => m.id === "plan")!.frame).toContain("research (");
+    // A turn that stops on narration carries on; the finished reply (with its report link) doesn't.
+    expect(continueAfterToolCap("Need more sources on licences.", "research")).toContain("mid-task");
+    expect(continueAfterToolCap("Answer: use X.\n[report.md](/chat?workspace=research%2Fx%2Freport.md&owner=o)", "research")).toBeNull();
+  });
+
   test("a turn Ambition cut off at its tool limit is continued (observed 2026-11-08)", () => {
     const cut = "Patches not applied by setup; apply manually.Read the code.\n\n_(Stopping after several tool calls - please re-ask if you want to continue.)_";
     expect(continueAfterToolCap(cut)).toContain("continue");
@@ -418,7 +428,7 @@ describe("plan mode", () => {
     expect(parseTaskList(`Tasks\n${example}`, ids)).toEqual([
       expect.objectContaining({ n: 1, mode: "cad", title: "Motor mount" }),
     ]);
-    for (const named of plan.frame.match(/\b(code|debug|cad|3d|plan) \(/g) ?? []) expect(ids).toContain(named.split(" ")[0]);
+    for (const named of plan.frame.match(/\b(code|debug|cad|3d|research|plan) \(/g) ?? []) expect(ids).toContain(named.split(" ")[0]);
   });
 
   test("planContext points tasks at the plan file in the workspace", () => {
