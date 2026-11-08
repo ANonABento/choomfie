@@ -64,6 +64,19 @@ export interface BrainTask {
 }
 
 /**
+ * The GitHub repo a task line works in: "in owner/name" anywhere ("in
+ * ANonABento/rs3m-twin (new repo), create …"), or a line that starts with it.
+ * A GitHub owner has no dots or underscores, which keeps file paths
+ * ("in rs3m_twin/contact.py") out.
+ */
+export function taskRepo(spec: string): string | undefined {
+  const name = "`?([A-Za-z0-9-]+\\/[A-Za-z0-9_.-]*[A-Za-z0-9_-])`?";
+  const m = new RegExp(`\\bin\\s+${name}(?![\\w/-]|\\.\\w)`).exec(spec) ?? new RegExp(`^${name}\\s+[—–:-]`).exec(spec);
+  const repo = m?.[1];
+  return repo && !repo.includes("..") && !/\.(py|ts|js|md|ya?ml|json|scad|stl|txt|toml)$/i.test(repo) ? repo : undefined;
+}
+
+/**
  * The task list at the end of a plan: a line saying "Tasks", then one task
  * per line as `1. [cad] Motor mount — 40 x 30 plate … Done when: …`. Only
  * modes in `modes` count; anything else is left as text.
@@ -89,8 +102,8 @@ export function parseTaskList(text: string, modes: string[]): BrainTask[] {
     const named = parts.length > 1 && /^[\w.-]+\/[\w.-]+$/.test(parts[0]) ? parts[1] : parts[0];
     let title = (named ?? spec).split(/[(,;]/)[0].trim();
     if (title.length > 40) title = title.slice(0, 40).replace(/\s+\S*$/, "") + "…";
-    const repo = (/\bin\s+`?([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)`?\s*:/.exec(spec) ?? /^`?([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)`?\s+[—–-]\s/.exec(spec))?.[1];
-    tasks.push({ n: Number(m[1]), mode, title, spec, ...(repo && !repo.includes("..") ? { repo } : {}) });
+    const repo = taskRepo(spec);
+    tasks.push({ n: Number(m[1]), mode, title, spec, ...(repo ? { repo } : {}) });
   }
   return tasks.slice(0, 25);
 }

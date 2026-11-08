@@ -360,20 +360,23 @@ async function runTaskInThread(
     filePaths: [] as string[],
   };
   const repoMode = brain.modes?.find((m) => m.id === task.mode)?.repo;
-  if (!repoMode || !task.repo) return !!(await dispatchToBrain(ctx, brain, thread, message));
+  // A line that doesn't name its repo is still in the plan's repo, when the plan has just one.
+  const planRepos = [...new Set(board.tasks.flatMap((t) => (t.repo ? [t.repo] : [])))];
+  const repo = task.repo ?? (planRepos.length === 1 ? planRepos[0] : undefined);
+  if (!repoMode || !repo) return !!(await dispatchToBrain(ctx, brain, thread, message));
 
   let pb: PlanBranch;
   try {
     board.branches ??= new Map();
-    let opening = board.branches.get(task.repo);
+    let opening = board.branches.get(repo);
     if (!opening) {
-      opening = openPlanBranch(task.repo, join(ctx.DATA_DIR, "plans"));
-      board.branches.set(task.repo, opening);
-      opening.catch(() => board.branches?.delete(task.repo!));
+      opening = openPlanBranch(repo, join(ctx.DATA_DIR, "plans"));
+      board.branches.set(repo, opening);
+      opening.catch(() => board.branches?.delete(repo));
     }
     pb = await opening;
   } catch (e) {
-    await say(`❌ Couldn't set up a branch on **${task.repo}**: ${errorText(e).slice(0, 1500)}`);
+    await say(`❌ Couldn't set up a branch on **${repo}**: ${errorText(e).slice(0, 1500)}`);
     return false;
   }
   const bundle = await bundlePlanBranch(pb).catch(async (e) => {

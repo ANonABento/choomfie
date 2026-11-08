@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseTaskList } from "@choomfie/shared";
+import { parseTaskList, taskRepo } from "@choomfie/shared";
 
 const modes = ["code", "cad", "plan"];
 
@@ -33,5 +33,14 @@ describe("parseTaskList", () => {
       modes
     );
     expect(t.map((x) => x.repo)).toEqual(["ANonABento/rs3m-twin", "a/b", undefined]);
+  });
+
+  test("taskRepo finds the repo however the line puts it (lines seen 2026-11-08), and not file paths", () => {
+    expect(taskRepo("Scaffold + params + geometry: in ANonABento/rs3m-twin (new repo), create the Python package")).toBe("ANonABento/rs3m-twin");
+    expect(taskRepo("Fast mode turning: in ANonABento/rs3m-twin, add 6 face hinges")).toBe("ANonABento/rs3m-twin");
+    expect(taskRepo("Fix it in `a/b`.")).toBe("a/b");
+    expect(taskRepo("Edit the loader in rs3m_twin/params.py, then test")).toBeUndefined();
+    expect(taskRepo("Put it in src/index.ts")).toBeUndefined();
+    expect(taskRepo("Plain task with no repo")).toBeUndefined();
   });
 });

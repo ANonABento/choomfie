@@ -143,6 +143,7 @@ export {
   type BrainMode,
   type BrainTask,
   parseTaskList,
+  taskRepo,
 } from "./brains.ts";
 
 // Chats (location → conversation bindings)
