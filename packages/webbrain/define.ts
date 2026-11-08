@@ -256,6 +256,7 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
           const runNow = !!planMode?.runSingleTask && tasks.length === 1;
           return {
             text: answerText(result, adapter.label),
+            ...(result.stopped || turn.stop ? { stopped: true } : {}),
             files: result.files,
             choices: result.choices,
             approvals: result.approvals,

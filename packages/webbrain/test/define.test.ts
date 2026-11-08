@@ -102,6 +102,7 @@ describe("defineWebBrain", () => {
       await started.promise;
       expect(await brain.stop!("chan1")).toBe(true);
       expect((await reply).text).toContain("⏹️ Stopped.");
+      expect((await reply).stopped).toBe(true);
       expect(stops).toEqual(["conv-s"]);
       expect(await brain.stop!("chan1")).toBe(false);
     } finally {

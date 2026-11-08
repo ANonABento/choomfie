@@ -363,7 +363,10 @@ async function runTaskInThread(
   // A line that doesn't name its repo is still in the plan's repo, when the plan has just one.
   const planRepos = [...new Set(board.tasks.flatMap((t) => (t.repo ? [t.repo] : [])))];
   const repo = task.repo ?? (planRepos.length === 1 ? planRepos[0] : undefined);
-  if (!repoMode || !repo) return !!(await dispatchToBrain(ctx, brain, thread, message));
+  if (!repoMode || !repo) {
+    const reply = await dispatchToBrain(ctx, brain, thread, message);
+    return !!reply && !reply.stopped;
+  }
 
   let pb: PlanBranch;
   try {
@@ -395,6 +398,10 @@ async function runTaskInThread(
       { noPatchOffer: true }
     );
     if (!reply) return false;
+    if (reply.stopped) {
+      await say(`⏹ Stopped — nothing was committed to \`${pb.branch}\`.`);
+      return false;
+    }
     const patch = reply.files?.find((f) => /\.(patch|diff)$/i.test(f.name));
     if (!patch) {
       await say(`❌ No patch came back, so nothing was committed to \`${pb.branch}\`.`);

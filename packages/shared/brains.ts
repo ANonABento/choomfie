@@ -37,6 +37,8 @@ export interface BrainFile {
 
 export interface BrainReply {
   text: string;
+  /** Ended by `/stop`: a plan's Run all stops here too. */
+  stopped?: boolean;
   files?: BrainFile[];
   /** Quick replies; shown as buttons, and clicking one sends that text to the brain. */
   choices?: string[];
