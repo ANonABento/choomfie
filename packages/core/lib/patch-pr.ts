@@ -14,6 +14,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrainFile } from "@choomfie/shared";
+import { which } from "./which.ts";
 
 export interface PatchOffer {
   /** `owner/name` on GitHub. */
@@ -58,7 +59,7 @@ export function takePatch(messageId: string): PatchOffer | undefined {
 export type Runner = (cmd: string[], cwd?: string) => Promise<string>;
 
 export const runCommand: Runner = async (cmd, cwd) => {
-  const proc = Bun.spawn(cmd, {
+  const proc = Bun.spawn([which(cmd[0]), ...cmd.slice(1)], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",

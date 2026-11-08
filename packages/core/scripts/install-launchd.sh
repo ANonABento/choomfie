@@ -93,6 +93,12 @@ fi
 CLAUDE_DIR="$(dirname "$CLAUDE_BIN")"
 
 SERVICE_PATH="$BUN_DIR:$CLAUDE_DIR:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin"
+# gh (GitHub tools, plan branches, draft PRs) may live somewhere else, like ~/bin.
+GH_BIN="$(command -v gh || true)"
+if [ -n "$GH_BIN" ]; then
+  GH_DIR="$(dirname "$GH_BIN")"
+  case ":$SERVICE_PATH:" in *":$GH_DIR:"*) ;; *) SERVICE_PATH="$SERVICE_PATH:$GH_DIR" ;; esac
+fi
 
 # Carry a custom data dir through if this shell has one set; otherwise the
 # service falls back to the same default every other entry point uses.
