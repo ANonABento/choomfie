@@ -52,9 +52,11 @@ def holes(mesh):
         n = np.zeros(3)
         n[axis] = 1
         lo, hi = mesh.bounds[0][axis], mesh.bounds[1][axis]
-        for f in (0.2, 0.5, 0.8):
+        # Every ~1 mm (at most 120 slices), so thin features — a 5 mm flange's bolt holes — are cut too.
+        step = max(0.5, (hi - lo) / 120)
+        for z in np.arange(lo + step / 2, hi, step):
             o = np.zeros(3)
-            o[axis] = lo + (hi - lo) * f
+            o[axis] = z
             s = mesh.section(plane_origin=o, plane_normal=n)
             if s is None:
                 continue
@@ -64,7 +66,7 @@ def holes(mesh):
                     xy = np.array(ring.coords)
                     r = np.sqrt(((xy - xy.mean(0)) ** 2).sum(1))
                     if r.mean() > 0 and r.std() / r.mean() < 0.05:
-                        found.append(round(2 * r.mean(), 2))
+                        found.append(round(float(2 * r.mean()), 2))
     return sorted(set(found))
 
 

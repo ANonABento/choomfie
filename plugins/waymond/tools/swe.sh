@@ -93,6 +93,11 @@ case "${1:-}" in
         sed -E 's/\[[0-9.]+ ?m?s\]//g; s/ +$//' | sort -u
     }
     for c in "${CHECKS[@]}"; do
+      if [[ "$c" == "pio run"* ]] && ! grep -q 'platform *= *native' platformio.ini; then
+        # An embedded toolchain (ESP32: hundreds of MB) can't download inside one sandbox run.
+        say "SKIP  $c — the embedded toolchain can't download within a sandbox run; build it on your machine (native tests cover the logic)"
+        continue
+      fi
       out=$(timeout 100 bash -c "$c" 2>&1); rc=$?
       if [ $rc -eq 0 ]; then
         say "PASS  $c"
