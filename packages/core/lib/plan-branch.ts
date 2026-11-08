@@ -106,24 +106,68 @@ async function syncClone(pb: PlanBranch, run: Runner): Promise<void> {
   await run(["git", "clean", "-qfdx"], pb.dir);
 }
 
+/** The repo's default branch: the clone's origin/HEAD, else GitHub's answer, else main. */
+async function baseBranch(pb: PlanBranch, run: Runner): Promise<string> {
+  const head = (await tryRun(run, ["git", "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"], pb.dir))?.trim();
+  if (head?.startsWith("origin/")) return head.slice("origin/".length);
+  return (await tryRun(run, ["gh", "repo", "view", pb.repo, "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name"]))?.trim() || "main";
+}
+
+/** What bringing the default branch in did: merged N commits, or found a conflict (and left the branch as it was). */
+export type CatchUp = { merged: number; base: string } | { conflict: string; base: string } | null;
+
+/**
+ * Work that reached the default branch some other way (the plan's PR merged
+ * and fixed on main, an approval card committing there) comes into the plan
+ * branch first, so a task never builds on a stale copy. A conflict leaves the
+ * branch untouched and is reported, not thrown.
+ */
+async function catchUpWithBase(pb: PlanBranch, run: Runner): Promise<CatchUp> {
+  const base = await baseBranch(pb, run);
+  if (base === pb.branch) return null;
+  const fetched = await tryRun(run, ["git", "fetch", "-q", "origin", `+refs/heads/${base}:refs/remotes/origin/${base}`], pb.dir);
+  if (fetched === null) return null;
+  if ((await tryRun(run, ["git", "merge-base", "--is-ancestor", `origin/${base}`, "HEAD"], pb.dir)) !== null) return null;
+  const merged = Number((await run(["git", "rev-list", "--count", `HEAD..origin/${base}`], pb.dir)).trim()) || 0;
+  try {
+    await run(["git", ...NO_HOOKS, "merge", "-q", "--no-edit", "-m", `Bring in ${base}`, `origin/${base}`], pb.dir);
+  } catch (e) {
+    await tryRun(run, ["git", "merge", "--abort"], pb.dir);
+    await tryRun(run, ["git", "reset", "-q", "--hard", `origin/${pb.branch}`], pb.dir);
+    const files = (await tryRun(run, ["git", "diff", "--name-only", `HEAD...origin/${base}`], pb.dir))?.trim().split("\n").slice(0, 8).join(", ");
+    return { conflict: files || (e instanceof Error ? e.message : String(e)), base };
+  }
+  const push = () => run(["git", ...NO_HOOKS, "push", "-q", "origin", `HEAD:refs/heads/${pb.branch}`], pb.dir);
+  try {
+    await push().catch(push);
+  } catch (e) {
+    // Can't push the merge: work on GitHub's branch as it is, and say why.
+    await tryRun(run, ["git", "reset", "-q", "--hard", `origin/${pb.branch}`], pb.dir);
+    return { conflict: `couldn't push the merge: ${e instanceof Error ? e.message : e}`, base };
+  }
+  await run(["git", "fetch", "-q", "origin", `+refs/heads/${pb.branch}:refs/remotes/origin/${pb.branch}`], pb.dir);
+  return { merged, base };
+}
+
 /**
  * The branch as a git bundle for a task's sandbox. With history when it's
  * small; a big repo gets one commit holding the current files (the task's
- * patch applies the same either way).
+ * patch applies the same either way). The default branch is merged in first.
  */
 export async function bundlePlanBranch(
   pb: PlanBranch,
   run: Runner = runCommand,
   maxBytes = MAX_BUNDLE_BYTES
-): Promise<{ path: string; snapshot: boolean; cleanup(): void }> {
+): Promise<{ path: string; snapshot: boolean; caughtUp: CatchUp; cleanup(): void }> {
   return locked(pb.dir, async () => {
     await syncClone(pb, run);
+    const caughtUp = await catchUpWithBase(pb, run);
     const out = mkdtempSync(join(tmpdir(), "choomfie-bundle-"));
     const cleanup = () => rmSync(out, { recursive: true, force: true });
     try {
       const path = join(out, `${pb.repo.split("/")[1]}.bundle`);
       await run(["git", "bundle", "create", "-q", path, "HEAD", pb.branch], pb.dir);
-      if (statSync(path).size <= maxBytes) return { path, snapshot: false, cleanup };
+      if (statSync(path).size <= maxBytes) return { path, snapshot: false, caughtUp, cleanup };
       const snap = (await run(["git", "commit-tree", "HEAD^{tree}", "-m", `${pb.branch} as of now`], pb.dir)).trim();
       const ref = "refs/heads/choomfie-snapshot";
       await run(["git", "update-ref", ref, snap], pb.dir);
@@ -133,7 +177,7 @@ export async function bundlePlanBranch(
       } finally {
         await tryRun(run, ["git", "update-ref", "-d", ref], pb.dir);
       }
-      return { path, snapshot: true, cleanup };
+      return { path, snapshot: true, caughtUp, cleanup };
     } catch (e) {
       cleanup();
       throw e;
@@ -177,6 +221,11 @@ async function landChange(
       await run(["git", "fetch", "-q", "origin", `+refs/heads/${pb.branch}:refs/remotes/origin/${pb.branch}`], pb.dir);
       const sha = (await run(["git", "rev-parse", "HEAD"], pb.dir)).trim();
       const landed: Landed = { commitUrl: `https://github.com/${pb.repo}/commit/${sha}` };
+      // The plan's PR was merged or closed (work went on after it): this commit needs a new one.
+      if (pb.prUrl) {
+        const state = (await tryRun(run, ["gh", "pr", "view", pb.prUrl, "--json", "state", "-q", ".state"]))?.trim();
+        if (state === "MERGED" || state === "CLOSED") pb.prUrl = undefined;
+      }
       if (!pb.prUrl) {
         try {
           pb.prUrl = await openPlanPr(pb, run);
@@ -281,7 +330,7 @@ export function pruneClones(root: string, keep: Set<string>, now = Date.now(), m
 async function openPlanPr(pb: PlanBranch, run: Runner): Promise<string> {
   const open = (await tryRun(run, ["gh", "pr", "list", "--repo", pb.repo, "--head", pb.branch, "--state", "open", "--json", "url", "-q", ".[0].url"]))?.trim();
   if (open) return open;
-  const base = (await tryRun(run, ["gh", "repo", "view", pb.repo, "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name"]))?.trim() || "main";
+  const base = await baseBranch(pb, run);
   const url = await run(
     [
       "gh", "pr", "create", "--repo", pb.repo, "--head", pb.branch, "--base", base, "--draft",

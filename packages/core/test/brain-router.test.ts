@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Brain } from "@choomfie/shared";
+import { fileBatches, type Brain } from "@choomfie/shared";
 import {
   chunkForDiscord,
   decideRoute,
@@ -198,6 +198,27 @@ describe("files", () => {
     await postBrainReply(channel, "waymond", "c1", { text: "", files: [file] });
     expect(sent).toHaveLength(1);
     expect(sent[0].content).toBe("");
+  });
+
+  test("more than one message holds goes on in messages of their own — five 3 MB portraits all arrive", async () => {
+    const sent: { content?: string; files?: { attachment: Buffer; name: string }[] }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: "m" }) };
+    const big = (name: string) => ({ name, data: new Uint8Array(3 * 1024 * 1024) });
+    const files = ["seshat", "hathor", "hetepheres", "bastet", "cleopatra"].map((n) => big(`${n}.png`));
+    await postBrainReply(channel, "waymond", "c1", { text: "I made the 5 portraits.", files });
+    expect(sent.map((m) => m.files?.map((f) => f.name) ?? [])).toEqual([
+      ["seshat.png", "hathor.png", "hetepheres.png"],
+      ["bastet.png", "cleopatra.png"],
+    ]);
+    expect(sent[0].content).toBe("I made the 5 portraits.");
+  });
+
+  test("batches: at most 10 files and ~10 MB a message, in order", () => {
+    const small = Array.from({ length: 23 }, (_, i) => ({ name: `${i}`, data: new Uint8Array(10) }));
+    expect(fileBatches(small).map((b) => b.length)).toEqual([10, 10, 3]);
+    const sizes = [6, 6, 3, 9.5].map((mb) => ({ data: new Uint8Array(mb * 1024 * 1024) }));
+    expect(fileBatches(sizes).map((b) => b.length)).toEqual([1, 2, 1]);
+    expect(fileBatches([])).toEqual([]);
   });
 });
 

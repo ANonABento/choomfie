@@ -160,10 +160,25 @@ export function stripNarration(text: string): string {
  * tool calls - please re-ask if you want to continue.)_". In a mode that's a
  * task cut off mid-way, so carry on rather than hand the owner a stub.
  */
-export function continueAfterToolCap(answer: string): string | null {
-  return /stopping after (several|\d+) tool calls/i.test(answer.slice(-400))
-    ? "continue — pick up exactly where you stopped (your workspace has what you saved), finish the task, and reply in the format above."
+export function continueAfterToolCap(answer: string, mode?: string): string | null {
+  if (/stopping after (several|\d+) tool calls/i.test(answer.slice(-400))) {
+    return "continue — pick up exactly where you stopped (your workspace has what you saved), finish the task, and reply in the format above.";
+  }
+  return mode && stoppedMidTask(answer, mode)
+    ? "continue — your last turn ended mid-task. Pick up where you left off (your workspace has what you saved), finish it, and reply in the format above."
     : null;
+}
+
+/**
+ * A work mode's turn that ended on a line of its own narration ("Output
+ * truncated; need params and mjcf.") — no deliverable, no question, no
+ * check output — rather than the reply the mode asks for.
+ */
+export function stoppedMidTask(answer: string, mode: string): boolean {
+  const m = WAYMOND_MODES.find((x) => x.id === mode);
+  if (!m?.repo && !m?.files) return false;
+  const t = answer.trim();
+  return t.length > 0 && t.length < 400 && !/workspace=|```|^repo:|\?\s*$/im.test(t);
 }
 
 /**

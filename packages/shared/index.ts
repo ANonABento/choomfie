@@ -144,6 +144,9 @@ export {
   type BrainTask,
   parseTaskList,
   taskRepo,
+  fileBatches,
+  DISCORD_MESSAGE_FILES,
+  DISCORD_MESSAGE_BYTES,
 } from "./brains.ts";
 
 // Chats (location → conversation bindings)

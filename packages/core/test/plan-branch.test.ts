@@ -50,7 +50,7 @@ afterAll(() => {
 
 const bare = (repo: string) => join(root, "remote", `${repo}.git`);
 
-function fakeGh(opts: { permission?: string; failPr?: boolean; failPush?: number } = {}) {
+function fakeGh(opts: { permission?: string; failPr?: boolean; failPush?: number; prState?: string } = {}) {
   const calls: string[] = [];
   let pushFails = opts.failPush ?? 0;
   const run: Runner = async (cmd, cwd) => {
@@ -70,6 +70,7 @@ function fakeGh(opts: { permission?: string; failPr?: boolean; failPush?: number
       }
       if (cmd[1] === "repo" && cmd[2] === "clone") return runCommand(["git", "clone", "-q", bare(repo), cmd[4]]);
       if (cmd[1] === "pr" && cmd[2] === "list") return "";
+      if (cmd[1] === "pr" && cmd[2] === "view") return opts.prState ?? "OPEN";
       if (cmd[1] === "pr" && cmd[2] === "create") {
         if (opts.failPr) throw new Error("gh pr create failed: no commits between main and branch");
         return "https://github.com/x/y/pull/1";
@@ -167,6 +168,61 @@ describe("plan branch", () => {
     });
     await landPatch(pb, p, "Task 1", run);
     expect(await runCommand(["git", "log", "--format=%s", pb.branch], bare(repo))).toBe("Task 1\nby hand\nStart");
+  });
+
+  /** Commit straight to the repo's main, as an approval card or a hotfix does. */
+  async function commitToMain(repo: string, file: string, body: string) {
+    const other = join(mkdtempSync(join(root, "main-")), "r");
+    await runCommand(["git", "clone", "-q", "-b", "main", bare(repo), other]);
+    writeFileSync(join(other, file), body);
+    await runCommand(["git", "add", "-A"], other);
+    await runCommand(["git", "commit", "-q", "-m", `main: ${file}`], other);
+    await runCommand(["git", "push", "-q"], other);
+  }
+
+  test("work that reached main another way comes into the branch before the next task", async () => {
+    const { run } = fakeGh({ prState: "MERGED" });
+    const repo = repoName();
+    const pb = await openPlanBranch(repo, join(root, "plans"), run);
+    await landPatch(pb, await task(pb, run, (d) => writeFileSync(join(d, "a.py"), "x = 1\n")), "Task 1", run);
+    const firstPr = pb.prUrl;
+    await commitToMain(repo, "visual.py", "stickerless\n");
+
+    const b = await bundlePlanBranch(pb, run);
+    try {
+      expect(b.caughtUp).toEqual({ merged: 1, base: "main" });
+      const p = await workOn(b.path, (d) => {
+        expect(readFileSync(join(d, "visual.py"), "utf8")).toBe("stickerless\n");
+        writeFileSync(join(d, "a.py"), "x = 2\n");
+      });
+      const landed = await landPatch(pb, p, "Task 2", run);
+      // The first PR was merged: this commit gets a PR of its own.
+      expect(landed.prOpened).toBeDefined();
+      expect(firstPr).toBeDefined();
+    } finally {
+      b.cleanup();
+    }
+    expect(await runCommand(["git", "log", "--first-parent", "--format=%s", pb.branch], bare(repo))).toBe("Task 2\nBring in main\nTask 1\nStart");
+    await runCommand(["git", "merge-base", "--is-ancestor", "main", pb.branch], bare(repo));
+    // Already up to date: nothing to bring in.
+    const again = await bundlePlanBranch(pb, run);
+    again.cleanup();
+    expect(again.caughtUp).toBeNull();
+  });
+
+  test("main conflicting with the branch is reported, and the branch is left as it was", async () => {
+    const { run } = fakeGh();
+    const repo = repoName();
+    const pb = await openPlanBranch(repo, join(root, "plans"), run);
+    await landPatch(pb, await task(pb, run, (d) => writeFileSync(join(d, "p.py"), "branch\n")), "Task 1", run);
+    await commitToMain(repo, "p.py", "main\n");
+    const before = await head(pb.dir, `origin/${pb.branch}`);
+    const b = await bundlePlanBranch(pb, run);
+    b.cleanup();
+    expect(b.caughtUp && "conflict" in b.caughtUp ? b.caughtUp.conflict : "").toContain("p.py");
+    expect(await head(pb.dir)).toBe(before);
+    expect(await runCommand(["git", "rev-parse", pb.branch], bare(repo))).toBe(before);
+    expect(await runCommand(["git", "status", "--porcelain"], pb.dir)).toBe("");
   });
 
   test("a push that keeps failing leaves no local commit behind", async () => {

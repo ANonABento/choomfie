@@ -8,7 +8,7 @@
  */
 
 import { basename } from "node:path";
-import { errorMessage, type BrainApproval, type BrainFile } from "@choomfie/shared";
+import { DISCORD_MESSAGE_BYTES, errorMessage, type BrainApproval, type BrainFile } from "@choomfie/shared";
 import {
   LayoutChangedError,
   LoginRequiredError,
@@ -126,9 +126,13 @@ async function clearDraftAttachments(page: Page): Promise<void> {
   }
 }
 
-/** Discord's upload cap for a bot (10 attachments, ~10 MB on an unboosted server). */
-const MAX_FILES = 10;
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+/**
+ * How much one answer brings back. Discord takes 10 files / ~10 MB per
+ * message, so a bigger set goes over several messages; one file has to fit
+ * a message on its own.
+ */
+const MAX_FILES = 20;
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 /**
  * The answer with its workspace links made absolute, plus the files they
@@ -136,20 +140,29 @@ const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
  */
 export async function withFiles(page: Page, text: string): Promise<{ text: string; files: BrainFile[] }> {
   const files: BrainFile[] = [];
+  const left: string[] = [];
   let room = MAX_UPLOAD_BYTES;
-  for (const link of workspaceLinks(text).slice(0, MAX_FILES)) {
+  const links = workspaceLinks(text);
+  for (const link of links) {
+    const name = basename(link.path);
+    if (files.length >= MAX_FILES) {
+      left.push(name);
+      continue;
+    }
     try {
       const where = parseWorkspaceFile(await getJson(page, workspaceFileUrl(link)));
+      const cap = Math.min(room, DISCORD_MESSAGE_BYTES);
       const data = !where
         ? null
         : "content" in where
           ? new TextEncoder().encode(where.content)
-          : await pageFetchBytes(page, where.downloadUrl, room);
-      if (data && data.length <= room) {
-        files.push({ name: basename(link.path), data });
+          : await pageFetchBytes(page, where.downloadUrl, cap);
+      if (data && data.length <= cap) {
+        files.push({ name, data });
         room -= data.length;
-      }
+      } else left.push(name);
     } catch (e) {
+      left.push(name);
       console.error(`[waymond] couldn't fetch workspace file ${link.path}: ${errorMessage(e)}`);
     }
   }
@@ -166,7 +179,7 @@ export async function withFiles(page: Page, text: string): Promise<{ text: strin
         const data = await pageFetchBytes(page, new URL(a.mediaUrl, API_ORIGIN).href, room);
         if (data) file = { name: artifactFileName(a.title, ext), data };
       }
-      if (file && file.data.length <= room && files.length < MAX_FILES) {
+      if (file && file.data.length <= Math.min(room, DISCORD_MESSAGE_BYTES) && files.length < MAX_FILES) {
         if (files.some((f) => f.name === file.name)) file.name = file.name.replace(/(\.\w+)$/, `-${ref.id.slice(0, 4)}$1`);
         files.push(file);
         room -= file.data.length;
@@ -177,6 +190,8 @@ export async function withFiles(page: Page, text: string): Promise<{ text: strin
     }
     text = text.split(ref.token).join(line);
   }
+  // Say which links didn't come along, rather than dropping them quietly.
+  if (left.length) text += `\n\n-# Not attached (too big for Discord, or too many): ${left.join(", ")} — the links above open them in Waymond.`;
   return { text: absoluteLinks(text), files };
 }
 
@@ -285,7 +300,17 @@ export const waymondAdapter: SiteAdapter = {
         t.notice(`🔐 Waymond is waiting for your OK on something. Approve or decline it here: ${chatUrl(ref)}`);
       }
       if (elapsed > t.timeoutMs) {
-        throw new Error(`still working after ${Math.round(elapsed / 60_000)} min — follow it at ${chatUrl(ref)}`);
+        // Hand it to the late-result watch rather than lose the answer: it's posted when the turn ends.
+        const ours = parseMessages(await getJson(page, messagesUrl(ref))).find((m) => m.role === "user" && !baseline.has(m.id));
+        if (!ours) throw new Error(`still working after ${Math.round(elapsed / 60_000)} min — follow it at ${chatUrl(ref)}`);
+        return {
+          text: `⏳ Still working after ${Math.round(elapsed / 60_000)} min — follow it at ${chatUrl(ref)}`,
+          files: [],
+          ref,
+          background: true,
+          lastMessageId: ours.id,
+          messageIds: [],
+        };
       }
     }
   },
@@ -297,6 +322,8 @@ export const waymondAdapter: SiteAdapter = {
 
   async readLate(page, ref, afterId, posted) {
     await onApp(page);
+    // Mid-turn, the answer is still being written: wait for the turn to end.
+    if (parseTurn(await getJson(page, turnUrl(ref))).active) return null;
     const late = lateMessages(parseMessages(await getJson(page, messagesUrl(ref))), afterId, posted);
     if (!late.length) return null;
     return {

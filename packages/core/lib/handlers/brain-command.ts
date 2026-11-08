@@ -506,10 +506,18 @@ async function runTaskInThread(
   try {
     const name = bundle.path.split("/").pop()!;
     const note = mode.repo ? planBranchNote(pb, name, bundle.snapshot) : planFilesNote(pb, name, mode.files!);
+    const caught = bundle.caughtUp;
     await say(
       `-# 🌿 works on \`${pb.branch}\` of **${pb.repo}**${pb.created ? " (new, private)" : ""}` +
-        (mode.repo ? ` — attached as ${name}` : ` — its files go in ${mode.files}/`)
+        (mode.repo ? ` — attached as ${name}` : ` — its files go in ${mode.files}/`) +
+        (caught && "merged" in caught ? ` · brought in ${caught.merged} new commit${caught.merged === 1 ? "" : "s"} from \`${caught.base}\`` : "")
     );
+    if (caught && "conflict" in caught) {
+      await say(
+        `⚠️ \`${caught.base}\` has changes that conflict with \`${pb.branch}\` (${caught.conflict.slice(0, 300)}), so this task works without them. ` +
+          `Merge \`${caught.base}\` into the branch on GitHub to bring them in.`
+      );
+    }
     const reply = await dispatchToBrain(
       ctx,
       brain,
@@ -523,6 +531,13 @@ async function runTaskInThread(
       return false;
     }
     const landing = landingFor(board, index, reply.files);
+    if (!landing && reply.background) {
+      await say(
+        `⏳ ${brain.label} is still on it. When it finishes, its answer is posted here with a **Commit to the plan's branch** button; ` +
+          `the next task waits for you to start it from the board.`
+      );
+      return false;
+    }
     if (!landing) {
       const cut = /stopping after (several|\d+) tool calls/i.test(reply.text);
       await say(

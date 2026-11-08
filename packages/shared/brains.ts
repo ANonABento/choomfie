@@ -29,6 +29,31 @@ export interface BrainMessage {
   progress?: (line: string) => Promise<void>;
 }
 
+/**
+ * What one Discord message can carry for a bot on an unboosted server: 10
+ * attachments, 10 MB in all (a little under, for the request's own overhead).
+ * A reply with more is posted over several messages; one file over the cap can't go.
+ */
+export const DISCORD_MESSAGE_FILES = 10;
+export const DISCORD_MESSAGE_BYTES = 9.5 * 1024 * 1024;
+
+/** Files in posting order, packed into as few messages as Discord allows. */
+export function fileBatches<T extends { data: Uint8Array }>(files: T[]): T[][] {
+  const batches: T[][] = [];
+  let bytes = 0;
+  for (const f of files) {
+    const cur = batches.at(-1);
+    if (cur && cur.length < DISCORD_MESSAGE_FILES && bytes + f.data.length <= DISCORD_MESSAGE_BYTES) {
+      cur.push(f);
+      bytes += f.data.length;
+    } else {
+      batches.push([f]);
+      bytes = f.data.length;
+    }
+  }
+  return batches;
+}
+
 /** A file a brain hands back (an image it made, a PDF), posted as a Discord attachment. */
 export interface BrainFile {
   name: string;
@@ -39,6 +64,8 @@ export interface BrainReply {
   text: string;
   /** Ended by `/stop`: a plan's Run all stops here too. */
   stopped?: boolean;
+  /** Still going on the brain's side (a long turn, a background job): the rest is posted when it lands. */
+  background?: boolean;
   files?: BrainFile[];
   /** Quick replies; shown as buttons, and clicking one sends that text to the brain. */
   choices?: string[];

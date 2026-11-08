@@ -15,6 +15,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from "disc
 import {
   CLAUDE_BRAIN,
   errorMessage,
+  fileBatches,
   getBrain,
   setBrainPoster,
   type Brain,
@@ -288,7 +289,7 @@ export function planStatusNote(chatKey: string): string | undefined {
   const word = { idle: "not run yet", running: "running now", done: "done", failed: "failed" } as const;
   const lines = board.tasks.map((t, i) => `${t.n}. ${t.title} [${t.mode}] — ${word[board.states[i]?.kind ?? "idle"]}`);
   const branches = Object.values(board.plans ?? {}).map(
-    (p) => `${p.repo} (private — read it through the user's connected GitHub account), branch ${p.branch}${p.prUrl ? `, draft PR ${p.prUrl}` : ""}`
+    (p) => `${p.repo} (private — read it through the user's connected GitHub account), branch ${p.branch}${p.prUrl ? `, PR ${p.prUrl} (opened as a draft — mark it ready for review before merging it)` : ""}`
   );
   return [
     "[Plan status, from Choomfie (not the user): each task ran in its own chat; finished code/cad tasks are committed to the plan's branch, one commit per task.",
@@ -421,20 +422,22 @@ export async function postBrainReply(
   const fallback = choices.length ? "(pick one)" : reply.approvals?.length || reply.files?.length ? "" : "(no reply)";
   const chunks = chunkForDiscord(reply.text || fallback);
   if (!chunks.length && reply.files?.length) chunks.push(""); // files alone still need a message
+  // More files than one message carries go on in messages of their own, right after.
+  const [firstFiles, ...moreFiles] = fileBatches(reply.files ?? []);
+  const attach = (files: BrainFile[]) => files.map((f) => ({ attachment: Buffer.from(f.data), name: f.name }));
   for (let i = 0; i < chunks.length; i++) {
     const last = i === chunks.length - 1;
     const sent = await channel.send({
       allowedMentions: NO_MENTIONS,
       content: chunks[i],
       ...(i === 0 && replyTo ? { reply: { messageReference: replyTo } } : {}),
-      ...(last && reply.files?.length
-        ? { files: reply.files.map((f) => ({ attachment: Buffer.from(f.data), name: f.name })) }
-        : {}),
+      ...(last && firstFiles ? { files: attach(firstFiles) } : {}),
       ...(last && choices.length ? { components: choiceRows(choices) } : {}),
     });
     const id = (sent as { id?: unknown } | undefined)?.id;
     if (last && choices.length && typeof id === "string") pendingChoices.set(id, { brainId, chatKey, choices });
   }
+  for (const files of moreFiles) await channel.send({ allowedMentions: NO_MENTIONS, files: attach(files) });
   // A plan's tasks: one button each, which runs it in its own thread (owner only).
   // A single task the brain will run right away needs no buttons.
   if (reply.tasks?.length && !reply.runNow) {

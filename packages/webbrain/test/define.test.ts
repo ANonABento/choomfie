@@ -175,6 +175,47 @@ describe("defineWebBrain", () => {
     }
   });
 
+  test("a turn left running in the background isn't continued, and says so", async () => {
+    let n = 0;
+    const { brain, destroy } = await setup(
+      async () => (n++, { text: "still going", ref: "r", background: true, lastMessageId: "m1" }),
+      { continueAfter: () => "continue" }
+    );
+    try {
+      const r = await brain.send(msg("bg"), {} as never);
+      expect(r.background).toBe(true);
+      expect(n).toBe(1);
+    } finally {
+      await destroy();
+    }
+  });
+
+  test("a work mode's turn gets the longer wait, and continueAfter is told the mode", async () => {
+    const waits: number[] = [];
+    const modesSeen: (string | undefined)[] = [];
+    const { brain, chats, destroy } = await setup(
+      async (_i, t) => (waits.push(t.timeoutMs), { text: "ok", ref: "r" }),
+      {
+        modes: [
+          { id: "code", label: "Code", description: "d", frame: "[code]", repo: true },
+          { id: "ask", label: "Ask", description: "d", frame: "[ask]" },
+        ],
+        continueAfter: (_a, mode) => (modesSeen.push(mode), null),
+      }
+    );
+    try {
+      await brain.send(msg("w"), {} as never);
+      chats.setMode(chats.bound("w", "fakesite")!.id, "code");
+      await brain.send(msg("w"), {} as never);
+      chats.setMode(chats.bound("w", "fakesite")!.id, "ask");
+      await brain.send(msg("w"), {} as never);
+      expect(waits).toEqual([15 * 60_000, 45 * 60_000, 15 * 60_000]);
+      expect(modesSeen).toEqual([undefined, "code", "ask"]);
+    } finally {
+      await destroy();
+    }
+  });
+
   test("a logged-out site says how to log in", async () => {
     const { brain, destroy } = await setup(async () => {
       throw new LoginRequiredError({ id: "fakesite", label: "FakeSite" });

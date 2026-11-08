@@ -367,6 +367,13 @@ describe("modes", () => {
     const cut = "Patches not applied by setup; apply manually.Read the code.\n\n_(Stopping after several tool calls - please re-ask if you want to continue.)_";
     expect(continueAfterToolCap(cut)).toContain("continue");
     expect(continueAfterToolCap("Added contact mode. All tests pass.")).toBeNull();
+    // A work mode's turn that ended on its own narration carries on; a real answer, a question, or chat doesn't.
+    expect(continueAfterToolCap("Output truncated; need params and mjcf.", "code")).toContain("mid-task");
+    expect(continueAfterToolCap("Output truncated; need params and mjcf.", "ask")).toBeNull();
+    expect(continueAfterToolCap("Output truncated; need params and mjcf.")).toBeNull();
+    expect(continueAfterToolCap("Which repo should this go in?", "code")).toBeNull();
+    expect(continueAfterToolCap("Done.\n\nrepo: a/b\n```\nPASS\n```", "code")).toBeNull();
+    expect(continueAfterToolCap("[part.step](/chat?workspace=x%2Fpart.step&owner=o)", "cad")).toBeNull();
   });
 
   test("stripNarration drops notes glued onto the answer, and leaves normal text alone", () => {

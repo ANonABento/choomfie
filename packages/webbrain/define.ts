@@ -33,8 +33,10 @@ export interface WebBrainOptions {
   maxTabs?: number;
   /** Close the browser after this long with nothing running. Default 10 min. */
   idleCloseMs?: number;
-  /** Whole-turn timeout. Default 15 min. */
+  /** How long to wait on one turn before leaving it to the late-result watch. Default 15 min. */
   turnTimeoutMs?: number;
+  /** The same for a work mode's turn (one that makes a patch or files). Default 45 min. */
+  workTurnTimeoutMs?: number;
   /** Replace the browser launch (tests, or another engine). Gets the site's profile dir. */
   launch?(profileDir: string): Promise<ContextLike<Page>>;
 }
@@ -84,6 +86,9 @@ export function modePrompt(adapter: Pick<SiteAdapter, "modes">, mode: string | n
 /** Times one message carries on after the site cuts an answer short. */
 export const MAX_CONTINUES = 3;
 
+/** Meta flag on a continue the kit sends itself for a late answer (it doesn't reset the count). */
+const LATE_CONTINUE = "webbrain_continue";
+
 /** Headed for debugging: `CHOOMFIE_<ID>_HEADED=1`. */
 const headedFor = (id: string) => process.env[`CHOOMFIE_${id.toUpperCase()}_HEADED`] === "1";
 
@@ -105,6 +110,10 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
     const outbox = outboxDir(ctx.DATA_DIR, adapter.id);
     const human = createHuman(new Pacer());
     const timeoutMs = opts.turnTimeoutMs ?? 15 * 60_000;
+    const workTimeoutMs = opts.workTurnTimeoutMs ?? 45 * 60_000;
+    const isWorkMode = (mode: string | null | undefined) => !!adapter.modes?.some((m) => m.id === mode && (m.repo || m.files));
+    /** Continues sent for late answers, per chat, since the owner last wrote: bounded like the in-turn ones. */
+    const lateContinues = new Map<string, number>();
     const active = new Map<string, ActiveTurn>();
     const tabs = (pool = new TabPool<Page>({
       launch: () => (opts.launch ? opts.launch(profile) : launchContext(profile, { headless: !headedFor(adapter.id), engine })),
@@ -127,11 +136,22 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
     const lateWatch = (watch = new LateWatch(
       (chatKey, ref, afterId, posted) =>
         adapter.readLate ? onTab(chatKey, (page) => adapter.readLate!(page, ref, afterId, posted)) : Promise.resolve(null),
-      (chatKey, late) =>
-        pushBrainReply(adapter.id, chatKey, { text: late.text, files: late.files, choices: late.choices, approvals: late.approvals })
+      async (chatKey, late) => {
+        // A late answer that stopped short (the turn outlasted our wait, then hit the tool cap): carry on, as in a turn.
+        const more = late.approvals?.length ? null : adapter.continueAfter?.(late.text, chats.bound(chatKey, adapter.id)?.mode ?? undefined);
+        const n = lateContinues.get(chatKey) ?? 0;
+        if (more && n < MAX_CONTINUES) {
+          lateContinues.set(chatKey, n + 1);
+          await pushBrainReply(adapter.id, chatKey, { text: `-# ${adapter.label} stopped before finishing — continuing (${n + 1}/${MAX_CONTINUES})` });
+          const reply = await brain.send({ chatKey, content: more, filePaths: [], meta: { chat_id: chatKey, role: "owner", [LATE_CONTINUE]: "1" } }, ctx);
+          await pushBrainReply(adapter.id, chatKey, reply);
+          return;
+        }
+        await pushBrainReply(adapter.id, chatKey, { text: late.text, files: late.files, choices: late.choices, approvals: late.approvals });
+      }
     ));
 
-    return {
+    const brain: Brain = {
       id: adapter.id,
       label: adapter.label,
       modes: adapter.modes?.map(({ id, label, description, repo, files }) => ({ id, label, description, ...(repo ? { repo } : {}), ...(files ? { files } : {}) })),
@@ -157,6 +177,7 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
       },
 
       async send(message) {
+        if (!message.meta?.[LATE_CONTINUE]) lateContinues.delete(message.chatKey);
         const chat = chats.current(message.chatKey, adapter.id, message.content);
         // In a chat the bot isn't in, status goes in the "thinking…" reply instead.
         const relayProgress = message.progress;
@@ -226,19 +247,20 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
                 progress,
                 notice,
                 human,
-                timeoutMs,
+                timeoutMs: isWorkMode(mode) ? workTimeoutMs : timeoutMs,
               };
               return adapter.turn(page, { text: prompt, files: attach, mode }, tctx);
             });
           let result = await runTurn(text, files);
           // The site cut the answer short (a tool-call cap): carry on, keeping files from every part.
           for (let i = 0; i < MAX_CONTINUES && !result.stopped && !turn.stop && !result.approvals?.length; i++) {
-            const more = adapter.continueAfter?.(result.text);
+            if (result.background) break;
+            const more = adapter.continueAfter?.(result.text, mode ?? undefined);
             if (!more) break;
             turn.ref = result.ref;
             chats.setBackendRef(chat.id, result.ref);
             lateWatch.delivered(message.chatKey, result.messageIds ?? []);
-            notice(`${adapter.label} hit its tool limit for one turn — continuing (${i + 1}/${MAX_CONTINUES})`);
+            notice(`${adapter.label} stopped before finishing — continuing (${i + 1}/${MAX_CONTINUES})`);
             const earlier = result.files ?? [];
             const { text: next } = modePrompt(adapter, mode ?? null, more);
             result = await runTurn(next, []);
@@ -257,6 +279,7 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
           return {
             text: answerText(result, adapter.label),
             ...(result.stopped || turn.stop ? { stopped: true } : {}),
+            ...(result.background ? { background: true } : {}),
             files: result.files,
             choices: result.choices,
             approvals: result.approvals,
@@ -269,6 +292,7 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
         }
       },
     };
+    return brain;
   }
 
   return {
