@@ -9,7 +9,7 @@
 #
 # Fetched by URL from the Choomfie repo, so every chat runs the same steps.
 set -uo pipefail
-REPO_DIR=/tmp/repo
+REPO_DIR=${SWE_REPO_DIR:-/tmp/repo}
 export GIT_TERMINAL_PROMPT=0  # a missing repo must fail, not ask for a password
 export PATH="$HOME/.bun/bin:$PATH"
 
@@ -43,6 +43,9 @@ detect_checks() {
 case "${1:-}" in
   setup)
     src="${2:?repo}"; shift 2
+    # Earlier-work paths are relative to where setup was run from; setup cd's into the repo below.
+    base_args=()
+    for arg in "$@"; do [[ "$arg" == /* ]] && base_args+=("$arg") || base_args+=("$PWD/$arg"); done
     [[ "$src" == http* || "$src" == git@* ]] || src="https://github.com/$src.git"
     apt-get update -qq >/dev/null 2>&1; apt-get install -y -qq git curl unzip >/dev/null 2>&1
     rm -rf "$REPO_DIR"
@@ -56,9 +59,11 @@ case "${1:-}" in
     git commit -q --allow-empty -m base >/dev/null 2>&1 || true
     # Earlier work, in order: patch files, or folders of them (plan tasks: plans/<name>/patches/).
     applied=0
-    for arg in "$@"; do
+    for arg in ${base_args[@]+"${base_args[@]}"}; do
       if [ -d "$arg" ]; then files=$(ls "$arg"/*.patch 2>/dev/null | sort -V); else files="$arg"; fi
+      [ -n "$files" ] || say "WARNING: no .patch files in $arg"
       for f in $files; do
+        [ -e "$f" ] || { say "WARNING: $f not found — earlier work NOT applied. Pass the path as run_python sees it (ls it first)."; continue; }
         [ -s "$f" ] || continue
         if git apply "$f"; then say "applied $f"; applied=1; else say "WARNING: $f did not apply"; fi
       done
