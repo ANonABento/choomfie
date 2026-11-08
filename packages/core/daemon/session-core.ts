@@ -16,7 +16,10 @@ export function buildSystemPromptAppend(handoffSummary?: string): string {
     "You are running under the Choomfie daemon, one session per Discord thread, channel or DM. " +
       "When context gets heavy the daemon asks you for a handoff summary and carries on in a fresh " +
       "session that starts with it. Choomfie's `restart` tool restarts only the Discord worker; " +
-      "this session is unaffected.",
+      "this session is unaffected. " +
+      // Measured: a recap after every reply was ~14% of a chat's output tokens.
+      "Nobody reads your text outside tool calls — Discord only sees what you send with `reply`. " +
+      "Once you've replied, end the turn without writing anything else (no recap of what you sent).",
   ];
   if (handoffSummary) {
     parts.push(

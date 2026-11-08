@@ -120,6 +120,16 @@ describe("tools on an ask chat", () => {
     expect(i.calls[0]).toEqual({ kind: "edit", body: { content: "hi" } });
   });
 
+  test("a reply over 2000 characters is split, not refused", async () => {
+    const i = fakeInteraction();
+    const id = openAskRelay("789", interactionChannel(i));
+    const long = ("word ".repeat(300) + "\n\n").repeat(3); // ~4500 chars
+    const res = await tool("reply").handler({ chat_id: id, text: long }, ctx);
+    expect(res.isError).toBeFalsy();
+    expect(i.calls.length).toBeGreaterThan(1);
+    for (const c of i.calls) expect((c.body.content as string).length).toBeLessThanOrEqual(2000);
+  });
+
   test("reply to an expired ask says why", async () => {
     const res = await tool("reply").handler({ chat_id: "ask:gone", text: "hi" }, ctx);
     expect(res.isError).toBe(true);

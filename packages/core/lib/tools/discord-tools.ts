@@ -17,6 +17,7 @@ import { text, err } from "../types.ts";
 import { onReplySent } from "../typing.ts";
 import { refreshChannel } from "../conversation.ts";
 import { ASK_ONLY_REPLY, getAskRelay, isAskChatId } from "../ask-relay.ts";
+import { chunkForDiscord } from "../brain-router.ts";
 
 /**
  * Allowed prefixes for files attached via the reply tool.
@@ -145,7 +146,7 @@ const tools: ToolDef[] = [
           chat_id: { type: "string", description: "Discord channel ID" },
           text: {
             type: "string",
-            description: "Message text (markdown OK). Optional if embeds are provided.",
+            description: "Message text (markdown OK; any length — over 2000 characters is split into several messages). Optional if embeds are provided.",
           },
           reply_to: {
             type: "string",
@@ -196,9 +197,13 @@ const tools: ToolDef[] = [
     handler: async (args, ctx) => {
       const opts: Record<string, unknown> = {};
 
-      // Text content (can be omitted if embeds are provided)
+      // Text content (can be omitted if embeds are provided). Over Discord's
+      // 2000 characters it goes out as several messages: the model used to get
+      // an error and write the whole answer again.
       const content = args.text as string | undefined;
-      if (content) opts.content = content;
+      const chunks = content ? chunkForDiscord(content) : [];
+      const leading = chunks.slice(0, -1);
+      if (chunks.length) opts.content = chunks[chunks.length - 1];
 
       if (!content && (!args.embeds || !Array.isArray(args.embeds) || (args.embeds as unknown[]).length === 0)) {
         return err("Must provide text or embeds (or both).");
@@ -226,8 +231,9 @@ const tools: ToolDef[] = [
       if (isAskChatId(args.chat_id)) {
         const relay = getAskRelay(args.chat_id as string);
         if (!relay) return err("This /choomfie can't be answered any more — Discord closes it after 15 minutes.");
+        for (const part of leading) await relay.send({ content: part } as never);
         const sent = (await relay.send(opts as never)) as { id?: string } | undefined;
-        ctx.messageStats.sent++;
+        ctx.messageStats.sent += leading.length + 1;
         return text(`sent (id: ${sent?.id ?? "?"})`);
       }
 
@@ -250,8 +256,15 @@ const tools: ToolDef[] = [
         }
       }
 
+      // The reference goes on the first message, files and embeds on the last.
+      let reference = opts.reply;
+      for (const part of leading) {
+        await textChannel.send({ content: part, ...(reference ? { reply: reference } : {}) } as any);
+        reference = undefined;
+      }
+      if (!reference) delete opts.reply;
       const sent = await textChannel.send(opts as any);
-      ctx.messageStats.sent++;
+      ctx.messageStats.sent += leading.length + 1;
 
       // Refresh conversation timeout — bot replies count as activity
       refreshChannel(ctx.activeChannels, args.chat_id as string);
