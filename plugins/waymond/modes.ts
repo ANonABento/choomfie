@@ -22,7 +22,7 @@ import type { SiteMode } from "@choomfie/webbrain";
  * the repo is public). Pinned, so a chat always runs scripts that match these
  * frames; bump it when tools/ changes.
  */
-export const TOOLS_REF = "16729dc51a9525d7ca8a6d4bb64c9428a3b64d0c";
+export const TOOLS_REF = "97d5f83c5c4efe10aad47b51199b19e7ca4e386e";
 export const toolUrl = (file: string) =>
   `https://raw.githubusercontent.com/ANonABento/choomfie/${TOOLS_REF}/plugins/waymond/tools/${file}`;
 
@@ -81,7 +81,7 @@ ${TASKS}]`,
     repo: true,
     frame: `[code mode — work it through yourself in run_python before replying; no questions mid-task, state assumptions at the end. Plain tone.
 Each run_python is a fresh container killed after ~150 s; nothing installed persists. Start EVERY run with:
-${fetchTool("swe.sh", 'sh("bash /tmp/swe.sh setup OWNER/REPO")  # add a wip.patch path as 3rd arg to restore earlier edits')}
+${fetchTool("swe.sh", 'sh("bash /tmp/swe.sh setup OWNER/REPO")  # add your saved wip.patch as 3rd arg to restore your earlier edits (they stay in your diff)')}
 setup clones to /tmp/repo, installs deps and lists the repo's own checks. Prefer doing setup + edit + check in one run; if you need more runs, save \`bash /tmp/swe.sh diff /tmp/wip.patch\` to your workspace and pass it to setup next time.
 Loop: grep/read the code → smallest change in the repo's style, plus a test → \`bash /tmp/swe.sh check\` (tests + type-check + lint). Every line must say PASS (a PASS noting failures that also happen without your change is fine — leave those alone); on FAIL read it, fix, rerun (max 6). A reply without a full-PASS check is a failure.
 Finish: \`bash /tmp/swe.sh diff /tmp/out/<short-name>.patch\`, save it to workspace patches/<short-name>.patch. Reply with exactly: one line on what changed; a line \`repo: <owner>/<name>\`; the check output in a code block; the patch link; assumptions. No commits or PRs unless asked.]`,
@@ -93,7 +93,7 @@ Finish: \`bash /tmp/swe.sh diff /tmp/out/<short-name>.patch\`, save it to worksp
     repo: true,
     frame: `[debug mode — find the cause before fixing anything. Work it through yourself in run_python; no questions mid-task. Plain tone.
 Each run_python is a fresh container killed after ~150 s; nothing installed persists. Start EVERY run with:
-${fetchTool("swe.sh", 'sh("bash /tmp/swe.sh setup OWNER/REPO")  # add a wip.patch path as 3rd arg to restore earlier edits')}
+${fetchTool("swe.sh", 'sh("bash /tmp/swe.sh setup OWNER/REPO")  # add your saved wip.patch as 3rd arg to restore your earlier edits (they stay in your diff)')}
 1. Reproduce: write the smallest failing test (or script) that shows the bug, run it, show it failing. Can't reproduce? Stop and say what you tried and what would help (logs, versions, exact steps).
 2. Cause: follow the code path, add temporary prints if needed, and state the root cause in one sentence with file and function.
 3. Fix the cause, not the symptom; remove the temporary prints. The failing test now passes and \`bash /tmp/swe.sh check\` is all PASS (a PASS noting failures that also happen without your change is fine).

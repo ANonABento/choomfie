@@ -293,8 +293,9 @@ async function handleTask(interaction: ButtonInteraction, which: number | "all",
   const brain = board ? getBrain(board.brainId) : undefined;
   if (!board || !brain) return void (await ephemeral("These tasks expired (Choomfie restarted) — ask for the task list again."));
   if (board.busy) return void (await ephemeral("Run all is already working through these — one at a time."));
-  const indices = which === "all" ? board.states.flatMap((s, i) => (s.kind === "idle" ? [i] : [])) : [which];
-  if (!indices.length || indices.some((i) => board.states[i]?.kind !== "idle" || !board.tasks[i])) {
+  const runnable = (i: number) => board.states[i]?.kind === "idle" || board.states[i]?.kind === "failed";
+  const indices = which === "all" ? board.states.flatMap((_, i) => (runnable(i) ? [i] : [])) : [which];
+  if (!indices.length || indices.some((i) => !runnable(i) || !board.tasks[i])) {
     return void (await ephemeral("That task is already running."));
   }
 

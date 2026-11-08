@@ -217,7 +217,8 @@ export function taskPrompt(task: { n: number; spec: string }, context?: string):
 /** A button per task: runnable until started, then a link to its thread showing how it went. Plus "Run all" while 2+ are idle. */
 export function taskBoardRows(board: Pick<TaskBoard, "tasks" | "states" | "busy">) {
   const rows = [];
-  const idle = board.busy ? 0 : board.states.filter((s) => s.kind === "idle").length;
+  // Failed tasks can run again (their thread is still linked from the retry).
+  const idle = board.busy ? 0 : board.states.filter((s) => s.kind === "idle" || s.kind === "failed").length;
   const tasks = board.tasks.slice(0, idle >= 2 ? 20 : 25);
   for (let r = 0; r * 5 < tasks.length; r++) {
     rows.push(
@@ -230,6 +231,9 @@ export function taskBoardRows(board: Pick<TaskBoard, "tasks" | "states" | "busy"
           if (state.kind === "idle") {
             return b.setCustomId(`brain:task:${i}`).setLabel(`▶ ${label}`.slice(0, 80)).setStyle(ButtonStyle.Secondary);
           }
+          if (state.kind === "failed" && !board.busy) {
+            return b.setCustomId(`brain:task:${i}`).setLabel(`↻ ${label} (failed — retry)`.slice(0, 80)).setStyle(ButtonStyle.Danger);
+          }
           return b.setURL(state.url).setLabel(`${TASK_ICON[state.kind]} ${label}`.slice(0, 80)).setStyle(ButtonStyle.Link);
         })
       )
@@ -238,7 +242,7 @@ export function taskBoardRows(board: Pick<TaskBoard, "tasks" | "states" | "busy"
   if (idle >= 2) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId("brain:taskall").setLabel(`▶ Run all ${idle}, in order`).setStyle(ButtonStyle.Primary)
+        new ButtonBuilder().setCustomId("brain:taskall").setLabel(`▶ Run the remaining ${idle}, in order`).setStyle(ButtonStyle.Primary)
       )
     );
   }

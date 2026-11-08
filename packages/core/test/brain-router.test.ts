@@ -234,6 +234,11 @@ describe("task board", () => {
       "brain:task:0",
       "brain:task:1",
     ]);
+    // A failed task can be retried, and counts toward running the rest in order.
+    const failed = json(taskBoardRows({ ...board, states: [{ kind: "failed", url: "u" }, { kind: "idle" }] }));
+    expect(failed.map((c) => c.custom_id)).toEqual(["brain:task:0", "brain:task:1", "brain:taskall"]);
+    expect(failed[0].label).toContain("retry");
+    expect(failed[2].label).toBe("▶ Run the remaining 2, in order");
   });
 
   test("a single task to run now posts no board; the brain switches mode and starts it", async () => {
