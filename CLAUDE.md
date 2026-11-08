@@ -103,7 +103,7 @@ So a daemon-launched worker writes each message to `meta/incoming/` and the daem
 | Effort | `effort` from config.json (default `medium`) | `--effort` via `scripts/resolve-model.ts effort` |
 | Plain-text answer | final message auto-posted to the chat (one model call) | `reply` tool (the terminal isn't Discord) |
 
-Permission mode and plain-text answers differ **deliberately**: a terminal session has a human in front of it who can still be asked about genuinely destructive things; a daemon answering Discord at 3am does not. The model must match.
+Permission mode differs **deliberately**: a terminal session has a human in front of it who can still be asked about genuinely destructive things; a daemon answering Discord at 3am does not. Plain-text answers differ because foreground text lands in the terminal, not Discord. Model and effort must match.
 
 ### Plugin System
 
