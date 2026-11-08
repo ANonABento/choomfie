@@ -46,7 +46,7 @@ import {
 } from "../brain-router.ts";
 import { isAllowed, isOwner } from "../access.ts";
 import { onMessageReceived, onReplySent } from "../typing.ts";
-import { isDaemonMode, requestDaemonControl } from "../daemon-status.ts";
+import { isDaemonMode, requestDaemonControl, waitForClaudeIdle } from "../daemon-status.ts";
 import { openDraftPr, takePatch } from "../patch-pr.ts";
 import { bundlePlanBranch, landPatch, openPlanBranch, planBranchNote, type PlanBranch } from "../plan-branch.ts";
 import { requireOwner } from "./shared.ts";
@@ -184,10 +184,15 @@ registerCommand("stop", {
         });
         return;
       }
+      const asked = Date.now();
       await requestDaemonControl(ctx.DATA_DIR, "stop", { requestedBy: interaction.user.id, location: channelId });
       onReplySent(channelId); // the interrupted turn won't reply, so stop typing now
       await settleAskRelays(channelId, "⏹️ Stopped.");
-      await interaction.reply({ content: "Asked **Claude** to stop.", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "Stopping **Claude**…", flags: MessageFlags.Ephemeral });
+      const idle = await waitForClaudeIdle(ctx.DATA_DIR, channelId, asked);
+      await interaction
+        .editReply(idle ? "⏹️ **Claude** stopped." : "Asked **Claude** to stop — it hasn't confirmed yet; `/status` shows whether it's still busy.")
+        .catch(() => {});
       return;
     }
     const brain = getBrain(current);
