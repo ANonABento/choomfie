@@ -30,3 +30,4 @@ handoffs.json
 *.port
 inbox/
 .choomfie-data/
+plugins/waymond/library/library.zip
