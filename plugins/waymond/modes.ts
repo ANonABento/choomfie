@@ -44,7 +44,36 @@ const SANDBOX =
  * right; the tool versions were the only ones that ran the full test suite,
  * type-check and lint every time, and that showed their checks in the reply.
  */
+/** Waymond's own default is to coach: quiz the user, open a learning "pursuit", hand code to "your coding agent". */
+const AGENT =
+  "you are the user's engineering agent: the point is to save them work. Plain tone. Do the work yourself in your sandbox. " +
+  "Never turn a request into a learning pursuit, never quiz the user about what they know, never hand the work to another agent or tool for them to run.";
+
+const RESEARCH = `Research before your first reply: read the repo if one is involved (run_python: urllib.request.urlretrieve("${toolUrl("swe.sh")}", "/tmp/swe.sh"), then bash /tmp/swe.sh setup OWNER/REPO), web_search the parts, standards, libraries and prior art (several searches, cite sources), and check your workspace for earlier work. Then ask only what research can't answer — preferences and constraints only the user knows — at most 3 short questions, with likely answers as quick replies. Where a sensible default exists, take it and list it under Assumptions instead of asking.`;
+
+const TASKS = `Tasks: each small enough for one agent in one sitting, and standalone — it goes to a fresh chat that sees only its own line and the plan file. Give each the mode that does it: code (change a GitHub repo, with tests), debug (find and fix a bug), cad (OpenSCAD printable part), 3d (Blender model), plan (a sub-plan). Name the repo for code/debug. End each with "Done when:" and a check that mode can run (firmware: native unit tests — device builds can't run in the sandbox, so say they're checked on the user's machine). Order by dependency.
+The task list is a line that says only "Tasks", then one line per task, exactly like:
+1. [cad] Motor mount — 40 x 30 x 5 mm plate for a NEMA 17, four M3 holes on 31 mm centres. Done when: cad_check passes with --expect 40,30,5 --hole 3.4
+2. [code] Step driver — in ANonABento/robot: … Done when: …`;
+
+/** What a Waymond chat runs when no mode is set: research, then answer, do one job, or plan. */
+export const AUTO_MODE = "auto";
+
 export const WAYMOND_MODES: SiteMode[] = [
+  {
+    id: AUTO_MODE,
+    label: "Auto",
+    description: "Default: researches, then answers, runs the one mode the job needs, or plans a bigger one",
+    tasks: true,
+    runSingleTask: true,
+    frame: `[${AGENT}
+${RESEARCH}
+Then decide:
+- A question: just answer it, with sources.
+- One job one mode can do: reply with one line saying what you'll make, then the task list with that single task. It starts straight away in that mode, so put everything it needs in the task line.
+- Anything bigger: write workspace plans/<short-name>/plan.md (Requirements, numbered and testable · Design, with why · Tasks · Risks), reply with a short summary and the plan link, then the task list. The user runs the tasks.
+${TASKS}]`,
+  },
   {
     id: "code",
     label: "Code",
@@ -71,16 +100,14 @@ Finish: \`bash /tmp/swe.sh diff /tmp/out/<short-name>.patch\`, save it to worksp
   {
     id: "plan",
     label: "Plan",
-    description: "Planning partner: talks it through, writes requirements + design, splits it into tasks you can run",
+    description: "Planning partner: researches, asks what's left, writes requirements + design + runnable tasks",
     tasks: true,
-    frame: `[plan mode — you're the planning partner of an engineer (software, robots, 3D-printed parts on a Bambu P1S, electronics). Plain tone. Change nothing: no commits, PRs, emails or posts.
-Talk first. While the goal, constraints or what "done" means are unclear, ask at most 3 short questions per reply and offer likely answers as quick replies. Don't ask what you can find out: read the code (run_python: urllib.request.urlretrieve("${toolUrl("swe.sh")}", "/tmp/swe.sh"), then bash /tmp/swe.sh setup OWNER/REPO) or research it (web_search, cite sources). Stop asking once you could write a test for every requirement, or when the user says go.
-Then write workspace plans/<short-name>/plan.md: Requirements (numbered, each testable) · Design (approach and why, alternatives rejected; cite files/functions for repos) · Tasks · Risks and unknowns.
-Tasks: each small enough for one agent in one sitting, and standalone — it goes to a fresh chat that sees only its own line and the plan file. Give each the mode that does it: code (change a GitHub repo, with tests), debug (find and fix a bug), cad (OpenSCAD printable part), 3d (Blender model), plan (a sub-plan). Name the repo for code/debug. End each with "Done when:" and a check that mode can run (firmware: native unit tests — device builds can't run in the sandbox, so say they're checked on the user's machine). Order by dependency.
-End every reply that has a plan with the plan link, then a line that says only "Tasks", then one line per task, exactly like:
-1. [cad] Motor mount — 40 x 30 x 5 mm plate for a NEMA 17, four M3 holes on 31 mm centres. Done when: cad_check passes with --expect 40,30,5 --hole 3.4
-2. [code] Step driver — in ANonABento/robot: … Done when: …
-When you change the plan, repeat the whole task list.]`,
+    frame: `[plan mode — ${AGENT}
+${RESEARCH}
+Change nothing: no commits, PRs, emails or posts. Stop asking once you could write a test for every requirement, or when the user says go.
+Then write workspace plans/<short-name>/plan.md: Requirements (numbered, each testable) · Design (approach and why, alternatives rejected; cite files/functions for repos, sources for the rest) · Tasks · Risks and unknowns.
+${TASKS}
+End every reply that has a plan with the plan link, then the task list. When you change the plan, repeat the whole list.]`,
   },
   {
     id: "cad",
@@ -118,7 +145,9 @@ export function stripNarration(text: string): string {
   const nl = text.indexOf("\n");
   const head = nl === -1 ? text : text.slice(0, nl);
   let cut = -1;
-  for (const m of head.matchAll(/[.!?](?=[A-Z`*#])/g)) cut = m.index! + 1;
+  // A seam is a sentence end run straight into a capital, a backtick, a heading, or **Bold —
+  // not "**~360 mA.** TowerPro", where the period ends a bold phrase.
+  for (const m of head.matchAll(/[.!?](?=[A-Z`#]|\*\*[A-Z])/g)) cut = m.index! + 1;
   return cut === -1 ? text : text.slice(cut).trimStart();
 }
 

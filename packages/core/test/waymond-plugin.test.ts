@@ -290,8 +290,8 @@ describe("modes", () => {
     expect(new Set(ids).size).toBe(ids.length);
     for (const m of WAYMOND_MODES) {
       expect(m.id).toMatch(/^[a-z0-9]+$/);
-      expect(m.frame).toMatch(/Reply with|End every reply/);
-      expect(m.frame.length).toBeLessThan(2000);
+      expect(m.frame).toMatch(/Reply with|End every reply|task list/);
+      expect(m.frame.length).toBeLessThan(2500); // rides on every message
     }
     expect(WAYMOND_MODES.find((m) => m.id === "code")!.frame).toContain("repo: <owner>/<name>");
   });
@@ -300,6 +300,8 @@ describe("modes", () => {
     expect(stripNarration("No git; download tarball.No node/bun present. Let me look.I fixed `x`.\n\nMore."))
       .toBe("I fixed `x`.\n\nMore.");
     expect(stripNarration("Nested quotes; retry.```\n 22 pass\n```")).toBe("```\n 22 pass\n```");
+    expect(stripNarration("Checked the sources.**Stall current:** about 360 mA")).toBe("**Stall current:** about 360 mA");
+    expect(stripNarration("Short answer: **~360 mA.** TowerPro doesn't say.")).toBe("Short answer: **~360 mA.** TowerPro doesn't say.");
     const normal = "I fixed it. Tests pass.\nSee README.md for details.";
     expect(stripNarration(normal)).toBe(normal);
   });

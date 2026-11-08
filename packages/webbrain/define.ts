@@ -132,6 +132,7 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
       id: adapter.id,
       label: adapter.label,
       modes: adapter.modes?.map(({ id, label, description }) => ({ id, label, description })),
+      defaultMode: adapter.defaultMode,
 
       // Core has already bound a fresh chat here; only the background watch is ours to drop.
       async reset(chatKey) {
@@ -203,7 +204,11 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
 
         const turn: ActiveTurn = { ref: chat.backendRef ?? undefined, stop: false };
         try {
-          const { text, mode } = modePrompt(adapter, chat.mode, (adapter.framePrompt ?? framePrompt)(message.content, message.meta));
+          const { text, mode } = modePrompt(
+            adapter,
+            chat.mode ?? adapter.defaultMode ?? null,
+            (adapter.framePrompt ?? framePrompt)(message.content, message.meta)
+          );
           const result = await onTab(message.chatKey, (page) => {
             started = Date.now();
             active.set(message.chatKey, turn);
@@ -225,13 +230,16 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
           lateWatch.delivered(message.chatKey, result.messageIds ?? []);
           if (result.background && result.lastMessageId) lateWatch.start(message.chatKey, result.ref, result.lastMessageId);
           const planMode = mode ? adapter.modes?.find((m) => m.id === mode && m.tasks) : undefined;
-          const tasks = planMode ? parseTaskList(result.text, adapter.modes!.map((m) => m.id)) : [];
+          // A task can't be for the planning modes themselves, except a sub-plan.
+          const runnable = (adapter.modes ?? []).filter((m) => !m.runSingleTask).map((m) => m.id);
+          const tasks = planMode ? parseTaskList(result.text, runnable) : [];
+          const runNow = !!planMode?.runSingleTask && tasks.length === 1;
           return {
             text: answerText(result, adapter.label),
             files: result.files,
             choices: result.choices,
             approvals: result.approvals,
-            ...(tasks.length ? { tasks, taskContext: adapter.taskContext?.(result.text) } : {}),
+            ...(tasks.length ? { tasks, taskContext: adapter.taskContext?.(result.text), runNow } : {}),
           };
         } finally {
           if (active.get(message.chatKey) === turn) active.delete(message.chatKey);

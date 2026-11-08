@@ -193,6 +193,8 @@ export interface TaskBoard {
   tasks: BrainTask[];
   context?: string;
   states: TaskState[];
+  /** "Run all" is working through the list. */
+  busy?: boolean;
 }
 
 /** Task-board message id → its plan's tasks and how each is going. In memory: a restart expires them. */
@@ -204,13 +206,20 @@ export function getTaskBoard(messageId: string): TaskBoard | undefined {
 
 const TASK_ICON = { running: "⏳", done: "✅", failed: "❌" } as const;
 
-/** A button per task: runnable until started, then a link to its thread showing how it went. */
-export function taskBoardRows(board: Pick<TaskBoard, "tasks" | "states">) {
+/** The prompt a task starts with: stands alone, since its chat never saw the planning conversation. */
+export function taskPrompt(task: { n: number; spec: string }, context?: string): string {
+  return [`Task ${task.n} of a plan: ${task.spec}`, context].filter(Boolean).join("\n\n");
+}
+
+/** A button per task: runnable until started, then a link to its thread showing how it went. Plus "Run all" while 2+ are idle. */
+export function taskBoardRows(board: Pick<TaskBoard, "tasks" | "states" | "busy">) {
   const rows = [];
-  for (let r = 0; r * 5 < board.tasks.length; r++) {
+  const idle = board.busy ? 0 : board.states.filter((s) => s.kind === "idle").length;
+  const tasks = board.tasks.slice(0, idle >= 2 ? 20 : 25);
+  for (let r = 0; r * 5 < tasks.length; r++) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        board.tasks.slice(r * 5, r * 5 + 5).map((t, j) => {
+        tasks.slice(r * 5, r * 5 + 5).map((t, j) => {
           const i = r * 5 + j;
           const state = board.states[i] ?? { kind: "idle" };
           const label = `${t.n} · ${t.mode} · ${t.title}`;
@@ -220,6 +229,13 @@ export function taskBoardRows(board: Pick<TaskBoard, "tasks" | "states">) {
           }
           return b.setURL(state.url).setLabel(`${TASK_ICON[state.kind]} ${label}`.slice(0, 80)).setStyle(ButtonStyle.Link);
         })
+      )
+    );
+  }
+  if (idle >= 2) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("brain:taskall").setLabel(`▶ Run all ${idle}, in order`).setStyle(ButtonStyle.Primary)
       )
     );
   }
@@ -253,7 +269,8 @@ export async function postBrainReply(
     if (last && choices.length && typeof id === "string") pendingChoices.set(id, { brainId, chatKey, choices });
   }
   // A plan's tasks: one button each, which runs it in its own thread (owner only).
-  if (reply.tasks?.length) {
+  // A single task the brain will run right away needs no buttons.
+  if (reply.tasks?.length && !reply.runNow) {
     const board: TaskBoard = { brainId, tasks: reply.tasks, context: reply.taskContext, states: reply.tasks.map(() => ({ kind: "idle" })) };
     const sent = await channel.send({
       allowedMentions: NO_MENTIONS,
@@ -314,6 +331,14 @@ export function dispatchToBrain(
     try {
       const reply = await brain.send(message, ctx);
       await postBrainReply(channel, brain.id, message.chatKey, reply, message.messageId);
+      const task = reply.runNow ? reply.tasks?.[0] : undefined;
+      if (task) {
+        // One job for one mode: switch this chat to it and start, in this same thread.
+        const chat = ctx.chats.bound(message.chatKey, brain.id);
+        if (chat) ctx.chats.setMode(chat.id, task.mode);
+        await channel.send({ allowedMentions: NO_MENTIONS, content: `-# → **${task.mode}** mode · \`/mode off\` to go back to auto` }).catch(() => {});
+        void dispatchToBrain(ctx, brain, channel, { ...message, messageId: undefined, content: taskPrompt(task, reply.taskContext), filePaths: [] });
+      }
       return true;
     } catch (e) {
       console.error(`[brain:${brain.id}] ${errorMessage(e)}`);

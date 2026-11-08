@@ -37,6 +37,7 @@ import {
   getPendingApproval,
   getTaskBoard,
   taskBoardRows,
+  taskPrompt,
   parentChannelId,
   resolveBrainId,
   takeChoices,
@@ -212,6 +213,7 @@ registerButtonHandler("brain", async (interaction, parts, ctx) => {
   if (parts[1] === "approval") return handleApproval(interaction, parts[2] === "yes", ctx);
   if (parts[1] === "pr") return handlePatchPr(interaction, ctx);
   if (parts[1] === "task") return handleTask(interaction, Number(parts[2]), ctx);
+  if (parts[1] === "taskall") return handleTask(interaction, "all", ctx);
   if (parts[1] !== "choice") return;
   const userId = interaction.user.id;
   const owner = isOwner(ctx, userId);
@@ -273,24 +275,22 @@ registerButtonHandler("brain", async (interaction, parts, ctx) => {
 
 type Ctx = Parameters<Parameters<typeof registerButtonHandler>[1]>[2];
 
-/** The prompt a task's thread starts with: stands alone, since that chat has never seen the plan conversation. */
-export function taskPrompt(task: { n: number; spec: string }, context?: string): string {
-  return [`Task ${task.n} of a plan: ${task.spec}`, context].filter(Boolean).join("\n\n");
-}
-
 /**
  * A plan task's button: open a thread off the plan's channel, put a fresh
  * chat there in the task's mode, and send it the task. The button becomes a
  * link to the thread (⏳, then ✅ or ❌). Owner only — it starts real work.
  */
-async function handleTask(interaction: ButtonInteraction, index: number, ctx: Ctx): Promise<void> {
+async function handleTask(interaction: ButtonInteraction, which: number | "all", ctx: Ctx): Promise<void> {
   const ephemeral = (content: string) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
   if (!isOwner(ctx, interaction.user.id)) return void (await ephemeral("Only the owner can start plan tasks~"));
   const board = getTaskBoard(interaction.message.id);
-  const task = board?.tasks[index];
   const brain = board ? getBrain(board.brainId) : undefined;
-  if (!board || !task || !brain) return void (await ephemeral("These tasks expired (Choomfie restarted) — ask for the task list again."));
-  if (board.states[index]?.kind !== "idle") return void (await ephemeral("That task is already running."));
+  if (!board || !brain) return void (await ephemeral("These tasks expired (Choomfie restarted) — ask for the task list again."));
+  if (board.busy) return void (await ephemeral("Run all is already working through these — one at a time."));
+  const indices = which === "all" ? board.states.flatMap((s, i) => (s.kind === "idle" ? [i] : [])) : [which];
+  if (!indices.length || indices.some((i) => board.states[i]?.kind !== "idle" || !board.tasks[i])) {
+    return void (await ephemeral("That task is already running."));
+  }
 
   // Threads can't nest: from inside a thread, the task's thread goes in the parent channel.
   const here = interaction.channel as unknown as { isThread?: () => boolean; parent?: unknown } | null;
@@ -302,32 +302,44 @@ async function handleTask(interaction: ButtonInteraction, index: number, ctx: Ct
     return void (await ephemeral("Plan tasks run in threads, so they need a server text channel — not a DM."));
   }
   await interaction.deferUpdate();
-  let thread: SendableChannel & { id: string; url: string; members?: { add(id: string): Promise<unknown> } };
-  try {
-    thread = (await parent.threads.create({ name: `${task.n} · ${task.mode} · ${task.title}`.slice(0, 100) })) as typeof thread;
-  } catch (e) {
-    await interaction.followUp({ content: `Couldn't open a thread: ${e instanceof Error ? e.message : e}`, flags: MessageFlags.Ephemeral });
-    return;
-  }
-  await thread.members?.add(interaction.user.id).catch(() => {});
-  ctx.config.setChannelBrain(thread.id, brain.id);
-  ctx.chats.setMode(ctx.chats.start(thread.id, brain.id).id, task.mode);
+  const redraw = () => interaction.message.edit({ components: taskBoardRows(board) }).catch(() => {});
 
-  const show = (state: TaskBoard["states"][number]) => {
-    board.states[index] = state;
-    return interaction.message.edit({ components: taskBoardRows(board) }).catch(() => {});
+  /** One task in its own thread; resolves when its answer is posted. */
+  const runOne = async (index: number): Promise<boolean> => {
+    const task = board.tasks[index];
+    let thread: SendableChannel & { id: string; url: string; members?: { add(id: string): Promise<unknown> } };
+    try {
+      thread = (await parent.threads!.create({ name: `${task.n} · ${task.mode} · ${task.title}`.slice(0, 100) })) as typeof thread;
+    } catch (e) {
+      await interaction.followUp({ content: `Couldn't open a thread: ${e instanceof Error ? e.message : e}`, flags: MessageFlags.Ephemeral });
+      return false;
+    }
+    await thread.members?.add(interaction.user.id).catch(() => {});
+    ctx.config.setChannelBrain(thread.id, brain.id);
+    ctx.chats.setMode(ctx.chats.start(thread.id, brain.id).id, task.mode);
+    board.states[index] = { kind: "running", url: thread.url };
+    await redraw();
+    await thread.send({ content: `**Task ${task.n}** · \`${task.mode}\` mode\n${task.spec}`.slice(0, 2000), allowedMentions: { parse: [] } });
+    onMessageReceived(thread.id, thread as never, false);
+    const ok = await dispatchToBrain(ctx, brain, thread, {
+      chatKey: thread.id,
+      content: taskPrompt(task, board.context),
+      meta: { chat_id: thread.id, user: interaction.user.username, user_id: interaction.user.id, role: "owner" },
+      filePaths: [],
+    });
+    board.states[index] = { kind: ok ? "done" : "failed", url: thread.url };
+    await redraw();
+    return ok;
   };
-  await show({ kind: "running", url: thread.url });
-  const prompt = taskPrompt(task, board.context);
-  await thread.send({ content: `**Task ${task.n}** · \`${task.mode}\` mode\n${task.spec}`.slice(0, 2000), allowedMentions: { parse: [] } });
-  onMessageReceived(thread.id, thread as never, false);
-  const ok = await dispatchToBrain(ctx, brain, thread, {
-    chatKey: thread.id,
-    content: prompt,
-    meta: { chat_id: thread.id, user: interaction.user.username, user_id: interaction.user.id, role: "owner" },
-    filePaths: [],
-  });
-  await show({ kind: ok ? "done" : "failed", url: thread.url });
+
+  // In order, one at a time: later tasks build on earlier ones. A failure stops the run.
+  board.busy = which === "all";
+  try {
+    for (const i of indices) if (!(await runOne(i))) break;
+  } finally {
+    board.busy = false;
+    await redraw();
+  }
 }
 
 /**

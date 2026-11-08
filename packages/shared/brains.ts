@@ -46,6 +46,8 @@ export interface BrainReply {
   tasks?: BrainTask[];
   /** Put in front of every task's prompt (where the full plan is, say). */
   taskContext?: string;
+  /** Run `tasks[0]` now, in this same chat, switched to its mode — instead of posting buttons. */
+  runNow?: boolean;
 }
 
 /** One step of a plan, for the mode that should do it. */
@@ -116,6 +118,8 @@ export interface Brain {
   label: string;
   /** Modes a chat with this brain can be put in (`/mode`). */
   modes?: BrainMode[];
+  /** The mode a chat runs in when none is set. */
+  defaultMode?: string;
   send(message: BrainMessage, ctx: PluginContext): Promise<BrainReply>;
   /** Forget the backend conversation for this key, so the next message starts fresh. */
   reset?(chatKey: string): Promise<void>;

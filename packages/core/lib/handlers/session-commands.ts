@@ -45,7 +45,7 @@ const modesOf = (brain: string): BrainMode[] => (brain === CLAUDE_BRAIN ? [] : (
 /** A brain's modes matching what's typed, plus `off`. In memory — well inside 3s. */
 function modeChoices(brain: string, typed: string, withOff: boolean) {
   const t = typed.toLowerCase();
-  return [...modesOf(brain).map((m) => ({ name: `${m.label} — ${m.description}`, value: m.id })), ...(withOff ? [{ name: "off — plain chat", value: MODE_OFF }] : [])]
+  return [...modesOf(brain).map((m) => ({ name: `${m.label} — ${m.description}`, value: m.id })), ...(withOff ? [{ name: `off — back to the default${getBrain(brain)?.defaultMode ? ` (${getBrain(brain)!.defaultMode})` : ""}`, value: MODE_OFF }] : [])]
     .filter((c) => c.value.includes(t) || c.name.toLowerCase().includes(t))
     .slice(0, AUTOCOMPLETE_LIMIT)
     .map((c) => ({ name: c.name.slice(0, 100), value: c.value }));
@@ -220,14 +220,17 @@ registerCommand("mode", {
       );
     }
     const requested = interaction.options.getString("name");
+    const fallback = getBrain(brain)?.defaultMode;
     if (requested === null) {
       const current = ctx.chats.bound(interaction.channelId, brain)?.mode;
       return ephemeral(
         interaction,
         [
-          `This **${brainName(brain)}** chat is ${current ? `in **${current}** mode` : "a plain chat (no mode)"}.`,
+          `This **${brainName(brain)}** chat is ${
+            current ? `in **${current}** mode` : fallback ? `in **${fallback}** mode (the default)` : "a plain chat (no mode)"
+          }.`,
           ...modes.map((m) => `\`${m.id}\` — ${m.description}`),
-          "`/mode <name>` switches; `/mode off` goes back to plain chat. It applies from your next message.",
+          `\`/mode <name>\` switches; \`/mode off\` goes back to ${fallback ? `**${fallback}**` : "plain chat"}. It applies from your next message.`,
         ].join("\n")
       );
     }
@@ -240,7 +243,7 @@ registerCommand("mode", {
     await interaction.reply(
       label
         ? `This **${brainName(brain)}** chat is now in **${label}** mode, from your next message. \`/mode off\` to leave it.`
-        : `This **${brainName(brain)}** chat is back to plain chat.`
+        : `This **${brainName(brain)}** chat is back to ${fallback ? `**${fallback}** mode (the default)` : "plain chat"}.`
     );
   },
 });

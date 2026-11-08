@@ -11,11 +11,14 @@ import {
   getTaskBoard,
   postBrainReply,
   taskBoardRows,
+  taskPrompt,
   takeChoices,
   resolveBrainId,
   type RouteInput,
 } from "../lib/brain-router.ts";
 import { ConfigManager } from "../lib/config.ts";
+import { ChatStore } from "../lib/chats/store.ts";
+import { Database } from "bun:sqlite";
 import { takePatch } from "../lib/patch-pr.ts";
 import { findSetting } from "../lib/settings.ts";
 
@@ -107,6 +110,24 @@ describe("dispatchToBrain", () => {
     });
     await dispatchToBrain({} as never, brain, { send: async (o: { content?: string }) => void sent.push(o.content!) }, msg("x"));
     expect(sent[0]).toContain("Waymond didn't answer: login expired");
+  });
+  test("a single run-now task switches the chat to its mode and is sent next, in the same place", async () => {
+    const chats = new ChatStore(new Database(":memory:"));
+    const chat = chats.current("t1", "waymond", "make a spacer");
+    const seen: string[] = [];
+    const brain = fake("waymond", async (m) => {
+      seen.push(m.content);
+      return seen.length === 1
+        ? { text: "One spacer.", tasks: [{ n: 1, mode: "cad", title: "Spacer", spec: "Spacer — 10 mm" }], taskContext: "ctx", runNow: true }
+        : { text: "Done: spacer.stl" };
+    });
+    const sent: string[] = [];
+    const channel = { send: async (o: { content?: string }) => void sent.push(o.content ?? "") };
+    await dispatchToBrain({ chats } as never, brain, channel, { ...msg("make a spacer"), chatKey: "t1" });
+    for (let i = 0; i < 20 && seen.length < 2; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(chats.get(chat.id)!.mode).toBe("cad");
+    expect(seen[1]).toBe("Task 1 of a plan: Spacer — 10 mm\n\nctx");
+    expect(sent.some((c) => c.includes("**cad** mode"))).toBe(true);
   });
 });
 
@@ -204,11 +225,24 @@ describe("task board", () => {
     expect(board).toMatchObject({ brainId: "waymond", context: "see plan.md" });
     const json = (rows: unknown[]) =>
       rows.flatMap((r) => (r as { toJSON(): { components: { custom_id?: string; url?: string; label: string }[] } }).toJSON().components);
-    expect(json(sent[1].components!).map((c) => c.custom_id)).toEqual(["brain:task:0", "brain:task:1"]);
+    expect(json(sent[1].components!).map((c) => c.custom_id)).toEqual(["brain:task:0", "brain:task:1", "brain:taskall"]);
     board.states[0] = { kind: "running", url: "https://discord.com/channels/g/t" };
     const after = json(taskBoardRows(board));
     expect(after[0]).toMatchObject({ url: "https://discord.com/channels/g/t", label: "⏳ 1 · cad · Mount" });
-    expect(after[1].custom_id).toBe("brain:task:1");
+    expect(after.map((c) => c.custom_id)).toEqual([undefined, "brain:task:1"]); // Run all needs 2+ idle
+    expect(json(taskBoardRows({ ...board, states: [{ kind: "idle" }, { kind: "idle" }], busy: true })).map((c) => c.custom_id)).toEqual([
+      "brain:task:0",
+      "brain:task:1",
+    ]);
+  });
+
+  test("a single task to run now posts no board; the brain switches mode and starts it", async () => {
+    const sent: { content?: string; components?: unknown[] }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: `n${sent.length}` }) };
+    const tasks = [{ n: 1, mode: "cad", title: "Spacer", spec: "Spacer — 10 mm" }];
+    await postBrainReply(channel, "waymond", "c1", { text: "Making a spacer.", tasks, runNow: true });
+    expect(sent).toHaveLength(1);
+    expect(taskPrompt(tasks[0], "plan at x")).toBe("Task 1 of a plan: Spacer — 10 mm\n\nplan at x");
   });
 });
 

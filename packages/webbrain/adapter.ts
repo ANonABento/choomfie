@@ -32,6 +32,8 @@ export interface SiteMode extends BrainMode {
   frame: string;
   /** Replies end with a task list (`parseTaskList` format): post it as buttons that run each task in its own thread. */
   tasks?: boolean;
+  /** A list of exactly one task runs right away, in this same chat, switched to that task's mode. */
+  runSingleTask?: boolean;
 }
 
 export interface TurnContext {
@@ -100,6 +102,8 @@ export interface SiteAdapter {
   loginUrl: string;
   /** Modes a chat can be put in with `/mode`. */
   modes?: SiteMode[];
+  /** The mode a chat runs in when none is set (`/mode off`). */
+  defaultMode?: string;
   /** Default browser engine; config.json `webbrain.<id>.engine` overrides. */
   engine?: EngineName;
   /** Link to a conversation, for messages that point the owner at the site. */
