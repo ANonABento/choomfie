@@ -14,6 +14,7 @@ import type { ConfigManager } from "./config.ts";
 import type { ReminderScheduler } from "./reminders.ts";
 import type { BirthdayScheduler } from "./birthdays.ts";
 import type { McpProxy } from "./mcp-proxy.ts";
+import type { ToolCaller } from "./ipc-types.ts";
 
 // Re-export shared types so existing core code keeps working
 export type { Plugin, ToolResult } from "@choomfie/shared";
@@ -27,7 +28,9 @@ export interface ToolDef {
   };
   handler: (
     args: Record<string, unknown>,
-    ctx: AppContext
+    ctx: AppContext,
+    /** Who called; see `callerIsOwner` for tools that need the owner. */
+    caller?: ToolCaller
   ) => Promise<ToolResult>;
 }
 

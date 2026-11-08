@@ -656,7 +656,7 @@ export const discordTools: ToolDef[] = tools.map((t) =>
     ? t
     : {
         ...t,
-        handler: async (args, ctx) =>
-          isAskChatId(args?.chat_id) ? err(ASK_ONLY_REPLY) : t.handler(args, ctx),
+        handler: async (args, ctx, caller) =>
+          isAskChatId(args?.chat_id) ? err(ASK_ONLY_REPLY) : t.handler(args, ctx, caller),
       }
 );

@@ -6,7 +6,7 @@
  */
 
 import { errorMessage } from "@choomfie/shared";
-import type { IpcToolDef, SupervisorMessage, WorkerMessage } from "./ipc-types.ts";
+import type { IpcToolDef, SupervisorMessage, ToolCaller, WorkerMessage } from "./ipc-types.ts";
 import { waitForPendingToolCalls, type PendingToolCallMap } from "./supervisor-boundary.ts";
 
 const WORKER_PATH = `${import.meta.dir}/../worker.ts`;
@@ -185,7 +185,7 @@ export class WorkerHost {
   }
 
   /** Run a worker tool. Rejects if the worker isn't ready or doesn't answer in time. */
-  call(name: string, args: Record<string, unknown>): Promise<unknown> {
+  call(name: string, args: Record<string, unknown>, caller: ToolCaller = { via: "local" }): Promise<unknown> {
     return new Promise((resolve, reject) => {
       if (!this.ready || !this.child) return reject(new Error("Worker not ready"));
       const id = String(++this.nextId);
@@ -194,7 +194,7 @@ export class WorkerHost {
         reject(new Error(`Tool call timed out: ${name}`));
       }, LONG_TOOL_TIMEOUTS[name] ?? TOOL_CALL_TIMEOUT);
       this.pending.set(id, { resolve, reject, timer });
-      if (!this.send({ type: "tool_call", id, name, args })) {
+      if (!this.send({ type: "tool_call", id, name, args, caller })) {
         clearTimeout(timer);
         this.pending.delete(id);
         reject(new Error("Failed to send tool call to worker"));
@@ -203,7 +203,7 @@ export class WorkerHost {
   }
 
   /** A tool call as an MCP result: the restart tool, or the worker's tools with errors as text. */
-  async callTool(name: string, args: Record<string, unknown>): Promise<ToolResult> {
+  async callTool(name: string, args: Record<string, unknown>, caller: ToolCaller = { via: "local" }): Promise<ToolResult> {
     if (name === RESTART_TOOL.name) {
       const reason = (args.reason as string) || "manual restart";
       const { timedOut } = await this.restart(reason);
@@ -220,7 +220,7 @@ export class WorkerHost {
     }
     if (!this.ready) return { content: [{ type: "text", text: "Worker is starting up, please wait..." }], isError: true };
     try {
-      return (await this.call(name, args)) as ToolResult;
+      return (await this.call(name, args, caller)) as ToolResult;
     } catch (e) {
       return { content: [{ type: "text", text: `Tool error: ${errorMessage(e)}` }], isError: true };
     }

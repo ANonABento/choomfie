@@ -152,7 +152,7 @@ export function createMcpServer(ctx: AppContext): Server {
     const handler = toolMap.get(req.params.name);
     if (!handler) return err(`Unknown tool: ${req.params.name}`);
 
-    return handler(req.params.arguments ?? {}, ctx);
+    return handler(req.params.arguments ?? {}, ctx, { via: "local" });
   });
 
   // Assign to ctx before registering permission relay (needs ctx.mcp)

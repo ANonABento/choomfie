@@ -519,8 +519,26 @@ export function installBrainPoster(ctx: AppContext): void {
   });
 }
 
-/** One in-flight request per backend conversation; later messages queue behind it. */
-const queues = new Map<string, Promise<unknown>>();
+/** One in-flight request per backend conversation; later ones queue behind it. */
+const queues = new Map<string, Promise<void>>();
+
+/**
+ * Run `job` when the conversation `chatKey` is free: Discord messages and
+ * askBrain share the queue, so nothing talks over a reply in progress.
+ */
+export function inConversation<T>(chatKey: string, job: () => Promise<T>): Promise<T> {
+  const run = (queues.get(chatKey) ?? Promise.resolve()).then(job);
+  const tail: Promise<void> = run
+    .then(
+      () => {},
+      () => {}
+    )
+    .then(() => {
+      if (queues.get(chatKey) === tail) queues.delete(chatKey);
+    });
+  queues.set(chatKey, tail);
+  return run;
+}
 
 export function dispatchToBrain(
   ctx: AppContext,
@@ -530,8 +548,7 @@ export function dispatchToBrain(
   message: BrainMessage & { messageId?: string },
   opts: PostOptions = {}
 ): Promise<BrainReply | null> {
-  const prev = queues.get(message.chatKey) ?? Promise.resolve();
-  const run = prev.then(async () => {
+  return inConversation(message.chatKey, async () => {
     try {
       const status = message.meta?.role === "owner" ? planStatusNote(message.chatKey) : undefined;
       const reply = await brain.send(status ? { ...message, content: `${message.content}\n\n${status}` } : message, ctx);
@@ -580,9 +597,4 @@ export function dispatchToBrain(
       onReplySent(message.chatKey);
     }
   });
-  const tail = run.finally(() => {
-    if (queues.get(message.chatKey) === tail) queues.delete(message.chatKey);
-  });
-  queues.set(message.chatKey, tail);
-  return run;
 }

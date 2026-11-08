@@ -190,7 +190,33 @@ export function setBrainPoster(fn: BrainPoster): void {
   poster = fn;
 }
 
+/**
+ * Someone waiting for a conversation's late result (askBrain after a reply
+ * that went to the background). It takes the result instead of the chat.
+ */
+const lateWaiters = new Map<string, (reply: BrainReply) => void>();
+const lateKey = (brainId: string, chatKey: string) => `${brainId}\u0000${chatKey}`;
+
+/**
+ * The next late result for this conversation, or null after `ms`. Results
+ * that land after that go to the chat as usual.
+ */
+export function awaitLateReply(brainId: string, chatKey: string, ms: number): Promise<BrainReply | null> {
+  const key = lateKey(brainId, chatKey);
+  return new Promise((resolve) => {
+    const take = (reply: BrainReply | null) => {
+      clearTimeout(timer);
+      if (lateWaiters.get(key) === take) lateWaiters.delete(key);
+      resolve(reply);
+    };
+    const timer = setTimeout(() => take(null), ms);
+    lateWaiters.set(key, take);
+  });
+}
+
 export async function pushBrainReply(brainId: string, chatKey: string, reply: BrainReply): Promise<void> {
+  const waiter = lateWaiters.get(lateKey(brainId, chatKey));
+  if (waiter) return waiter(reply);
   if (!poster) throw new Error("brain poster not installed");
   await poster(brainId, chatKey, reply);
 }

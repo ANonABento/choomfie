@@ -7,14 +7,14 @@ DM — side by side.
 ```
 daemon.ts → daemon/hub.ts (always running)
   ├→ WorkerHost → worker.ts (Discord, tools)            lib/worker-host.ts
-  ├→ loopback MCP endpoint (every tool, token in RAM)   startLocalMcp in lib/remote-mcp.ts
+  ├→ loopback MCP endpoint (every tool, a token per session) startLocalMcp in lib/remote-mcp.ts
   └→ SessionPool → ChatSession × N (Agent SDK)          daemon/pool.ts, daemon/chat-session.ts
           mcpServers: { choomfie: http → endpoint }
 ```
 
 - **daemon.ts** is a thin CLI entry point (`--status`, `--stop`, `--verbose`); the runtime lives in `packages/core/daemon/`
 - **The daemon runs the worker** with the same `WorkerHost` the foreground supervisor uses, so a session compacting never drops Discord and a worker restart never touches a session
-- **Sessions load no plugin** — its supervisor would log in to Discord a second time. They reach every tool at the loopback endpoint, whose server instructions are the worker's (persona, security rules). Any supervisor started while the daemon runs (a project `.mcp.json`, a terminal `choomfie`) refuses to start
+- **Sessions load no plugin** — its supervisor would log in to Discord a second time. They reach every tool at the loopback endpoint, whose server instructions are the worker's (persona, security rules). Each session gets its own headers from the hub: its location and a token bound to it (an HMAC of the daemon's in-memory secret), so every tool call is known to come from that chat (`ToolCaller`). Any supervisor started while the daemon runs (a project `.mcp.json`, a terminal `choomfie`) refuses to start
 - **Inbound messages** arrive through `meta/incoming`, not the `claude/channel` MCP capability — see **Inbound Message Delivery**. Everything outbound (tool calls, `reply`) goes through MCP as normal
 - Sessions always run on Anthropic. Authentication/billing errors stop a session's retry loop immediately; rate limits and overload retry with backoff (2s → 60s)
 - **`remoteMcp`** (if enabled) is started by the daemon, since there is no supervisor

@@ -91,7 +91,7 @@ process.on("message", async (msg: SupervisorMessage) => {
       };
     } else {
       try {
-        result = await handler(msg.args, ctx);
+        result = await handler(msg.args, ctx, msg.caller ?? { via: "local" });
       } catch (e) {
         result = {
           content: [{ type: "text", text: `Tool error: ${errorMessage(e)}` }],
