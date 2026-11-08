@@ -12,6 +12,9 @@
 
 ### Fixed
 
+- **A plan task written as a heading plus a bulleted list went out as just the heading.** The task-list parser read one line per task, so Waymond received "…opened as a PR against the default branch:" with none of the requirements under it, and guessed. Indented sub-lines, and bullets under a line ending in ":", now stay part of their task's spec.
+- **Opening a draft PR from a patch is all or nothing.** A new repo is created only after the patch has applied and committed locally (a failed apply used to leave an empty private repo on GitHub), and a pushed branch is deleted again if `gh pr create` fails.
+
 - **`/usage` reported a rate-limit window that had already reset as if it were live.** Found on the running daemon: it rendered `Weekly — 97% · resets 7 hours ago` in red, from a snapshot 11 hours old, for a window that had rolled over overnight.
 
   The cause is structural, not a typo: the daemon only learns its utilization from a `rate_limit_event`, which the SDK sends on a turn. An idle session takes no turns, so the numbers simply stop moving. A window whose reset has passed now renders as **reset** with an empty bar, the stale snapshot carries a "last updated" note explaining why the figures aren't moving, and a `rejected` status older than 30 minutes no longer claims you are rate limited right now. `isRateLimitStale` / `viewRateLimitWindows` in `lib/daemon-status.ts` are the shared source of truth, so the embed and the alerter cannot disagree about it.

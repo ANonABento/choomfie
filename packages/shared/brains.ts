@@ -86,7 +86,7 @@ export interface BrainTask {
   mode: string;
   /** Short name, for the button. */
   title: string;
-  /** The whole task line: what to make and when it's done. Sent to a fresh chat, so it must stand alone. */
+  /** The whole task, sub-lines included: what to make and when it's done. Sent to a fresh chat, so it must stand alone. */
   spec: string;
   /** `owner/name` the task works in, when its line names one ("— in owner/name: …"). */
   repo?: string;
@@ -107,22 +107,32 @@ export function taskRepo(spec: string): string | undefined {
 
 /**
  * The task list at the end of a plan: a line saying "Tasks", then one task
- * per line as `1. [cad] Motor mount — 40 x 30 plate … Done when: …`. Only
- * modes in `modes` count; anything else is left as text.
+ * per line as `1. [cad] Motor mount — 40 x 30 plate … Done when: …`, with
+ * any indented sub-lines under it. Only modes in `modes` count; anything else
+ * is left as text.
  */
 export function parseTaskList(text: string, modes: string[]): BrainTask[] {
   const lines = text.split("\n");
   const start = lines.findIndex((l) => /^[#*\s]*tasks\b[^a-z]*$/i.test(l.trim()));
   if (start === -1) return [];
   const tasks: BrainTask[] = [];
+  let current: BrainTask | null | undefined; // null: the last task line was a mode we skip
   for (const raw of lines.slice(start + 1)) {
     const line = raw.replace(/\*\*/g, "").trim();
     if (!line) continue;
     const m = /^(\d+)[.)]\s*\[([a-z0-9]+)\]\s*(.+)$/i.exec(line);
     if (!m) {
+      // A task's own sub-lines (indented, or bullets after a line ending in ":")
+      // are part of its spec — dropping them sent a task out as just its heading.
+      const sub = /^\s/.test(raw) || (/^[-*•]\s/.test(line) && (!current || current.spec.endsWith(":") || current.spec.includes("\n")));
+      if (sub && current !== undefined) {
+        if (current) current.spec += "\n" + raw.replace(/\*\*/g, "").trimEnd();
+        continue; // a skipped task's sub-lines are skipped with it
+      }
       if (tasks.length) break; // the list ended
       continue;
     }
+    current = null;
     const mode = m[2].toLowerCase();
     if (!modes.includes(mode)) continue;
     const spec = m[3].trim();
@@ -132,7 +142,8 @@ export function parseTaskList(text: string, modes: string[]): BrainTask[] {
     let title = (named ?? spec).split(/[(,;]/)[0].trim();
     if (title.length > 40) title = title.slice(0, 40).replace(/\s+\S*$/, "") + "…";
     const repo = taskRepo(spec);
-    tasks.push({ n: Number(m[1]), mode, title, spec, ...(repo ? { repo } : {}) });
+    current = { n: Number(m[1]), mode, title, spec, ...(repo ? { repo } : {}) };
+    tasks.push(current);
   }
   return tasks.slice(0, 25);
 }

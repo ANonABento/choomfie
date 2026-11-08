@@ -70,4 +70,29 @@ describe("openDraftPr", () => {
     expect(calls.at(-1)).toEqual(["git", "-c", "core.hooksPath=/dev/null", "push", "-q", "-u", "origin", "main"]);
     expect(calls.some((c) => c[1] === "pr")).toBe(false);
   });
+
+  test("a new repo isn't created when the patch doesn't apply", async () => {
+    const calls: string[][] = [];
+    const run: Runner = async (cmd) => {
+      calls.push(cmd);
+      if (cmd.join(" ").startsWith("gh repo view")) throw new Error("not found");
+      if (cmd[1] === "apply") throw new Error("patch does not apply");
+      return "";
+    };
+    await expect(openDraftPr(offer, run)).rejects.toThrow(/doesn't apply/);
+    expect(calls.some((c) => c[2] === "create")).toBe(false);
+  });
+
+  test("the pushed branch is deleted again when the PR can't be opened", async () => {
+    const calls: string[][] = [];
+    const run: Runner = async (cmd) => {
+      calls.push(cmd);
+      if (cmd[1] === "pr") throw new Error("gh pr create failed");
+      return "";
+    };
+    await expect(openDraftPr(offer, run)).rejects.toThrow("gh pr create failed");
+    const del = calls.at(-1)!;
+    expect(del.slice(3, 7)).toEqual(["push", "-q", "origin", "--delete"]);
+    expect(del[7]).toStartWith("waymond/fix-it-");
+  });
 });

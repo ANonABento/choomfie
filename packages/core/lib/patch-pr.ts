@@ -94,7 +94,9 @@ export interface Opened {
 /**
  * Apply the patch on a new branch and open a draft PR. A repo that doesn't
  * exist yet (a plan's new project) is created private, with the patch as its
- * first commit on main — there is nothing to open a PR against.
+ * first commit on main — there is nothing to open a PR against. All or
+ * nothing: the repo is created only once the patch has committed locally, and
+ * a pushed branch is deleted again if the PR can't be opened.
  */
 export async function openDraftPr(offer: PatchOffer, run: Runner = runCommand): Promise<Opened> {
   const dir = mkdtempSync(join(tmpdir(), "choomfie-pr-"));
@@ -117,10 +119,11 @@ export async function openDraftPr(offer: PatchOffer, run: Runner = runCommand): 
       () => false
     );
     if (!exists) {
-      const url = await run(["gh", "repo", "create", offer.repo, "--private"]);
+      // Commit locally first: a patch that doesn't apply must not leave an empty repo on GitHub.
       await run(["git", "init", "-q", "-b", "main", repoDir]);
       await apply();
       await run(["git", ...noHooks, "commit", "-q", "-m", offer.title, "-m", "Written by Waymond, opened from Discord."], repoDir);
+      const url = await run(["gh", "repo", "create", offer.repo, "--private"]);
       await run(["git", "remote", "add", "origin", `https://github.com/${offer.repo}.git`], repoDir);
       await run(["git", ...noHooks, "push", "-q", "-u", "origin", "main"], repoDir);
       return { url: url.trim() || `https://github.com/${offer.repo}`, kind: "repo" };
@@ -132,11 +135,17 @@ export async function openDraftPr(offer: PatchOffer, run: Runner = runCommand): 
     await run(["git", ...noHooks, "commit", "-q", "-m", offer.title, "-m", "Patch written by Waymond, opened from Discord."], repoDir);
     await run(["git", ...noHooks, "push", "-q", "-u", "origin", branch], repoDir);
     const body = `${offer.body.slice(0, 60_000)}\n\n---\nWritten by Waymond in its sandbox and opened from Discord as a draft. Review before merging.`;
-    const url = await run(
-      ["gh", "pr", "create", "--repo", offer.repo, "--head", branch, "--draft", "--title", offer.title, "--body", body],
-      repoDir
-    );
-    return { url, kind: "pr" };
+    try {
+      const url = await run(
+        ["gh", "pr", "create", "--repo", offer.repo, "--head", branch, "--draft", "--title", offer.title, "--body", body],
+        repoDir
+      );
+      return { url, kind: "pr" };
+    } catch (e) {
+      // All or nothing: don't leave a pushed branch with no PR behind.
+      await run(["git", ...noHooks, "push", "-q", "origin", "--delete", branch], repoDir).catch(() => {});
+      throw e;
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

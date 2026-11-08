@@ -27,6 +27,34 @@ describe("parseTaskList", () => {
     expect(parseTaskList("Tasks\n" + Array.from({ length: 30 }, (_, i) => `${i + 1}. [code] t${i} — s`).join("\n"), modes)).toHaveLength(25);
   });
 
+  test("a task's sub-lines stay in its spec (a task once went out as just its heading)", () => {
+    const text = [
+      "Tasks",
+      "1. [code] Atomic multi-file commits — in ANonABento/choomfie, on a new branch `fix/atomic-commit`:",
+      "   - **Find the commit step.** Replace it with the Git Data API:",
+      "     - Create one commit whose parent is the head.",
+      "   - **Tests.** Mock the GitHub API.",
+      "2. [paint] Skipped — x:",
+      "   - not part of task 3",
+      "3. [cad] Mount — plate:",
+      "- 40 x 30",
+      "",
+      "Shall I start?",
+    ].join("\n");
+    const t = parseTaskList(text, modes);
+    expect(t.map((x) => x.n)).toEqual([1, 3]);
+    expect(t[0].spec).toBe(
+      "Atomic multi-file commits — in ANonABento/choomfie, on a new branch `fix/atomic-commit`:\n" +
+        "   - Find the commit step. Replace it with the Git Data API:\n" +
+        "     - Create one commit whose parent is the head.\n" +
+        "   - Tests. Mock the GitHub API."
+    );
+    expect(t[0]).toMatchObject({ title: "Atomic multi-file commits", repo: "ANonABento/choomfie" });
+    expect(t[1].spec).toBe("Mount — plate:\n- 40 x 30");
+    // A bullet after a line that doesn't introduce a list is not the task's.
+    expect(parseTaskList("Tasks\n1. [cad] a — b\n- Risk: c", modes)[0].spec).toBe("a — b");
+  });
+
   test("a task line that names its repo carries it", () => {
     const t = parseTaskList(
       "Tasks\n1. [code] Fast mode — in ANonABento/rs3m-twin: `model.build(\"fast\")`. Done when: pytest passes\n2. [code] a/b — Scaffold: x\n3. [code] Docs — in the README: y",
