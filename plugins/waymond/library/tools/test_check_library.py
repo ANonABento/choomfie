@@ -60,3 +60,14 @@ def test_build_zip(tmp_path):
     out = build_zip.build(make_lib(tmp_path), tmp_path / "library.zip")
     names = zipfile.ZipFile(out).namelist()
     assert "INDEX.md" in names and "lessons/answer.md" in names
+
+
+def test_every_core_rule_has_cited_reason_in_ref():
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    ref = (root / "ref" / "one-shot.md").read_text()
+    for name in ("shared.md", "answer.md"):
+        for rid in re.findall(r"^- \[([A-Z]\d+)\]", (root / "core" / name).read_text(), re.M):
+            m = re.search(rf"^- {rid}: .*\[P\d+\]", ref, re.M)
+            assert m, f"{rid} lacks cited reason"
