@@ -30,6 +30,7 @@ import {
 import { downloadAttachments, forwardToClaude } from "./inbound.ts";
 import { decideRoute, dispatchToBrain, installBrainPoster, parentChannelId } from "./brain-router.ts";
 import { isOwnThread, openThread, wantsThread } from "./chats/auto-thread.ts";
+import { replyExcerpt, replyPrompt } from "./ask-relay.ts";
 import {
   dispatchPluginMessage,
   initializePlugins,
@@ -217,18 +218,16 @@ export function createDiscordClient(ctx: AppContext): Client {
     const ownThread = isOwnThread(message.channel as never, botId);
     // An @mention in a text channel moves the conversation into a new thread.
     const threadIt = wantsThread(message, botId, ctx.config.getAutoThread(message.channelId));
-    let replyToUserId: string | null = null;
+    // The message this one replies to (a forward points at another channel, so skip it).
+    const ref = message.reference;
+    const repliedTo =
+      ref?.messageId && ref.channelId === message.channelId
+        ? await message.channel.messages.fetch(ref.messageId).catch(() => null)
+        : null;
+    const replyToUserId = repliedTo?.author.id ?? null;
+    const isReplyToBot = replyToUserId === botId;
     if (!isDM && !ownThread) {
       const isMentioned = message.mentions.has(discord.user!.id);
-      // Resolve who this message is replying to (if anyone)
-      let isReplyToBot = false;
-      if (message.reference?.messageId) {
-        try {
-          const refMsg = await message.channel.messages.fetch(message.reference.messageId);
-          replyToUserId = refMsg.author.id;
-          isReplyToBot = refMsg.author.id === discord.user!.id;
-        } catch {}
-      }
       const convoTimeout = ctx.config.getConvoTimeoutMs();
       const channelActive = isChannelActive(
         ctx.activeChannels,
@@ -339,8 +338,10 @@ export function createDiscordClient(ctx: AppContext): Client {
       .replace(new RegExp(`<@!?${botId}>`, "g"), "")
       .trim();
 
-    const content =
-      cleanContent || "(empty message — user may have just mentioned you)";
+    const typed = cleanContent || "(empty message — user may have just mentioned you)";
+    // Replying to one of the bot's messages works like the 💬 Reply button:
+    // the answer being replied to rides along, so "this part" makes sense.
+    const content = isReplyToBot && repliedTo ? replyPrompt(replyExcerpt(repliedTo.content), typed) : typed;
 
     if (route.kind === "brain") {
       void dispatchToBrain(ctx, route.brain, where as never, {

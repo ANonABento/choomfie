@@ -11,7 +11,8 @@ import {
   rememberBrainRelay,
 } from "../lib/ask-relay.ts";
 import { postBrainReply } from "../lib/brain-router.ts";
-import { menuPrompt, replyExcerpt, replyPrompt } from "../lib/handlers/ask-command.ts";
+import { menuPrompt } from "../lib/handlers/ask-command.ts";
+import { replyExcerpt, replyPrompt } from "../lib/ask-relay.ts";
 import { NO_ANSWER, REPLY_BUTTON_ID, RESTARTED, questionHeader, settleAllRelays, settleAskRelays } from "../lib/ask-relay.ts";
 import { MODAL_MAX_FILES, askModal } from "../lib/handlers/ask-command.ts";
 import { jest } from "bun:test";

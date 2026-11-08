@@ -48,6 +48,8 @@ import {
   openAskRelay,
   questionHeader,
   rememberBrainRelay,
+  replyExcerpt,
+  replyPrompt,
 } from "../ask-relay.ts";
 import { registerButtonHandler, registerCommand, registerMessageMenu, registerModalHandler } from "../register.ts";
 import type { AppContext } from "../types.ts";
@@ -140,24 +142,6 @@ export function menuPrompt(author: string, text: string, attachmentCount: number
   const body = text.trim() || (attachmentCount ? "(attachments only)" : "(empty message)");
   const ask = instruction.trim();
   return `${ask ? `${ask}\n\n` : ""}${author} said:\n${body}`;
-}
-
-/**
- * The answer being replied to, minus our own question header, cut to a size
- * worth resending. It rides along so a follow-up makes sense even if the
- * Claude session cycled, or the reply is to an older answer.
- */
-export function replyExcerpt(answer: string, limit = 500): string {
-  const body = answer
-    .split("\n")
-    .filter((l) => !/^> \*\*[^*]+:\*\* /.test(l))
-    .join("\n")
-    .trim();
-  return body.length > limit ? `${body.slice(0, limit - 1)}…` : body;
-}
-
-export function replyPrompt(excerpt: string, text: string): string {
-  return excerpt ? `[Replying to your earlier answer: "${excerpt}"]\n${text.trim()}` : text.trim();
 }
 
 /** Discord's cap on files in one modal upload field. */

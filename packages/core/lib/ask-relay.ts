@@ -64,6 +64,26 @@ export function replyRow() {
   );
 }
 
+/**
+ * The answer being replied to, minus our own question header, cut to a size
+ * worth resending. It rides along so a follow-up makes sense even if the
+ * Claude session cycled, or the reply is to an older answer. Used by the 💬
+ * Reply button and by a plain Discord reply to one of the bot's messages, so
+ * both ways of replying hand the brain the same prompt.
+ */
+export function replyExcerpt(answer: string, limit = 500): string {
+  const body = answer
+    .split("\n")
+    .filter((l) => !/^> \*\*[^*]+:\*\* /.test(l))
+    .join("\n")
+    .trim();
+  return body.length > limit ? `${body.slice(0, limit - 1)}…` : body;
+}
+
+export function replyPrompt(excerpt: string, text: string): string {
+  return excerpt ? `[Replying to your earlier answer: "${excerpt}"]\n${text.trim()}` : text.trim();
+}
+
 const DISCORD_LIMIT = 2000;
 
 export const NO_ANSWER = "⌛ No answer this time — try again.";
