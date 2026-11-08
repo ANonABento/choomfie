@@ -65,19 +65,18 @@ case "${1:-}" in
     fi
     git config user.name swe; git config user.email swe@localhost
     git commit -q --allow-empty -m base >/dev/null 2>&1 || true
-    # Earlier work, in order: patch files, or folders of them (plan tasks: plans/<name>/patches/).
-    applied=0
+    # Work in progress from an earlier run (wip.patch), or folders of patches, in order.
+    # Left uncommitted: it's this task's own work, so \`diff\` must include it.
+    # (A plan's earlier tasks come in the bundle's history instead.)
     for arg in ${base_args[@]+"${base_args[@]}"}; do
       if [ -d "$arg" ]; then files=$(ls "$arg"/*.patch 2>/dev/null | sort -V); else files="$arg"; fi
       [ -n "$files" ] || say "WARNING: no .patch files in $arg"
       for f in $files; do
         [ -e "$f" ] || { say "WARNING: $f not found — earlier work NOT applied. Pass the path as run_python sees it (ls it first)."; continue; }
         [ -s "$f" ] || continue
-        if git apply "$f"; then say "applied $f"; applied=1; else say "WARNING: $f did not apply"; fi
+        if git apply "$f"; then say "restored $f (part of your diff)"; else say "WARNING: $f did not apply"; fi
       done
     done
-    # Earlier work is the base, so \`diff\` shows only this run's change.
-    [ $applied = 1 ] && git add -A && git commit -q -m "earlier work"
     if [ -f platformio.ini ]; then pip install -q platformio 2>&1 | tail -1; fi
     if [ -f package.json ]; then
       if [ -f bun.lock ] || [ -f bun.lockb ]; then
