@@ -18,7 +18,7 @@ import {
   workspaceLinks,
 } from "../../../plugins/waymond/api.ts";
 import { withFiles } from "../../../plugins/waymond/adapter.ts";
-import { planContext, stripNarration, TOOLS_REF, toolUrl, WAYMOND_MODES } from "../../../plugins/waymond/modes.ts";
+import { continueAfterToolCap, planContext, stripNarration, TOOLS_REF, toolUrl, WAYMOND_MODES } from "../../../plugins/waymond/modes.ts";
 import type { Page } from "@choomfie/webbrain";
 import { framePrompt, originalName, toApproval } from "../../../plugins/waymond/index.ts";
 
@@ -294,6 +294,12 @@ describe("modes", () => {
       expect(m.frame.length).toBeLessThan(2500); // rides on every message
     }
     expect(WAYMOND_MODES.find((m) => m.id === "code")!.frame).toContain("repo: <owner>/<name>");
+  });
+
+  test("a turn Ambition cut off at its tool limit is continued (observed 2026-11-08)", () => {
+    const cut = "Patches not applied by setup; apply manually.Read the code.\n\n_(Stopping after several tool calls - please re-ask if you want to continue.)_";
+    expect(continueAfterToolCap(cut)).toContain("continue");
+    expect(continueAfterToolCap("Added contact mode. All tests pass.")).toBeNull();
   });
 
   test("stripNarration drops notes glued onto the answer, and leaves normal text alone", () => {

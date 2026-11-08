@@ -81,6 +81,9 @@ export function modePrompt(adapter: Pick<SiteAdapter, "modes">, mode: string | n
   return m ? { text: `${m.frame.trim()}\n\n${framed}`, mode: m.id } : { text: framed };
 }
 
+/** Times one message carries on after the site cuts an answer short. */
+export const MAX_CONTINUES = 3;
+
 /** Headed for debugging: `CHOOMFIE_<ID>_HEADED=1`. */
 const headedFor = (id: string) => process.env[`CHOOMFIE_${id.toUpperCase()}_HEADED`] === "1";
 
@@ -209,23 +212,40 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
             chat.mode ?? adapter.defaultMode ?? null,
             (adapter.framePrompt ?? framePrompt)(message.content, message.meta)
           );
-          const result = await onTab(message.chatKey, (page) => {
-            started = Date.now();
-            active.set(message.chatKey, turn);
-            const tctx: TurnContext = {
-              ref: turn.ref,
-              started(ref) {
-                turn.ref = ref;
-                chats.setBackendRef(chat.id, ref);
-              },
-              stopRequested: () => turn.stop,
-              progress,
-              notice,
-              human,
-              timeoutMs,
-            };
-            return adapter.turn(page, { text, files, mode }, tctx);
-          });
+          const runTurn = (prompt: string, attach: string[]) =>
+            onTab(message.chatKey, (page) => {
+              started ||= Date.now();
+              active.set(message.chatKey, turn);
+              const tctx: TurnContext = {
+                ref: turn.ref,
+                started(ref) {
+                  turn.ref = ref;
+                  chats.setBackendRef(chat.id, ref);
+                },
+                stopRequested: () => turn.stop,
+                progress,
+                notice,
+                human,
+                timeoutMs,
+              };
+              return adapter.turn(page, { text: prompt, files: attach, mode }, tctx);
+            });
+          let result = await runTurn(text, files);
+          // The site cut the answer short (a tool-call cap): carry on, keeping files from every part.
+          for (let i = 0; i < MAX_CONTINUES && !result.stopped && !turn.stop && !result.approvals?.length; i++) {
+            const more = adapter.continueAfter?.(result.text);
+            if (!more) break;
+            turn.ref = result.ref;
+            chats.setBackendRef(chat.id, result.ref);
+            lateWatch.delivered(message.chatKey, result.messageIds ?? []);
+            notice(`${adapter.label} hit its tool limit for one turn — continuing (${i + 1}/${MAX_CONTINUES})`);
+            const earlier = result.files ?? [];
+            const { text: next } = modePrompt(adapter, mode ?? null, more);
+            result = await runTurn(next, []);
+            const names = new Set((result.files ?? []).map((f) => f.name));
+            const kept = earlier.filter((f) => !names.has(f.name));
+            if (kept.length) result = { ...result, files: [...kept, ...(result.files ?? [])] };
+          }
           chats.setBackendRef(chat.id, result.ref);
           lateWatch.delivered(message.chatKey, result.messageIds ?? []);
           if (result.background && result.lastMessageId) lateWatch.start(message.chatKey, result.ref, result.lastMessageId);

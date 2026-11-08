@@ -42,7 +42,6 @@ import {
   resolveBrainId,
   takeChoices,
   type SendableChannel,
-  type TaskBoard,
 } from "../brain-router.ts";
 import { isAllowed, isOwner } from "../access.ts";
 import { onMessageReceived, onReplySent } from "../typing.ts";

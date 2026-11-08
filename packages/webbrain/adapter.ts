@@ -110,6 +110,12 @@ export interface SiteAdapter {
   chatUrl(ref?: string): string;
 
   turn(page: Page, input: TurnInput, ctx: TurnContext): Promise<TurnResult>;
+  /**
+   * The answer stopped short on the site's side (a per-turn tool-call cap):
+   * the message to send so it carries on, or null when it finished. The kit
+   * sends it in the same conversation, a few times at most.
+   */
+  continueAfter?(answer: string): string | null;
 
   /** Interrupt the turn running in `ref`. Called on the same tab while `turn()` is in flight. */
   stop?(page: Page, ref: string): Promise<boolean>;

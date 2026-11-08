@@ -139,6 +139,41 @@ describe("defineWebBrain", () => {
     }
   });
 
+  test("an answer the site cut short carries on in the same conversation, keeping every part's files", async () => {
+    const seen: { text: string; ref?: string }[] = [];
+    const { brain, destroy } = await setup(
+      async (input, t) => {
+        seen.push({ text: input.text, ref: t.ref });
+        if (seen.length === 1) return { text: "half done (cut)", ref: "conv-9", files: [{ name: "a.png", data: Buffer.from("a") }] };
+        if (seen.length === 2) return { text: "more (cut)", ref: "conv-9" };
+        return { text: "all done", ref: "conv-9", files: [{ name: "b.patch", data: Buffer.from("b") }] };
+      },
+      { continueAfter: (a) => (a.endsWith("(cut)") ? "continue" : null) }
+    );
+    try {
+      const r = await brain.send(msg("c", "build it"), {} as never);
+      expect(r.text).toBe("all done");
+      expect(r.files?.map((f) => f.name)).toEqual(["a.png", "b.patch"]);
+      expect(seen.map((s) => s.text)).toEqual(["build it", "continue", "continue"]);
+      expect(seen.map((s) => s.ref)).toEqual([undefined, "conv-9", "conv-9"]);
+    } finally {
+      await destroy();
+    }
+  });
+
+  test("it carries on a few times at most", async () => {
+    let n = 0;
+    const { brain, destroy } = await setup(
+      async () => ({ text: `cut ${++n}`, ref: "r" }),
+      { continueAfter: () => "continue" }
+    );
+    try {
+      expect((await brain.send(msg("d"), {} as never)).text).toBe("cut 4");
+    } finally {
+      await destroy();
+    }
+  });
+
   test("a logged-out site says how to log in", async () => {
     const { brain, destroy } = await setup(async () => {
       throw new LoginRequiredError({ id: "fakesite", label: "FakeSite" });

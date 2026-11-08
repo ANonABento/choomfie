@@ -22,7 +22,7 @@ import type { SiteMode } from "@choomfie/webbrain";
  * the repo is public). Pinned, so a chat always runs scripts that match these
  * frames; bump it when tools/ changes.
  */
-export const TOOLS_REF = "96b7944e9f5443db591551f7ebf56f8b8ae60e65";
+export const TOOLS_REF = "ab2e4d4f85f2043ff5e6554adc023cf18a93a7a6";
 export const toolUrl = (file: string) =>
   `https://raw.githubusercontent.com/ANonABento/choomfie/${TOOLS_REF}/plugins/waymond/tools/${file}`;
 
@@ -149,6 +149,17 @@ export function stripNarration(text: string): string {
   // not "**~360 mA.** TowerPro", where the period ends a bold phrase.
   for (const m of head.matchAll(/[.!?](?=[A-Z`#]|\*\*[A-Z])/g)) cut = m.index! + 1;
   return cut === -1 ? text : text.slice(cut).trimStart();
+}
+
+/**
+ * Ambition ends a turn that used too many tools with "_(Stopping after several
+ * tool calls - please re-ask if you want to continue.)_". In a mode that's a
+ * task cut off mid-way, so carry on rather than hand the owner a stub.
+ */
+export function continueAfterToolCap(answer: string): string | null {
+  return /stopping after (several|\d+) tool calls/i.test(answer.slice(-400))
+    ? "continue — pick up exactly where you stopped (your workspace has what you saved), finish the task, and reply in the format above."
+    : null;
 }
 
 /**
