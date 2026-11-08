@@ -218,8 +218,12 @@ export function startLocalMcp(
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch: (req) =>
-      handleMcpRequest(req, token, () => buildServer(null, deps.instructions() || "Choomfie is starting up...", deps)),
+    fetch: (req, server) => {
+      // Responses are JSON, sent when the tool finishes: a long tool (ask_brain)
+      // is silent for minutes, and Bun would close it after 10 s idle.
+      server.timeout(req, 0);
+      return handleMcpRequest(req, token, () => buildServer(null, deps.instructions() || "Choomfie is starting up...", deps));
+    },
   });
   return { url: `http://127.0.0.1:${server.port}/mcp`, token, stop: () => server.stop(true) };
 }

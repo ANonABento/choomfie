@@ -12,6 +12,8 @@ import { waitForPendingToolCalls, type PendingToolCallMap } from "./supervisor-b
 const WORKER_PATH = `${import.meta.dir}/../worker.ts`;
 const WORKER_READY_TIMEOUT = 30_000;
 const TOOL_CALL_TIMEOUT = 120_000;
+/** Tools that wait on something slow by design: ask_brain covers a web brain's longest turn (45 min). */
+const LONG_TOOL_TIMEOUTS: Record<string, number> = { ask_brain: 50 * 60_000 };
 const RESTART_PENDING_DRAIN_TIMEOUT = 5_000;
 const MAX_CRASHES = 5;
 const CRASH_WINDOW_MS = 60_000;
@@ -190,7 +192,7 @@ export class WorkerHost {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Tool call timed out: ${name}`));
-      }, TOOL_CALL_TIMEOUT);
+      }, LONG_TOOL_TIMEOUTS[name] ?? TOOL_CALL_TIMEOUT);
       this.pending.set(id, { resolve, reject, timer });
       if (!this.send({ type: "tool_call", id, name, args })) {
         clearTimeout(timer);

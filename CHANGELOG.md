@@ -4,6 +4,8 @@
 
 ### Added
 
+- **`ask_brain`: Claude can hand a job to another brain and use the result.** Send a prompt and files to Waymond (or any registered brain) and get its text back plus the files it made, saved to disk with their paths. The first use is image generation for a local tool (lochara, a character pipeline): Claude asks Waymond for pictures and feeds the files on. The call waits for the answer, so it gets its own worker timeout (50 min, against 2 for every other tool) and the daemon's loopback endpoint no longer drops a quiet request after Bun's 10 s idle limit. Owner-only through the existing role allowlist. See `docs/tools.md`.
+
 - **Choomfie now tells you when you're near a plan limit, instead of waiting to be asked.** A poller in the worker (`lib/rate-limit-alerts.ts`) reads the daemon's state file and DMs the owner on crossing 90%, and again when requests start being refused.
 
   It lives in the worker, not the daemon, and that is the point. The daemon's only route to Discord is to push a message into the Claude session and have it call the `reply` tool — the exact path that stops working when requests are being refused. The worker reads the state file directly and DMs through discord.js, so the "you are rate limited" message still goes out when the session is the thing that's broken.
