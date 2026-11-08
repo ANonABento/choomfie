@@ -2,13 +2,15 @@
 # Waymond code mode: one command per step inside its sandbox (a fresh
 # container per run_python, killed after ~150 s, nothing installed persists).
 #
-#   bash swe.sh setup <owner/repo | git url> [wip.patch]   install toolchain, clone to /tmp/repo, install deps, re-apply work in progress
+#   bash swe.sh setup <owner/repo | git url> [patch|dir ...] clone to /tmp/repo (or start empty if the repo doesn't exist yet),
+#                                                         apply earlier patches in order as the base, install deps, list checks
 #   bash swe.sh check                                       run the repo's own tests, type-check and lint; prints a summary, exit 1 on failure
 #   bash swe.sh diff <out.patch>                            save the change (git diff, including new files)
 #
 # Fetched by URL from the Choomfie repo, so every chat runs the same steps.
 set -uo pipefail
 REPO_DIR=/tmp/repo
+export GIT_TERMINAL_PROMPT=0  # a missing repo must fail, not ask for a password
 export PATH="$HOME/.bun/bin:$PATH"
 
 say() { printf '%s\n' "$*"; }
@@ -25,7 +27,11 @@ detect_checks() {
       fi
     done
     [ ${#CHECKS[@]} -eq 0 ] && [ "$pm" = "bun run" ] && CHECKS+=("bun test")
-  elif [ -f pyproject.toml ] || [ -f setup.py ] || [ -f requirements.txt ]; then
+  elif [ -f platformio.ini ]; then
+    grep -q '^\[env:native\]' platformio.ini && CHECKS+=("pio test -e native")
+    local env; env=$(grep -o '^\[env:[^]]*\]' platformio.ini | sed 's/\[env:\(.*\)\]/\1/' | grep -v '^native$' | head -1)
+    [ -n "$env" ] && CHECKS+=("pio run -e $env")
+  elif [ -f pyproject.toml ] || [ -f setup.py ] || [ -f requirements.txt ] || ls tests/test_*.py */test_*.py >/dev/null 2>&1; then
     CHECKS+=("python -m pytest -q")
     grep -q ruff pyproject.toml 2>/dev/null && CHECKS+=("ruff check .")
   elif [ -f Cargo.toml ]; then CHECKS+=("cargo test" "cargo clippy")
@@ -36,11 +42,30 @@ detect_checks() {
 
 case "${1:-}" in
   setup)
-    src="${2:?repo}"; wip="${3:-}"
+    src="${2:?repo}"; shift 2
     [[ "$src" == http* || "$src" == git@* ]] || src="https://github.com/$src.git"
     apt-get update -qq >/dev/null 2>&1; apt-get install -y -qq git curl unzip >/dev/null 2>&1
-    rm -rf "$REPO_DIR"; git clone -q --depth 1 "$src" "$REPO_DIR" || { say "clone failed: $src"; exit 1; }
+    rm -rf "$REPO_DIR"
+    if ! git clone -q --depth 1 "$src" "$REPO_DIR" 2>/dev/null; then
+      if git ls-remote "$src" >/dev/null 2>&1; then say "clone failed: $src"; exit 1; fi
+      # Not on GitHub yet: a new project. Start an empty repo; the patch becomes its first commit.
+      git init -q -b main "$REPO_DIR"; say "new repo: couldn't clone $src, so starting empty. If that repo exists (private?), stop and say so instead."
+    fi
     cd "$REPO_DIR"
+    git config user.name swe; git config user.email swe@localhost
+    git commit -q --allow-empty -m base >/dev/null 2>&1 || true
+    # Earlier work, in order: patch files, or folders of them (plan tasks: plans/<name>/patches/).
+    applied=0
+    for arg in "$@"; do
+      if [ -d "$arg" ]; then files=$(ls "$arg"/*.patch 2>/dev/null | sort -V); else files="$arg"; fi
+      for f in $files; do
+        [ -s "$f" ] || continue
+        if git apply "$f"; then say "applied $f"; applied=1; else say "WARNING: $f did not apply"; fi
+      done
+    done
+    # Earlier work is the base, so \`diff\` shows only this run's change.
+    [ $applied = 1 ] && git add -A && git commit -q -m "earlier work"
+    if [ -f platformio.ini ]; then pip install -q platformio 2>&1 | tail -1; fi
     if [ -f package.json ]; then
       if [ -f bun.lock ] || [ -f bun.lockb ]; then
         command -v bun >/dev/null || curl -fsSL https://bun.sh/install | bash >/dev/null 2>&1
@@ -52,7 +77,6 @@ case "${1:-}" in
     elif [ -f requirements.txt ]; then pip install -q -r requirements.txt 2>&1 | tail -3
     elif [ -f pyproject.toml ]; then pip install -q -e . 2>&1 | tail -3; pip install -q pytest 2>&1 | tail -1
     fi
-    if [ -n "$wip" ] && [ -s "$wip" ]; then git apply "$wip" && say "re-applied $wip" || say "WARNING: $wip did not apply"; fi
     detect_checks
     say "ready: $REPO_DIR @ $(git log -1 --format=%h)"
     say "checks: ${CHECKS[*]:-none found, read the CI config}"
