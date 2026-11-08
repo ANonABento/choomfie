@@ -21,6 +21,8 @@ export type DaemonThresholds = {
 export type ModelSettings = {
   model?: string;
   fallbackModel?: string;
+  /** Reasoning effort (`low` … `max`); unset = Claude Code's default. */
+  effort?: string;
 };
 
 /** Everything daemon/ needs from config.json, resolved by the entry point. */

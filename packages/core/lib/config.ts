@@ -84,6 +84,12 @@ export interface Config {
   model?: string;
   /** Model to fall back to when the primary is overloaded. Unset = no fallback. */
   fallbackModel?: string;
+  /**
+   * Reasoning effort, every mode (`low`, `medium`, `high`, `xhigh`, `max`).
+   * Unset = `medium`: on Discord chat, over half the output tokens were
+   * thinking at Claude Code's default.
+   */
+  effort?: string;
   daemon: DaemonConfig;
   /**
    * Which brain answers in each channel/thread (`/brain <name>`). Absent = claude.
@@ -137,6 +143,9 @@ const DEFAULT_CONFIG: Config = {
  * that, `Config`'s index signature would wave them straight back through
  * `...saved` and config.json would carry them forever.
  */
+export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+export const DEFAULT_EFFORT = "medium";
+
 const REMOVED_CONFIG_KEYS = ["openaiEndpoint"] as const;
 
 function mergeConfig(saved: Partial<Config>): Config {
@@ -358,6 +367,16 @@ export class ConfigManager {
   setFallbackModel(model: string | undefined) {
     if (model) this.config.fallbackModel = model;
     else delete this.config.fallbackModel;
+    this.save();
+  }
+
+  getEffort(): string {
+    return this.config.effort ?? DEFAULT_EFFORT;
+  }
+
+  setEffort(effort: string | undefined) {
+    if (effort && effort !== DEFAULT_EFFORT) this.config.effort = effort;
+    else delete this.config.effort;
     this.save();
   }
 

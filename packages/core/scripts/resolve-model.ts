@@ -14,8 +14,10 @@ import { ConfigManager } from "../lib/config.ts";
 import { resolveDataDir } from "@choomfie/shared";
 
 try {
-  const model = new ConfigManager(resolveDataDir()).getModel();
-  if (model) console.log(model);
+  // `resolve-model.ts effort` prints the reasoning effort instead.
+  const config = new ConfigManager(resolveDataDir());
+  const value = process.argv[2] === "effort" ? config.getEffort() : config.getModel();
+  if (value) console.log(value);
 } catch {
   // No output — the launcher treats that as "use the Claude Code default".
 }

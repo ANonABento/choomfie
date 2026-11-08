@@ -100,8 +100,10 @@ So a daemon-launched worker writes each message to `meta/incoming/` and the daem
 | Settings, cwd | project settings only; cwd = the chat's, default `<data dir>/home` | yours; the terminal's cwd |
 | Model | `models.model` from config.json | `--model` via `scripts/resolve-model.ts` |
 | Permission mode | `bypassPermissions` | `--permission-mode auto` (override: `CHOOMFIE_PERMISSION_MODE`, or pass your own) |
+| Effort | `effort` from config.json (default `medium`) | `--effort` via `scripts/resolve-model.ts effort` |
+| Plain-text answer | final message auto-posted to the chat (one model call) | `reply` tool (the terminal isn't Discord) |
 
-Permission mode differs **deliberately**: a terminal session has a human in front of it who can still be asked about genuinely destructive things; a daemon answering Discord at 3am does not. The model must match.
+Permission mode and plain-text answers differ **deliberately**: a terminal session has a human in front of it who can still be asked about genuinely destructive things; a daemon answering Discord at 3am does not. The model must match.
 
 ### Plugin System
 

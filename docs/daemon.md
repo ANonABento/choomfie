@@ -30,6 +30,10 @@ daemon.ts → daemon/hub.ts (always running)
 - **Limits:** `daemon.maxSessions` (default 3). At the cap the least recently active idle session closes; if all are mid-turn it goes over rather than cut one off. Idle sessions close after 20 minutes and resume on the next message
 - **Failures:** a stream failure reopens the same SDK session with backoff; auth/billing failures and 5 failures in a row mark the session dead, and the next message replaces it
 
+### Answers in one call
+
+A plain-text answer is the session's **final message**, which the daemon posts to the chat the message came from (`postReply` → the worker's `reply` tool). Calling `reply` and then ending the turn was two model calls, each re-reading the whole context — about half of a chat's cache reads. The session prompt (`buildSystemPromptAppend`) tells the model so, and to end with no text once `reply` has carried the answer: the recap it used to write was ~14% of a chat's output tokens. Nothing is posted when the turn called `reply`, ended empty, was interrupted, was a daemon prompt (handoff, `/compact` notice), or answered a `conversation_mode` message (silence is a valid answer there). The target is the latest message's `chat_id` (newest wins, so a merged turn can't leave it drifting). Foreground mode is unchanged: there, text goes to the terminal.
+
 ### Compacting
 
 Each session checks its own context every minute (`ChatSession.checkContext`). Compacting captures a handoff summary, then starts a fresh SDK session **on the same chat** with the summary in its system prompt. The summary is also kept as the chat's seed (`meta/claude-seeds.json`, newest 30): resuming that session later gets its transcript back from the SDK, but not its system prompt.

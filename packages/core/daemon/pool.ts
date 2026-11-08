@@ -35,7 +35,8 @@ export interface LiveSession {
   /** Gave up (unrecoverable error) — replace it on the next message. */
   dead(): boolean;
   lastActivityAt(): number;
-  push(content: string): void;
+  /** `replyTo`: the Discord chat a plain final answer is posted to (null: none). */
+  push(content: string, replyTo?: string | null): void;
   interrupt(): Promise<boolean>;
   compact(announceTo?: string): Promise<void>;
   close(): Promise<void>;
@@ -75,7 +76,7 @@ export class SessionPool<S extends LiveSession = LiveSession> {
   }
 
   /** Deliver a prompt to the session for `location`, opening it as needed. */
-  async deliver(location: string, content: string): Promise<boolean> {
+  async deliver(location: string, content: string, replyTo?: string | null): Promise<boolean> {
     const chat = this.deps.boundChat(location);
     if (!chat) {
       this.deps.log(`no chat bound at ${location} — message dropped`);
@@ -96,7 +97,7 @@ export class SessionPool<S extends LiveSession = LiveSession> {
       session = this.deps.open(location, chat);
       this.sessions.set(location, session);
     }
-    session.push(content);
+    session.push(content, replyTo);
     return true;
   }
 

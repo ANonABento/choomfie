@@ -32,6 +32,8 @@ Two readers, one value:
 
 They used to live at `daemon.model`, which meant `/model` silently did nothing in foreground mode — you changed it, restarted, and got the old model back. `mergeConfig` migrates the old key forward and drops it, so there is only ever one place to look. `fallbackModel` still only applies to `--daemon`; the CLI has no equivalent.
 
+`effort` (top level, every mode) is the reasoning effort: `low`, `medium`, `high`, `xhigh`, `max`. Unset means **`medium`** — measured on a Discord chat at Claude Code's default, over half the output tokens were thinking, small talk included. The daemon passes it to each session; `bin/choomfie` passes `--effort` (read through `scripts/resolve-model.ts effort`). `/config effort high` for heavier work.
+
 `daemon.maxSessions` (default 3) caps how many Claude sessions — one per thread, channel and DM — run at once; idle ones close first ([daemon.md](daemon.md#chats-and-sessions)). In `/config`; takes effect on the next daemon start.
 
 `daemon` otherwise holds the cycling thresholds — read at startup by `packages/core/daemon.ts` and threaded into daemon state, so `packages/core/daemon/` never has to import `lib/`. Changes take effect on the next daemon start.

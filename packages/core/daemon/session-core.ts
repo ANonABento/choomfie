@@ -5,6 +5,7 @@
 
 import {
   query,
+  type Options,
   type Query,
   type SDKAssistantMessage,
   type SDKUserMessage,
@@ -17,9 +18,15 @@ export function buildSystemPromptAppend(handoffSummary?: string): string {
       "When context gets heavy the daemon asks you for a handoff summary and carries on in a fresh " +
       "session that starts with it. Choomfie's `restart` tool restarts only the Discord worker; " +
       "this session is unaffected. " +
-      // Measured: a recap after every reply was ~14% of a chat's output tokens.
-      "Nobody reads your text outside tool calls — Discord only sees what you send with `reply`. " +
-      "Once you've replied, end the turn without writing anything else (no recap of what you sent).",
+      // Measured on a chat: every answer cost two model calls (`reply`, then
+      // one to end the turn, each re-reading the whole context), plus a recap
+      // nobody read — ~14% of the output tokens.
+      "\n\nAnswering in this daemon (this overrides \"reply with the reply tool\"): your final message " +
+      "is posted to the Discord chat the message came from, so for an answer that's just text, write it as " +
+      "your final message and don't call `reply` — that saves a whole model call. Use `reply` only when you " +
+      "need files, embeds, reply_to, another chat_id, or a progress message before more work. If `reply` " +
+      "already carried your answer this turn, or you choose not to answer, end with no text at all — " +
+      "never a recap. Messages with conversation_mode=\"true\" are not auto-posted: use `reply` there if you answer.",
   ];
   if (handoffSummary) {
     parts.push(
@@ -113,6 +120,8 @@ export function createSession(
       // `model` as "use Claude Code's configured default".
       ...(models.model ? { model: models.model } : {}),
       ...(models.fallbackModel ? { fallbackModel: models.fallbackModel } : {}),
+      // Measured: on chat, over half the output tokens were thinking.
+      ...(models.effort ? { effort: models.effort as Options["effort"] } : {}),
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       // Tools over HTTP from the daemon, not the plugin: loading the plugin
