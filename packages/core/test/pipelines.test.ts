@@ -38,9 +38,12 @@ describe("parsePipelines", () => {
       nodir: { dir: "/no/such/dir", command: ["./x"], allow: ["next"] },
       nocmd: { dir: toolDir, command: [], allow: ["next"] },
       shell: { dir: toolDir, command: ["./x"], allow: ["next; rm"] },
+      longabout: { dir: toolDir, command: ["./x"], allow: ["next"], about: "x".repeat(301) },
+      described: { dir: toolDir, command: ["./x"], allow: ["next"], about: " Makes characters. " },
     });
-    expect([...pipelines.keys()]).toEqual(["tool"]);
-    expect(problems).toHaveLength(4);
+    expect([...pipelines.keys()]).toEqual(["tool", "described"]);
+    expect(pipelines.get("described")?.about).toBe("Makes characters.");
+    expect(problems).toHaveLength(5);
     expect(parsePipelines(undefined).pipelines.size).toBe(0);
   });
 });
@@ -237,8 +240,8 @@ describe("pipeline tools", () => {
 });
 
 describe("pipelineToolsFor", () => {
-  const ctxWith = (names: string[]) =>
-    ({ config: { getPipelines: () => new Map(names.map((n) => [n, {}])) } }) as unknown as AppContext;
+  const ctxWith = (names: string[], about?: string) =>
+    ({ config: { getPipelines: () => new Map(names.map((name) => [name, { name, ...(about ? { about } : {}) }])) } }) as unknown as AppContext;
 
   test("no pipelines configured: no tools (their schemas would sit in every session)", () => {
     expect(pipelineToolsFor(ctxWith([]))).toEqual([]);
@@ -249,5 +252,11 @@ describe("pipelineToolsFor", () => {
     expect(run.definition.description).toContain("(lochara, render)");
     expect((run.definition.inputSchema as { properties: { pipeline: { enum: string[] } } }).properties.pipeline.enum).toEqual(["lochara", "render"]);
     expect(pipelineToolsFor(ctxWith(["x"])).map((t) => t.definition.name)).toEqual(["pipeline_run", "pipeline_status", "pipeline_stop"]);
+    expect(run.definition.description).not.toContain("Pipelines:");
+  });
+
+  test("each pipeline's about goes into pipeline_run's description", () => {
+    const run = pipelineToolsFor(ctxWith(["lochara"], "Makes anime 3D characters.")).find((t) => t.definition.name === "pipeline_run")!;
+    expect(run.definition.description).toContain("\nPipelines:\n- lochara: Makes anime 3D characters.");
   });
 });

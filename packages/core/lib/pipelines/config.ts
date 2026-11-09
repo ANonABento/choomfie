@@ -9,7 +9,8 @@
  *       "dir": "~/lochara",
  *       "command": ["./lochara"],
  *       "allow": ["next", "requests", "concept", "part", "deliver", "build", "check", "render", "export"],
- *       "json": "--json"
+ *       "json": "--json",
+ *       "about": "Makes anime 3D characters (VRM/GLB). Start with [\"next\"]: it says what to run, pick or show."
  *     }
  *   }
  *
@@ -18,6 +19,8 @@
  * - `allow`: the subcommands a caller may pass as the first argument. Nothing else runs.
  * - `json` (optional): a flag that makes the tool print one JSON result on stdout. With it, the
  *   runner reads `show` (pictures to post), `say`/`next` and `ok` from that result.
+ * - `about` (optional): what it's for and how to start, one or two sentences. It goes into `pipeline_run`'s
+ *   description, so a brain asked for "a character" knows which pipeline makes one.
  */
 
 import { existsSync, statSync } from "node:fs";
@@ -29,7 +32,10 @@ export interface PipelineConfig {
   command: string[];
   allow: string[];
   json?: string;
+  about?: string;
 }
+
+const MAX_ABOUT = 300;
 
 const NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 
@@ -71,7 +77,18 @@ export function parsePipelines(raw: unknown): { pipelines: Map<string, PipelineC
       skip("json must be a flag, e.g. \"--json\"");
       continue;
     }
-    pipelines.set(name, { name, dir, command: command as string[], allow: allow as string[], ...(v.json ? { json: v.json as string } : {}) });
+    if (v.about !== undefined && (typeof v.about !== "string" || !v.about.trim() || v.about.length > MAX_ABOUT)) {
+      skip(`about must be a sentence or two (at most ${MAX_ABOUT} characters)`);
+      continue;
+    }
+    pipelines.set(name, {
+      name,
+      dir,
+      command: command as string[],
+      allow: allow as string[],
+      ...(v.json ? { json: v.json as string } : {}),
+      ...(v.about ? { about: (v.about as string).trim() } : {}),
+    });
   }
   return { pipelines, problems };
 }
