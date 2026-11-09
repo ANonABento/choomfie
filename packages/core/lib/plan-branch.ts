@@ -255,10 +255,21 @@ export function landPatch(pb: PlanBranch, patch: Uint8Array, title: string, run:
       if (!patch.length) throw new Error("the patch is empty");
       const file = join(tmp, "task.patch");
       writeFileSync(file, patch);
+      const apply = (...mode: string[]) => run(["git", "apply", "--index", ...mode, "--binary", "--whitespace=nowarn", file], pb.dir);
       try {
-        await run(["git", "apply", "--index", "--binary", "--whitespace=nowarn", file], pb.dir);
-      } catch (e) {
-        throw new Error(`the patch doesn't apply to ${pb.branch} — it wasn't built on the branch it was given: ${e instanceof Error ? e.message : e}`);
+        await apply();
+      } catch {
+        // Built on an older head (another task landed meanwhile): merge it onto
+        // this one from the files it was made against, which every bundle took
+        // from this clone. Only real overlaps fail.
+        try {
+          await apply("--3way");
+        } catch (e) {
+          throw new Error(
+            `the patch doesn't apply to ${pb.branch}: it clashes with what landed there since its bundle was made, ` +
+              `or wasn't built on that bundle. Retry the task to get the current branch. ${e instanceof Error ? e.message : e}`
+          );
+        }
       }
     },
     "the patch changes nothing"

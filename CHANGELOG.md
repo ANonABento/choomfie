@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- **Plan tasks run in parallel no longer fail to land when another lands first.** A task's patch is built on the bundle it was sent; when another task on the same plan branch landed meanwhile, `git apply` refused it ("patch does not apply") even when the two touched different lines. Landing now falls back to `git apply --3way`, merging the patch onto the new head from the files it was built against (every bundle comes from the same clone). Only a real overlap fails, with a message that says so.
 - **A plan task written as a heading plus a bulleted list went out as just the heading.** The task-list parser read one line per task, so Waymond received "…opened as a PR against the default branch:" with none of the requirements under it, and guessed. Indented sub-lines, and bullets under a line ending in ":", now stay part of their task's spec.
 - **Opening a draft PR from a patch is all or nothing.** A new repo is created only after the patch has applied and committed locally (a failed apply used to leave an empty private repo on GitHub), and a pushed branch is deleted again if `gh pr create` fails.
 

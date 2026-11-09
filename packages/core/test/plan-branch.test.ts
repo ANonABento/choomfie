@@ -269,6 +269,29 @@ describe("plan branch", () => {
     expect((await runCommand(["git", "log", "--format=%s"], pb.dir)).split("\n").slice(0, 2).sort()).toEqual(["A", "B"]);
   });
 
+  test("tasks run in parallel from one bundle land when they touch different lines; a real clash fails cleanly", async () => {
+    const { run } = fakeGh();
+    const pb = await openPlanBranch(repoName(), join(root, "plans"), run);
+    const lines = Array.from({ length: 20 }, (_, i) => `line ${i}`);
+    await landPatch(pb, await task(pb, run, (d) => writeFileSync(join(d, "m.py"), lines.join("\n") + "\n")), "Task 0", run);
+    const edit = (i: number, to: string) => (d: string) => {
+      const l = readFileSync(join(d, "m.py"), "utf8").split("\n");
+      l[i] = to;
+      writeFileSync(join(d, "m.py"), l.join("\n"));
+    };
+    // All three start from the same head, as parallel tasks do; a snapshot, as a big repo (choomfie) gets.
+    const b = await bundlePlanBranch(pb, run, 1);
+    const [top, bottom, clash] = await Promise.all([workOn(b.path, edit(0, "top")), workOn(b.path, edit(19, "bottom")), workOn(b.path, edit(0, "other"))]);
+    b.cleanup();
+    await landPatch(pb, top, "A", run);
+    await landPatch(pb, bottom, "B", run);
+    const landed = readFileSync(join(pb.dir, "m.py"), "utf8").split("\n");
+    expect([landed[0], landed[19]]).toEqual(["top", "bottom"]);
+    await expect(landPatch(pb, clash, "C", run)).rejects.toThrow(/clashes with what landed/);
+    expect(await runCommand(["git", "status", "--porcelain"], pb.dir)).toBe("");
+    expect(await head(pb.dir)).toBe(await head(pb.dir, `origin/${pb.branch}`));
+  });
+
   test("a big repo goes as a snapshot of its files", async () => {
     const { run } = fakeGh();
     const pb = await openPlanBranch(repoName(), join(root, "plans"), run);
