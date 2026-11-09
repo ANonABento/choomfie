@@ -24,10 +24,9 @@ SKIP_DIRS = {"tools", "__pycache__"}
 def count_tokens(text):
     try:
         import tiktoken
-
-        return len(tiktoken.get_encoding("cl100k_base").encode(text))
-    except Exception:  # tiktoken missing or offline: conservative estimate
-        return (len(text) + 2) // 3
+    except ImportError:
+        sys.exit("check_library: tiktoken is required to count tokens (pip install tiktoken)")
+    return len(tiktoken.get_encoding("cl100k_base").encode(text))
 
 
 def library_files(root):
