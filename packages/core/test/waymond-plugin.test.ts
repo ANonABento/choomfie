@@ -372,6 +372,9 @@ describe("modes", () => {
     // A turn that stops on narration carries on; the finished reply (with its report link) doesn't.
     expect(continueAfterToolCap("Need more sources on licences.", "research")).toContain("mid-task");
     expect(continueAfterToolCap("Answer: use X.\n[report.md](/chat?workspace=research%2Fx%2Freport.md&owner=o)", "research")).toBeNull();
+    // A short review that ends on its verdict is finished, not cut off.
+    expect(continueAfterToolCap("Checks pass, rules followed.\n**Verdict:** clean", "review")).toBeNull();
+    expect(continueAfterToolCap("Reading the diff now.", "review")).toContain("mid-task");
   });
 
   test("a turn Ambition cut off at its tool limit is continued (observed 2026-11-08)", () => {

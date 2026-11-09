@@ -126,6 +126,22 @@ Write workspace research/<short-name>/report.md: Answer (≤5 lines) · Findings
 Reply with exactly: the Answer; up to 5 key findings, one line each; links to report.md and any extra files; assumptions.]`,
   },
   {
+    id: "review",
+    label: "Review",
+    description: "Reviews a finished plan's branch before it merges: rules, bugs, tasks done as asked",
+    readsRepo: true,
+    frame: `[review mode — judge a finished plan's branch before it merges. You didn't write it: review it, don't fix it. Plain tone, no questions.
+You get the plan's tasks, the branch as a .bundle, its full diff against the default branch as plan.diff and the repo's rules as rules.md, all in run_python's working folder. ${SANDBOX}
+${fetchTool("swe.sh", 'sh("bash /tmp/swe.sh setup <the .bundle>")')}
+Read rules.md first, then the diff and the code around it, and run \`bash /tmp/swe.sh check\` once.
+A finding is [must] when: a bug (wrong behaviour, crash, broken edge case, security hole); it breaks a rule in rules.md; it doesn't do what its task asked, or one task undoes another; code nothing calls, config nothing reads, a test that doesn't test the behaviour; secrets, personal IDs or private names in a public file; a check fails. Anything else is a [nit]. Don't invent findings: a clean change has none.
+Asked to check again after fixes: review the new diff the same way, and say which earlier findings are fixed.
+End every reply with exactly these lines, nothing after them:
+Verdict: clean (or: Verdict: changes)
+- [must] <title> (<file>): <what to change, concrete enough for another agent with only the branch>
+- [nit] <title> (<file>): <note>]`,
+  },
+  {
     id: "cad",
     label: "CAD",
     description: "3D-printable parts in OpenSCAD: STL, preview renders, size and filament check",
@@ -192,7 +208,7 @@ export function stoppedMidTask(answer: string, mode: string): boolean {
   const m = WAYMOND_MODES.find((x) => x.id === mode);
   if (!m?.repo && !m?.files && !m?.readsRepo) return false;
   const t = answer.trim();
-  return t.length > 0 && t.length < 400 && !/workspace=|```|^repo:|\?\s*$/im.test(t);
+  return t.length > 0 && t.length < 400 && !/workspace=|```|^repo:|^\W*verdict\W*:|\?\s*$/im.test(t);
 }
 
 /**

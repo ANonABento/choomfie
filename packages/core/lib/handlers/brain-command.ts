@@ -30,13 +30,13 @@ import {
   SlashCommandBuilder,
   type ButtonInteraction,
 } from "discord.js";
-import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, isDaemonOwnedProcess, listBrainIds } from "@choomfie/shared";
+import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds } from "@choomfie/shared";
 import { join } from "node:path";
 import { botIsAbsent, interactionChannel, rememberBrainRelay, settleAskRelays } from "../ask-relay.ts";
 import { registerButtonHandler, registerCommand } from "../register.ts";
 import {
   appendTask,
-  brainWorkIdle,
+  runningWork,
   clearPendingApproval,
   reviewable,
   dispatchToBrain,
@@ -62,8 +62,11 @@ import { isDaemonMode, requestDaemonControl, waitForClaudeIdle } from "../daemon
 import { openDraftPr, takePatch } from "../patch-pr.ts";
 import { bundlePlanBranch, landFiles, landPatch, openPlanBranch, planBranchNote, planFilesNote, planReadNote, type PlanBranch } from "../plan-branch.ts";
 import { mergePlanPr, prepareReview } from "../plan-branch.ts";
-import { claudeReviewer, reviewLoop, type ReviewState } from "../plan-review.ts";
-import { pullRunningCheckout, restartWhenIdle } from "../self-update.ts";
+import { parseReviewText, reviewLoop, reviewMessage, type Reviewer, type ReviewState } from "../plan-review.ts";
+import { pullRunningCheckout, requestRestart } from "../self-update.ts";
+import { activeJobs } from "../pipelines/index.ts";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { requireOwner } from "./shared.ts";
 
 function label(id: string): string {
@@ -238,6 +241,7 @@ registerButtonHandler("brain", async (interaction, parts, ctx) => {
   if (parts[1] === "taskall") return handleTask(interaction, "all", ctx);
   if (parts[1] === "review") return handleReview(interaction, ctx);
   if (parts[1] === "merge") return handleMerge(interaction, parts[2], parts.slice(3).join(":"), ctx);
+  if (parts[1] === "restart") return handleRestart(interaction, parts[2] === "force", ctx);
   if (parts[1] !== "choice") return;
   const userId = interaction.user.id;
   const owner = isOwner(ctx, userId);
@@ -487,12 +491,22 @@ async function startReview(
     await thread.members?.add(user.id).catch(() => {});
     state.threadId = thread.id;
     state.threadUrl = thread.url;
+    // The brain reviews in a chat of its own, in its review mode; later rounds come back to the same chat.
+    const reviewMode = brain.modes?.find((m) => m.id === "review")?.id;
+    if (reviewMode) {
+      ctx.config.setChannelBrain(thread.id, brain.id);
+      ctx.chats.setMode(ctx.chats.start(thread.id, brain.id).id, reviewMode);
+    }
     const say = (content: string, components?: unknown[]) =>
       thread.send({ content: content.slice(0, 2000), allowedMentions: { parse: [] }, ...(components ? { components } : {}) } as never).catch(() => {});
-    await say(`Reviewing \`${pb.branch}\` of **${pb.repo}** against its rules and the plan's tasks${pb.prUrl ? ` · ${pb.prUrl}` : ""}.`);
+    await say(
+      reviewMode
+        ? `${brain.label} reviews \`${pb.branch}\` of **${pb.repo}** against its rules and the plan's tasks${pb.prUrl ? ` · ${pb.prUrl}` : ""}.`
+        : `${brain.label} has no review mode: \`${pb.branch}\` goes to CI${pb.prUrl ? ` · ${pb.prUrl}` : ""}.`
+    );
     try {
       await reviewLoop(pb, board.tasks, state, {
-        reviewer: claudeReviewer(ctx.config.getModel()),
+        reviewer: reviewMode ? brainReviewer(ctx, brain, pb, thread, user) : undefined,
         say: (content) => say(content),
         fixMode,
         save: () => {
@@ -507,7 +521,7 @@ async function startReview(
         offerMerge: (head, checks) =>
           say(
             `✅ **Ready to merge:** review clean, CI ${checks.kind === "none" ? "— this repo has none" : "passed"}. ` +
-              `Merges \`${head.slice(0, 7)}\` (exactly what was reviewed) into the default branch. If this is Choomfie's own repo, it then updates and restarts itself once nothing is running.`,
+              `Merges \`${head.slice(0, 7)}\` (exactly what was reviewed) into the default branch.`,
             [
               new ActionRowBuilder<ButtonBuilder>().addComponents(
                 new ButtonBuilder().setCustomId(`brain:merge:${boardId}:${pb.repo}`).setLabel("Merge").setStyle(ButtonStyle.Success)
@@ -550,15 +564,84 @@ async function handleMerge(interaction: ButtonInteraction, boardId: string, repo
   const update = await pullRunningCheckout(pb.repo);
   if (update.kind === "skipped") return void (await say(`⚠️ Didn't update the running Choomfie: ${update.why}. Pull and restart it yourself.`));
   if (update.kind !== "pulled") return;
-  const restarting = isDaemonOwnedProcess();
-  await say(
-    `⬇️ Updated the running Choomfie \`${update.from}\` → \`${update.to}\`.` +
-      (restarting ? " Restarting once nothing is running (tasks, reviews, replies)…" : " Restart it to load the change (foreground mode can't restart itself).")
+  await (interaction.channel as unknown as SendableChannel)
+    .send({
+      content: `⬇️ Updated the running Choomfie \`${update.from}\` → \`${update.to}\`. It runs the old code until it restarts: press **Restart** when nothing important is running.`,
+      allowedMentions: { parse: [] },
+      components: [restartRow()],
+    } as never)
+    .catch(() => {});
+}
+
+const restartRow = (force = false) =>
+  new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(force ? "brain:restart:force" : "brain:restart")
+      .setLabel(force ? "Restart anyway" : "Restart")
+      .setStyle(force ? ButtonStyle.Danger : ButtonStyle.Primary)
   );
-  if (restarting) {
-    const ok = await restartWhenIdle(ctx.DATA_DIR, interaction.channelId, brainWorkIdle);
-    if (!ok) await say("⚠️ Still busy after 6 hours — restart it yourself.");
+
+/**
+ * Restart Choomfie on the code on disk (after a merge into its own repo).
+ * Lists what would be cut off first; "Restart anyway" goes ahead. The daemon
+ * still lets each Claude session finish its turn.
+ */
+async function handleRestart(interaction: ButtonInteraction, force: boolean, ctx: Ctx): Promise<void> {
+  const ephemeral = (content: string, components?: unknown[]) =>
+    interaction.reply({ content, flags: MessageFlags.Ephemeral, ...(components ? { components } : {}) } as never);
+  if (!isOwner(ctx, interaction.user.id)) return void (await ephemeral("Only the owner can restart Choomfie~"));
+  const jobs = activeJobs();
+  const busy = [...runningWork(), ...(jobs.length ? [`pipeline job${jobs.length === 1 ? "" : "s"} ${jobs.map((j) => j.id).join(", ")}`] : [])];
+  if (busy.length && !force) {
+    return void (await ephemeral(`A restart would cut off: ${busy.join("; ")}. Wait for them, or restart anyway.`, [restartRow(true)]));
   }
+  if (!(await requestRestart(ctx.DATA_DIR, interaction.channelId, interaction.user.username))) {
+    return void (await ephemeral("Foreground mode can't restart itself: exit and run `choomfie` again."));
+  }
+  await ephemeral("Restarting once every Claude session finishes its turn — back in a few seconds.");
+}
+
+/**
+ * The brain as the reviewer: one message in the review thread's chat (in its
+ * review mode), with the branch's bundle, the whole diff and the rules as
+ * files. Its reply is posted in the thread as usual and read for the verdict.
+ */
+function brainReviewer(
+  ctx: Ctx,
+  brain: NonNullable<ReturnType<typeof getBrain>>,
+  pb: PlanBranch,
+  thread: SendableChannel & { id: string },
+  user: { username: string; id: string }
+): Reviewer {
+  return async (input) => {
+    const dir = mkdtempSync(join(tmpdir(), "choomfie-review-"));
+    const bundle = await bundlePlanBranch(pb);
+    try {
+      const diff = join(dir, "plan.diff");
+      const rules = join(dir, "rules.md");
+      writeFileSync(diff, input.diff);
+      writeFileSync(rules, input.rules || "The repo has no CLAUDE.md, AGENTS.md or CONTRIBUTING.md.\n");
+      onMessageReceived(thread.id, thread as never, false);
+      const reply = await dispatchToBrain(
+        ctx,
+        brain,
+        thread,
+        {
+          chatKey: thread.id,
+          content: reviewMessage(input),
+          meta: { chat_id: thread.id, user: user.username, user_id: user.id, role: "owner" },
+          filePaths: [bundle.path, diff, rules],
+        },
+        { noPatchOffer: true }
+      );
+      if (!reply || reply.stopped) throw new Error("the review was stopped");
+      if (reply.background) throw new Error(`${brain.label} is still reviewing in the background; press 🔎 Review on the board once its answer is in`);
+      return parseReviewText(reply.text);
+    } finally {
+      bundle.cleanup();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
 }
 
 /** The plan's branch on `repo`: saved, being opened, or opened now (once, however many tasks ask). */

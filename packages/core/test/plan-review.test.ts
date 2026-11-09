@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCommand, type Runner } from "../lib/patch-pr.ts";
 import { bundlePlanBranch, landPatch, mergePlanPr, openPlanBranch, prepareReview, waitForChecks, type PlanBranch } from "../lib/plan-branch.ts";
-import { fixTask, MAX_FIX_ROUNDS, parseReview, reviewLoop, reviewPrompt, type Review, type ReviewState } from "../lib/plan-review.ts";
-import { pullRunningCheckout, restartWhenIdle } from "../lib/self-update.ts";
+import { fixTask, MAX_FIX_ROUNDS, parseReviewText, reviewLoop, reviewMessage, type Review, type ReviewState } from "../lib/plan-review.ts";
+import { pullRunningCheckout, requestRestart } from "../lib/self-update.ts";
 
 /**
  * Real git end to end: bare repos under <root>/remote stand in for GitHub
@@ -133,7 +133,7 @@ function deps(gh: ReturnType<typeof fakeGitHub>, pb: PlanBranch, reviews: Review
   const said: string[] = [];
   const fixes: string[] = [];
   const offered: string[] = [];
-  const inputs: Parameters<Parameters<typeof reviewLoop>[3]["reviewer"]>[0][] = [];
+  const inputs: Parameters<NonNullable<Parameters<typeof reviewLoop>[3]["reviewer"]>>[0][] = [];
   return {
     said,
     fixes,
@@ -186,6 +186,7 @@ describe("reviewLoop", () => {
     expect(t.fixes[0]).toContain("Logs to stdout (`a.ts`): use console.error");
     expect(t.inputs[0].rules).toContain("Never log to stdout.");
     expect(t.inputs[1].diff).toContain("+console.error(1)"); // round 2 saw the fix
+    expect(t.inputs.map((i) => i.round)).toEqual([0, 1]); // and knows it's a re-check
     const head = (await git(["rev-parse", pb.branch], bare(pb.repo))).trim();
     expect(t.offered).toEqual([head]);
     expect(state.head).toBe(head);
@@ -286,22 +287,47 @@ describe("mergePlanPr", () => {
 });
 
 describe("review output", () => {
-  test("parseReview takes structured or fenced JSON and drops malformed findings", () => {
-    expect(parseReview({ summary: "s", findings: [{ severity: "must", title: "t", fix: "f" }, { title: 1 }] }).findings).toEqual([
-      { severity: "must", title: "t", fix: "f" },
+  const reply = (tail: string) => `Read the rules and the diff; checks pass.\n\n**Verdict:** ${tail}`;
+
+  test("parseReviewText reads the verdict and the findings under it", () => {
+    const r = parseReviewText(
+      reply("changes\n- [must] Logs to stdout (`a.ts`): use console.error\n- [nit] Naming (b.ts): call it total\n- [must] No test: add one for add()")
+    );
+    expect(r.findings).toEqual([
+      { severity: "must", title: "Logs to stdout", file: "a.ts", fix: "use console.error" },
+      { severity: "nit", title: "Naming", file: "b.ts", fix: "call it total" },
+      { severity: "must", title: "No test", fix: "add one for add()" },
     ]);
-    expect(parseReview('```json\n{"summary":"s","findings":[{"severity":"odd","title":"t","fix":"f"}]}\n```').findings[0].severity).toBe("nit");
-    expect(() => parseReview("not json")).toThrow();
-    expect(() => parseReview({ findings: [] })).toThrow(/didn't return a review/);
+    expect(r.summary).toContain("checks pass");
+    expect(parseReviewText(reply("clean")).findings).toEqual([]);
+    // A clean verdict with a stray [must] line: nothing blocks.
+    expect(parseReviewText(reply("clean\n- [must] x (y): z")).findings[0].severity).toBe("nit");
   });
 
-  test("the prompt carries the tasks, the rules and the diff; a fix task names every finding", () => {
-    const p = reviewPrompt({ repo: "a/b", branch: "plan/b", base: "main", tasks: ["1. [code] x"], rules: "R1", stat: "a.ts | 1 +", diff: "+x", cwd: "/x" });
-    for (const s of ["1. [code] x", "R1", "a.ts | 1 +", "+x", "must"]) expect(p).toContain(s);
+  test("a reply without a verdict, or 'changes' with nothing to fix, is an error, not a pass", () => {
+    expect(() => parseReviewText("Looks fine to me!")).toThrow(/Verdict/);
+    expect(() => parseReviewText(reply("changes\n- [nit] x (y): z"))).toThrow(/no \[must\]/);
+  });
+
+  test("the first message carries the tasks and the change; a re-check asks about the earlier findings", () => {
+    const input = { round: 0, repo: "a/b", branch: "plan/b", base: "main", tasks: ["1. [code] x"], rules: "R1", stat: "a.ts | 1 +", diff: "+x" };
+    const first = reviewMessage(input);
+    for (const s of ["1. [code] x", "a.ts | 1 +", "plan.diff", "rules.md"]) expect(first).toContain(s);
+    expect(reviewMessage({ ...input, round: 1 })).toContain("earlier findings");
     const t = fixTask("a/b", 2, bad.findings, "code");
     expect(t).toMatchObject({ mode: "code", repo: "a/b", title: "Review fixes (round 2)" });
     expect(t.spec).toContain("in a/b");
     expect(t.spec).toContain("Done when:");
+  });
+
+  test("a brain with no review mode goes straight to CI", async () => {
+    const gh = fakeGitHub(passing);
+    const pb = await planWithTask(gh);
+    const t = deps(gh, pb, [bad]);
+    const state: ReviewState = { status: "reviewing", round: 0 };
+    await reviewLoop(pb, [], state, { ...t.d, reviewer: undefined });
+    expect(state.status).toBe("ready");
+    expect(t.fixes).toEqual([]);
   });
 });
 
@@ -341,17 +367,14 @@ describe("self-update", () => {
     expect(await pullRunningCheckout(repo, runCommand, dir)).toMatchObject({ kind: "skipped", why: expect.stringContaining("feature") });
   });
 
-  test("restartWhenIdle waits for idle, then asks the daemon; never outside daemon mode", async () => {
+  test("requestRestart asks the daemon, and never outside daemon mode", async () => {
     const data = mkdtempSync(join(root, "data-"));
     const prev = process.env.CHOOMFIE_DAEMON_PID;
     try {
       delete process.env.CHOOMFIE_DAEMON_PID;
-      expect(await restartWhenIdle(data, "c1", () => true)).toBe(false);
+      expect(await requestRestart(data, "c1", "me")).toBe(false);
       process.env.CHOOMFIE_DAEMON_PID = "1";
-      let checks = 0;
-      const ok = await restartWhenIdle(data, "c1", () => ++checks >= 3, { everyMs: 1, maxMs: 1000, sleep: async () => {} });
-      expect(ok).toBe(true);
-      expect(checks).toBe(3);
+      expect(await requestRestart(data, "c1", "me")).toBe(true);
       expect(JSON.parse(readFileSync(join(data, "meta", "control.json"), "utf8"))).toMatchObject({ command: "restart", location: "c1" });
     } finally {
       if (prev === undefined) delete process.env.CHOOMFIE_DAEMON_PID;

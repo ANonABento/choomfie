@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileBatches, type Brain } from "@choomfie/shared";
 import {
-  brainWorkIdle,
+  runningWork,
   chunkForDiscord,
   reviewable,
   decideRoute,
@@ -574,7 +574,7 @@ describe("a plan's review", () => {
     first.states = [{ kind: "done", url: "https://d/u" }];
     first.reviews = { "me/cube": { status: "reviewing", round: 0 } };
     saveTaskBoards();
-    expect(brainWorkIdle()).toBe(false); // a review is running
+    expect(runningWork()).toEqual(["1 plan review going"]);
     await postBrainReply(channel, "waymond", "rchat", { text: "Two more.", tasks: [{ n: 1, mode: "code", title: "B", spec: "b" }] });
     expect(getTaskBoard("rb2")!.plans).toEqual({ "me/cube": pb });
     // Another chat starts its own plan.
@@ -583,7 +583,7 @@ describe("a plan's review", () => {
 
     loadTaskBoards(dir);
     expect(getTaskBoard("rb1")!.reviews!["me/cube"].status).toBe("stuck");
-    expect(brainWorkIdle()).toBe(true);
+    expect(runningWork()).toEqual([]);
     resetTaskBoards();
   });
 });

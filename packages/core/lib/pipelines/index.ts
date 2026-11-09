@@ -34,6 +34,11 @@ export function pipelineRunner(ctx: AppContext): PipelineRunner {
   return runner;
 }
 
+/** Jobs queued or running now (none if no pipeline ran since startup). */
+export function activeJobs(): Job[] {
+  return runner?.list().filter((j) => j.state === "queued" || j.state === "running") ?? [];
+}
+
 /** Stop running jobs (worker shutdown). */
 export function stopPipelines(): void {
   runner?.stopAll();
