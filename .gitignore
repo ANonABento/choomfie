@@ -30,3 +30,7 @@ handoffs.json
 *.port
 inbox/
 .choomfie-data/
+
+# Built on demand by plugins/waymond/library/tools/build_zip.py
+plugins/waymond/library.zip
+.pytest_cache/

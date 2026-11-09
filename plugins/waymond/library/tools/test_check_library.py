@@ -20,6 +20,13 @@ def lib(tmp_path):
     return dst
 
 
+def test_missing_tiktoken_fails(monkeypatch):
+    monkeypatch.setitem(sys.modules, "tiktoken", None)
+    with pytest.raises(SystemExit) as e:
+        cl.count_tokens("hello")
+    assert "tiktoken is required" in str(e.value)
+
+
 def test_real_library_is_clean():
     assert cl.check(LIB) == []
 
