@@ -202,6 +202,27 @@ export function choiceRows(all: string[]) {
 
 export type TaskState = { kind: "idle" } | { kind: "running" | "done" | "failed"; url: string };
 
+/**
+ * One brain chat for a plan's tasks, so each task builds on what the chat
+ * already knows (the plan, the code it read, what earlier tasks did) instead
+ * of starting from nothing. `tasks` counts what it has run; `open` is false
+ * once a turn there may still be running in the background, so the next task
+ * doesn't talk over it.
+ */
+export interface PlanChat {
+  id: string;
+  tasks: number;
+  open: boolean;
+}
+
+/** A chat that has run this many tasks hands over to a fresh one (long chats cost more per message). */
+export const PLAN_CHAT_TASKS = 6;
+
+/** A task on the board is running, or Run all is: tasks share one chat, so one at a time. */
+export function boardBusy(board: Pick<TaskBoard, "states" | "busy">): boolean {
+  return !!board.busy || board.states.some((s) => s.kind === "running");
+}
+
 export interface TaskBoard {
   brainId: string;
   tasks: BrainTask[];
@@ -216,6 +237,8 @@ export interface TaskBoard {
   threads?: Record<string, number>;
   /** Repo → how the plan's review loop stands (lib/plan-review.ts). */
   reviews?: Record<string, ReviewState>;
+  /** The brain chat the plan's tasks share (it moves into each task's thread). */
+  workChat?: PlanChat;
   /** Not saved: "Run all" is working through the list. */
   busy?: boolean;
   /** Not saved: branches being opened right now. */
@@ -304,18 +327,18 @@ export function latestBoardIn(chatKey: string): { boardId: string; board: TaskBo
   return best;
 }
 
-/**
- * What the planning chat can't see for itself: how its tasks went. Each task
- * ran in its own chat, and the repo is private, so the brain would otherwise
- * say none of them ran. Added to the owner's messages in a plan's chat once
- * any task has started.
- */
 /** The thread's pipeline note for this brain's chat here (binding the chat the brain is about to use). */
 function threadPipelineNote(ctx: AppContext, brainId: string, message: { chatKey: string; content: string }): string | undefined {
   if (!ctx.chats.pipelineAt(message.chatKey)) return undefined;
   return pipelineNote(ctx, message.chatKey, ctx.chats.current(message.chatKey, brainId, message.content).id);
 }
 
+/**
+ * What the planning chat can't see for itself: how its tasks went. They ran
+ * in a chat of their own, and the repo is private, so the brain would
+ * otherwise say none of them ran. Added to the owner's messages in a plan's
+ * chat once any task has started.
+ */
 export function planStatusNote(chatKey: string): string | undefined {
   const plan = latestBoardIn(chatKey);
   if (!plan || plan.board.states.every((s) => s.kind === "idle")) return undefined;
@@ -324,11 +347,11 @@ export function planStatusNote(chatKey: string): string | undefined {
   const lines = board.tasks.map((t, i) => `${t.n}. ${t.title} [${t.mode}] — ${word[board.states[i]?.kind ?? "idle"]}`);
   const reviewWord = {
     reviewing: "being reviewed",
-    fixing: "review fixes running",
-    checks: "review clean, waiting for CI",
-    ready: "review clean and CI passed — the owner has a Merge button in the review thread",
+    fixing: "fixes running",
+    checks: "waiting for CI",
+    ready: "CI passed — the owner has a Merge button in the plan's merge thread",
     merged: "merged",
-    stuck: "review needs the owner (see the review thread)",
+    stuck: "needs the owner (see the plan's merge thread)",
   } as const;
   const branches = Object.values(board.plans ?? {}).map((p) => {
     const r = board.reviews?.[p.repo];
@@ -338,10 +361,10 @@ export function planStatusNote(chatKey: string): string | undefined {
     );
   });
   return [
-    "[Plan status, from Choomfie (not the user): each task ran in its own chat; finished code/cad tasks are committed to the plan's branch, one commit per task.",
+    "[Plan status, from Choomfie (not the user): the tasks ran in a separate chat (one per plan, in each task's thread); finished code/cad tasks are committed to the plan's branch, one commit per task.",
     ...lines,
     ...(branches.length ? [`Repo: ${branches.join("; ")}`] : []),
-    "When every task is done, Choomfie reviews the PR, sends you fix tasks for what it finds, waits for CI and offers the owner a Merge button. Don't tell the user to merge or mark the PR ready themselves. More tasks for this plan go on the same branch.",
+    "When every task is done, Choomfie waits for CI (a failure comes back as a fix task) and offers the owner a Merge button. Don't tell the user to merge or mark the PR ready themselves. More tasks for this plan go on the same branch.",
     "]",
   ].join("\n");
 }
@@ -640,11 +663,11 @@ export function dispatchToBrain(
       await postBrainReply(channel, brain.id, message.chatKey, reply, message.messageId, opts);
       const task = reply.runNow ? reply.tasks?.[0] : undefined;
       const plan = task && message.meta?.role === "owner" && planTaskStarter ? latestBoardIn(message.chatKey) : undefined;
-      if (task && plan && plan.board.busy) {
-        // Run all is going: queue it on the board rather than run two things on the branch at once.
+      if (task && plan && boardBusy(plan.board)) {
+        // A task is running: queue it on the board rather than run two things in the plan's chat at once.
         const added = plan.board.tasks[appendTask(plan.board, task)];
         await channel
-          .send({ allowedMentions: NO_MENTIONS, content: `-# → added to the plan as **task ${added.n}** — start it from the board once Run all finishes` })
+          .send({ allowedMentions: NO_MENTIONS, content: `-# → added to the plan as **task ${added.n}** — start it from the board once the running task finishes` })
           .catch(() => {});
       } else if (task && plan) {
         // The plan's own chat asked for one more job: it joins the plan, and runs as its next task.

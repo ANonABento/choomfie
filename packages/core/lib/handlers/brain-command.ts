@@ -39,6 +39,8 @@ import {
   runningWork,
   clearPendingApproval,
   reviewable,
+  boardBusy,
+  PLAN_CHAT_TASKS,
   dispatchToBrain,
   getPendingApproval,
   getTaskBoard,
@@ -305,8 +307,8 @@ registerButtonHandler("brain", async (interaction, parts, ctx) => {
 type Ctx = Parameters<Parameters<typeof registerButtonHandler>[1]>[2];
 
 /**
- * A plan task's button: open a thread off the plan's channel, put a fresh
- * chat there in the task's mode, and send it the task. The button becomes a
+ * A plan task's button: open a thread off the plan's channel, move the plan's
+ * work chat there in the task's mode, and send it the task. The button becomes a
  * link to the thread (⏳, then ✅ or ❌). Owner only — it starts real work.
  */
 async function handleTask(interaction: ButtonInteraction, which: number | "all", ctx: Ctx): Promise<void> {
@@ -316,7 +318,7 @@ async function handleTask(interaction: ButtonInteraction, which: number | "all",
   const board = getTaskBoard(boardId);
   const brain = board ? getBrain(board.brainId) : undefined;
   if (!board || !brain) return void (await ephemeral("These tasks expired — ask for the task list again."));
-  if (board.busy) return void (await ephemeral("Run all is already working through these — one at a time."));
+  if (boardBusy(board)) return void (await ephemeral("A task on this plan is running: they share one chat, so one at a time."));
   const runnable = (i: number) => board.states[i]?.kind === "idle" || board.states[i]?.kind === "failed";
   const indices = which === "all" ? board.states.flatMap((_, i) => (runnable(i) ? [i] : [])) : [which];
   if (!indices.length || indices.some((i) => !runnable(i) || !board.tasks[i])) {
@@ -365,8 +367,8 @@ async function handleTask(interaction: ButtonInteraction, which: number | "all",
     saveTaskBoards();
     await redraw();
   }
-  // The last task landed: the plan reviews itself.
-  if (reviewable(board)) void startReview(ctx, boardId, board, parent as ThreadParent, interaction.user, redraw);
+  // The last task landed: CI, then a Merge button.
+  if (reviewable(board)) void startReview(ctx, boardId, board, parent as ThreadParent, interaction.user, redraw, false);
 }
 
 type ThreadParent = { threads?: { create(o: { name: string }): Promise<unknown> } };
@@ -394,7 +396,8 @@ async function runBoardTask(
   }
   await thread.members?.add(user.id).catch(() => {});
   ctx.config.setChannelBrain(thread.id, brain.id);
-  ctx.chats.setMode(ctx.chats.start(thread.id, brain.id).id, task.mode);
+  const chat = planChatFor(ctx, board, brain.id, thread.id);
+  ctx.chats.setMode(chat.id, task.mode);
   board.states[index] = { kind: "running", url: thread.url };
   board.threads = { ...board.threads, [thread.id]: index };
   saveTaskBoards();
@@ -403,8 +406,10 @@ async function runBoardTask(
   onMessageReceived(thread.id, thread as never, false);
   let ok = false;
   try {
-    ok = await runTaskInThread(ctx, brain, board, index, thread, user);
+    ok = await runTaskInThread(ctx, brain, board, index, thread, user, chat.continuing);
   } catch (e) {
+    // Its turn may still be going: the next task gets a chat of its own.
+    if (board.workChat?.id === chat.id) board.workChat.open = false;
     await thread.send({ content: `❌ ${errorText(e).slice(0, 1500)}`, allowedMentions: { parse: [] } }).catch(() => {});
   }
   board.states[index] = { kind: ok ? "done" : "failed", url: thread.url };
@@ -412,6 +417,32 @@ async function runBoardTask(
   await redraw();
   return ok;
 }
+
+/**
+ * The chat this task runs in: the plan's work chat, moved into the task's
+ * thread, so it already knows the plan and what earlier tasks did. A fresh
+ * one (told the plan's context) for the first task, after PLAN_CHAT_TASKS, when
+ * a turn there may still be running, or when the owner moved it off its last
+ * task thread (`/clear`, `/resume`).
+ */
+function planChatFor(ctx: Ctx, board: TaskBoard, brainId: string, threadId: string): { id: string; continuing: boolean } {
+  const w = board.workChat;
+  const at = w ? ctx.chats.locationOf(w.id) : null;
+  if (w && w.open && w.tasks < PLAN_CHAT_TASKS && at && board.threads?.[at] !== undefined && ctx.chats.get(w.id)?.brain === brainId) {
+    ctx.chats.bind(threadId, w.id);
+    w.tasks++;
+    saveTaskBoards();
+    return { id: w.id, continuing: true };
+  }
+  const fresh = ctx.chats.start(threadId, brainId);
+  board.workChat = { id: fresh.id, tasks: 1, open: true };
+  saveTaskBoards();
+  return { id: fresh.id, continuing: false };
+}
+
+/** Said instead of the plan's context when a task continues the plan's chat. */
+const CONTINUE_NOTE =
+  "[From Choomfie: same plan, same chat — you ran the earlier tasks above. Start from the branch attached now, which has everything committed so far.]";
 
 /**
  * A plan's chat asked for one more job ("make the meshes stickerless"): it
@@ -429,9 +460,9 @@ setPlanTaskStarter(async (ctx, boardId, index, user) => {
   if (parent?.type !== ChannelType.GuildText || !parent.threads) return false;
   const msg = await w.messages?.fetch(boardId).catch(() => null);
   const redraw = () => msg?.edit({ components: taskBoardRows(board) }).catch(() => {}) ?? Promise.resolve();
-  if (board.busy || board.states[index]?.kind === "running") return false;
+  if (boardBusy(board)) return false;
   const ok = (await runBoardTask(ctx as Ctx, brain, board, index, parent, user, redraw)) === true;
-  if (ok && reviewable(board)) void startReview(ctx as Ctx, boardId, board, parent, user, redraw);
+  if (ok && reviewable(board)) void startReview(ctx as Ctx, boardId, board, parent, user, redraw, false);
   return ok;
 });
 
@@ -441,7 +472,7 @@ function threadParentOf(channel: unknown): (ThreadParent & { type?: ChannelType 
   return ((here?.isThread?.() ? here.parent : here) ?? null) as (ThreadParent & { type?: ChannelType }) | null;
 }
 
-/** "🔎 Review" on a board whose tasks all landed: run the review loop now. */
+/** "🔎 Review" on a board whose tasks all landed: the brain reviews the plan in a fresh chat, then CI and Merge. */
 async function handleReview(interaction: ButtonInteraction, ctx: Ctx): Promise<void> {
   const ephemeral = (content: string) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
   if (!isOwner(ctx, interaction.user.id)) return void (await ephemeral("Only the owner can review a plan~"));
@@ -453,13 +484,15 @@ async function handleReview(interaction: ButtonInteraction, ctx: Ctx): Promise<v
   if (parent?.type !== ChannelType.GuildText || !parent.threads) return void (await ephemeral("Reviews run in a thread, so they need a server text channel."));
   await interaction.deferUpdate();
   const redraw = () => interaction.message.edit({ components: taskBoardRows(board) }).catch(() => {});
-  void startReview(ctx, boardId, board, parent, interaction.user, redraw);
+  void startReview(ctx, boardId, board, parent, interaction.user, redraw, true);
 }
 
 /**
- * The review loop for each of the board's plan branches, in a thread of its
- * own: review → fix tasks on the board → review, until clean and CI passes
- * (a Merge button) or it needs the owner.
+ * The merge loop for each of the board's plan branches, in a thread of its
+ * own: CI (a failure becomes a fix task) until it passes, then a Merge button,
+ * or the owner. With `review` (the 🔎 Review button; never automatic, since
+ * it's a fresh chat re-reading the whole plan) the brain reviews first:
+ * review → fix tasks → review, until clean.
  */
 async function startReview(
   ctx: Ctx,
@@ -467,7 +500,8 @@ async function startReview(
   board: TaskBoard,
   parent: ThreadParent,
   user: { username: string; id: string },
-  redraw: () => Promise<unknown>
+  redraw: () => Promise<unknown>,
+  review: boolean
 ): Promise<void> {
   const brain = getBrain(board.brainId);
   const fixMode = brain?.modes?.find((m) => m.repo)?.id;
@@ -482,7 +516,7 @@ async function startReview(
     await redraw();
     let thread: SendableChannel & { id: string; url: string; members?: { add(id: string): Promise<unknown> } };
     try {
-      thread = (await parent.threads!.create({ name: `🔎 Review · ${pb.repo}`.slice(0, 100) })) as typeof thread;
+      thread = (await parent.threads!.create({ name: `${review ? "🔎 Review" : "🚦 Merge"} · ${pb.repo}`.slice(0, 100) })) as typeof thread;
     } catch (e) {
       console.error(`[review] couldn't open a thread: ${errorText(e)}`);
       state.status = "stuck";
@@ -492,7 +526,7 @@ async function startReview(
     state.threadId = thread.id;
     state.threadUrl = thread.url;
     // The brain reviews in a chat of its own, in its review mode; later rounds come back to the same chat.
-    const reviewMode = brain.modes?.find((m) => m.id === "review")?.id;
+    const reviewMode = review ? brain.modes?.find((m) => m.id === "review")?.id : undefined;
     if (reviewMode) {
       ctx.config.setChannelBrain(thread.id, brain.id);
       ctx.chats.setMode(ctx.chats.start(thread.id, brain.id).id, reviewMode);
@@ -502,7 +536,8 @@ async function startReview(
     await say(
       reviewMode
         ? `${brain.label} reviews \`${pb.branch}\` of **${pb.repo}** against its rules and the plan's tasks${pb.prUrl ? ` · ${pb.prUrl}` : ""}.`
-        : `${brain.label} has no review mode: \`${pb.branch}\` goes to CI${pb.prUrl ? ` · ${pb.prUrl}` : ""}.`
+        : `${review ? `${brain.label} has no review mode: ` : ""}\`${pb.branch}\` of **${pb.repo}** goes to CI, then a Merge button${pb.prUrl ? ` · ${pb.prUrl}` : ""}.` +
+            (review ? "" : " **🔎 Review** on the board has it reviewed in a fresh chat first.")
     );
     try {
       await reviewLoop(pb, board.tasks, state, {
@@ -700,13 +735,19 @@ async function runTaskInThread(
   board: TaskBoard,
   index: number,
   thread: SendableChannel & { id: string },
-  user: { username: string; id: string }
+  user: { username: string; id: string },
+  continuing = false
 ): Promise<boolean> {
   const task = board.tasks[index];
   const say = (content: string) => thread.send({ content, allowedMentions: { parse: [] } }).catch(() => {});
+  /** Its turn is still going in the background: the next task mustn't send into the same chat. */
+  const stillRunning = () => {
+    if (board.workChat && ctx.chats.locationOf(board.workChat.id) === thread.id) board.workChat.open = false;
+    saveTaskBoards();
+  };
   const message = {
     chatKey: thread.id,
-    content: taskPrompt(task, board.context),
+    content: continuing ? `${taskPrompt(task)}\n\n${CONTINUE_NOTE}` : taskPrompt(task, board.context),
     meta: { chat_id: thread.id, user: user.username, user_id: user.id, role: "owner" },
     filePaths: [] as string[],
   };
@@ -714,6 +755,7 @@ async function runTaskInThread(
   const repo = planTaskRepo(board, index);
   if (!repo || !(mode?.repo || mode?.files || mode?.readsRepo)) {
     const reply = await dispatchToBrain(ctx, brain, thread, message);
+    if (reply?.background) stillRunning();
     return !!reply && !reply.stopped;
   }
 
@@ -765,6 +807,7 @@ async function runTaskInThread(
     if (!mode.repo && !mode.files) {
       // Reads only: the answer is the result.
       if (reply.background) {
+        stillRunning();
         await say(`⏳ ${brain.label} is still on it; its answer is posted here when it finishes. The next task waits for you to start it from the board.`);
         return false;
       }
@@ -773,6 +816,7 @@ async function runTaskInThread(
     }
     const landing = landingFor(board, index, reply.files);
     if (!landing && reply.background) {
+      stillRunning();
       await say(
         `⏳ ${brain.label} is still on it. When it finishes, its answer is posted here with a **Commit to the plan's branch** button; ` +
           `the next task waits for you to start it from the board.`

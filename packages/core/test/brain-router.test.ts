@@ -395,7 +395,7 @@ describe("a plan's own chat", () => {
     expect(note).toContain("1. Scaffold [code] — done");
     expect(note).toContain("2. Turning [code] — failed");
     expect(note).toContain("me/cube (read it");
-    expect(note).toContain("Choomfie reviews the PR");
+    expect(note).toContain("Choomfie waits for CI");
     expect(note).toContain("https://pr/2");
 
     const started: { boardId: string; index: number }[] = [];
