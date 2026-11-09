@@ -1,6 +1,6 @@
 /**
  * Pipelines: local command-line tools a brain may run on this machine through
- * `pipeline_run` (a character builder, a renderer, …). Declared by hand in
+ * the `pipeline` tool (a character builder, a renderer, …). Declared by hand in
  * config.json, like `chatRoots`, because each one widens what a chat (and the
  * remote endpoint, if the tools are on its allowlist) can do here:
  *
@@ -19,8 +19,8 @@
  * - `allow`: the subcommands a caller may pass as the first argument. Nothing else runs.
  * - `json` (optional): a flag that makes the tool print one JSON result on stdout. With it, the
  *   runner reads `show` (pictures to post), `say`/`next` and `ok` from that result.
- * - `about` (optional): what it's for and how to start, one or two sentences. It goes into `pipeline_run`'s
- *   description, so a brain asked for "a character" knows which pipeline makes one.
+ * - `about` (optional): what it's for and how to start, one or two sentences. A thread put on the pipeline
+ *   (`/pipeline <name>`) tells its brain this once, so a plain "make me a character" goes to the right tool.
  */
 
 import { existsSync, statSync } from "node:fs";

@@ -307,7 +307,7 @@ export function createDiscordClient(ctx: AppContext): Client {
     // Handle image/file attachments
     const filePaths = await downloadAttachments(ctx, message.attachments.values(), meta);
     if (filePaths.length) {
-      // Kept so a tool can ask for "the user's last pictures" (pipeline_run files).
+      // Kept so a tool can ask for "the user's last pictures" (the pipeline tool's files).
       try {
         recordThreadFiles(ctx.DATA_DIR, message.channelId, message.id, "user", filePaths.map((path) => ({ path })));
       } catch (e) {

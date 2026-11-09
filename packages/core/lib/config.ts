@@ -111,7 +111,7 @@ export interface Config {
    */
   chatRoots?: string[];
   /**
-   * Local tools a brain may run through `pipeline_run`, by name. Edited in
+   * Local tools a brain may run through the `pipeline` tool, by name. Edited in
    * config.json, like chatRoots: see lib/pipelines/config.ts.
    */
   pipelines?: unknown;
@@ -405,7 +405,7 @@ export class ConfigManager {
 
   // --- Brains ---
 
-  /** Pipelines a brain may run (`pipeline_run`); entries that don't validate are left out. */
+  /** Pipelines a brain may run (the `pipeline` tool); entries that don't validate are left out. */
   getPipelines(): Map<string, PipelineConfig> {
     const { pipelines, problems } = parsePipelines(this.config.pipelines);
     for (const p of problems) console.error(`[config] ${p}`);

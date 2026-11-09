@@ -174,6 +174,7 @@ export function registerAllHandlers(): Promise<void> {
     await import("./handlers/brain-command.ts");
     await import("./handlers/resume-command.ts");
     await import("./handlers/ask-command.ts");
+    await import("./handlers/pipeline-command.ts");
   })();
   return handlersLoaded;
 }

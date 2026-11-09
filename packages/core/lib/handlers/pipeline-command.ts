@@ -1,0 +1,85 @@
+/**
+ * `/pipeline [name]`: put this thread on a configured pipeline (lochara, …),
+ * or take it off (`off`), or see which it's on (no name). On, whichever brain
+ * answers here is told once what the thread is for (lib/pipelines/thread-mode.ts),
+ * and `next` runs straight away so the thread opens on where things stand.
+ * Owner only.
+ */
+
+import { MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction } from "discord.js";
+import { AUTOCOMPLETE_LIMIT } from "@choomfie/shared";
+import { registerCommand } from "../register.ts";
+import { requireOwner } from "./shared.ts";
+import { buildArgv } from "../pipelines/args.ts";
+import { nextStep } from "../pipelines/announce.ts";
+import { pipelineRunner } from "../pipelines/index.ts";
+import { INLINE_MS } from "../tools/pipeline-tools.ts";
+import type { AppContext } from "../types.ts";
+
+/** The first command a thread runs when it's put on a pipeline. */
+const START = ["next"];
+
+async function ephemeral(interaction: ChatInputCommandInteraction, content: string): Promise<void> {
+  await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+}
+
+/** Run the pipeline's first step for this thread; its pictures are posted by the runner. One line on where it stands. */
+async function start(ctx: AppContext, name: string, chatId: string): Promise<string> {
+  const p = ctx.config.getPipelines().get(name)!;
+  if (!p.allow.includes(START[0])) return "";
+  try {
+    const runner = pipelineRunner(ctx);
+    const job = runner.start(p, buildArgv(p, START), START, chatId);
+    if (!(await runner.wait(job, INLINE_MS))) return "";
+    return nextStep(job)?.say ?? (job.error ? `\`${START.join(" ")}\` failed: ${job.error}` : "");
+  } catch (e) {
+    return `\`${START.join(" ")}\` failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+registerCommand("pipeline", {
+  data: {
+    ...new SlashCommandBuilder()
+      .setName("pipeline")
+      .setDescription("Put this thread on a local pipeline (e.g. lochara), or `off` (owner only)")
+      .addStringOption((o) => o.setName("name").setDescription("A configured pipeline, or `off`; omit to see").setAutocomplete(true))
+      .toJSON(),
+  },
+  autocomplete: async (interaction, ctx) => {
+    const typed = interaction.options.getFocused().toLowerCase();
+    await interaction.respond(
+      [...ctx.config.getPipelines().keys(), "off"]
+        .filter((n) => n.includes(typed))
+        .slice(0, AUTOCOMPLETE_LIMIT)
+        .map((n) => ({ name: n, value: n }))
+    );
+  },
+  handler: async (interaction, ctx) => {
+    if (await requireOwner(interaction, ctx)) return;
+    const location = interaction.channelId;
+    const names = [...ctx.config.getPipelines().keys()];
+    const requested = interaction.options.getString("name")?.trim().toLowerCase();
+    const current = ctx.chats.pipelineAt(location)?.pipeline;
+    if (!requested) {
+      return ephemeral(
+        interaction,
+        `${current ? `This thread is on **${current}**.` : "This thread isn't on a pipeline."} ` +
+          `Configured: ${names.map((n) => `\`${n}\``).join(", ") || "none (config.json `pipelines`)"}.`
+      );
+    }
+    if (requested === "off") {
+      ctx.chats.setPipeline(location, null);
+      return ephemeral(interaction, current ? `This thread is off **${current}**.` : "This thread wasn't on a pipeline.");
+    }
+    if (!names.includes(requested)) {
+      return ephemeral(interaction, `No pipeline \`${requested}\`. Configured: ${names.map((n) => `\`${n}\``).join(", ") || "none"}.`);
+    }
+    ctx.chats.setPipeline(location, requested);
+    await interaction.deferReply();
+    const where = await start(ctx, requested, location);
+    await interaction.editReply({
+      content: [`This thread is on **${requested}**: just say what you want. \`/pipeline off\` to leave it.`, where].filter(Boolean).join("\n").slice(0, 2000),
+      allowedMentions: { parse: [] },
+    });
+  },
+});
