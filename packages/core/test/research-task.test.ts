@@ -41,7 +41,7 @@ describe("research plan tasks", () => {
         ],
       };
       expect(landingFor(board, 1, [f("report.md")])).toBeUndefined();
-      expect(landingFor(board, 0, [f("a.patch")])).toEqual({ kind: "patch", files: [f("a.patch")] });
+      expect(landingFor(board, 0, [f("a.patch")], "a.patch")).toEqual({ kind: "patch", files: [f("a.patch")] });
     } finally {
       unregisterBrain("rbrain");
     }

@@ -6,10 +6,10 @@ const file = (name = "fix.patch") => ({ name, data: new TextEncoder().encode("di
 
 describe("findPatch", () => {
   test("needs a patch file and a repo line; takes the title from the first line", () => {
-    const text = "**Code blocks now survive chunking.**\nrepo: `ANonABento/choomfie`\n```\n 1 pass\n```";
+    const text = "**Code blocks now survive chunking.**\n[fix.patch](/x)\nrepo: `ANonABento/choomfie`\n```\n 1 pass\n```";
     expect(findPatch(text, [file()])).toMatchObject({ repo: "ANonABento/choomfie", title: "Code blocks now survive chunking." });
-    expect(findPatch("repo: https://github.com/a/b.git", [file("x.diff")])?.repo).toBe("a/b");
-    expect(findPatch("- **repo:** a/b", [file()])?.repo).toBe("a/b");
+    expect(findPatch("x.diff\nrepo: https://github.com/a/b.git", [file("x.diff")])?.repo).toBe("a/b");
+    expect(findPatch("fix.patch\n- **repo:** a/b", [file()])?.repo).toBe("a/b");
     expect(findPatch(text, [file("notes.md")])).toBeNull();
     expect(findPatch("no repo here", [file()])).toBeNull();
     expect(findPatch("repo: a/b; rm -rf /", [file()])).toBeNull();

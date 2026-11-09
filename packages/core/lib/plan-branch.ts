@@ -15,6 +15,7 @@
  * commit with hooks off, push. Review and CI happen on the PR.
  */
 
+import { namedPatch } from "./patch-pr.ts";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -377,13 +378,8 @@ async function openPlanPr(pb: PlanBranch, run: Runner): Promise<string> {
  * the same folder is never picked up.
  */
 export function pickPatch(files: BrainFile[] | undefined, text?: string): BrainFile | undefined {
-  let patches = (files ?? []).filter((f) => /\.(patch|diff)$/i.test(f.name));
-  if (text !== undefined) {
-    const at = (f: BrainFile) => text.lastIndexOf(f.name.split(/[\\/]/).pop()!);
-    patches = patches.filter((f) => at(f) >= 0).sort((a, b) => at(a) - at(b));
-  }
-  const final = patches.filter((f) => !/(^|[^a-z])wip([^a-z]|$)/i.test(f.name));
-  return (final.length ? final : patches).at(-1);
+  const r = namedPatch(files, text ?? "");
+  return "file" in r ? r.file : undefined;
 }
 
 /** The prompt line for a CAD / 3D task in a plan with a repo: where its files go, and the repo if it needs earlier ones. */

@@ -319,9 +319,9 @@ describe("plan branch", () => {
     expect(note).toContain("swe.sh setup b.bundle");
     expect(note).toContain("repo: a/b");
     const f = (name: string) => ({ name, data: new Uint8Array() });
-    expect(pickPatch([f("wip.patch"), f("fast-mode.patch"), f("notes.md")])?.name).toBe("fast-mode.patch");
-    expect(pickPatch([f("wip.patch")])?.name).toBe("wip.patch");
-    expect(pickPatch([f("a.patch"), f("b.diff")])?.name).toBe("b.diff");
+    expect(pickPatch([f("wip.patch"), f("fast-mode.patch"), f("notes.md")], "fast-mode.patch (wip.patch)")?.name).toBe("fast-mode.patch");
+    expect(pickPatch([f("wip.patch")], "wip.patch")?.name).toBe("wip.patch");
+    expect(pickPatch([f("a.patch"), f("b.diff")])).toBeUndefined(); // never by position
     expect(pickPatch([f("x.md")])).toBeUndefined();
   });
 

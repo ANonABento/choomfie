@@ -56,7 +56,7 @@ import {
 import { isAllowed, isOwner } from "../access.ts";
 import { onMessageReceived, onReplySent } from "../typing.ts";
 import { isDaemonMode, requestDaemonControl, waitForClaudeIdle } from "../daemon-status.ts";
-import { openDraftPr, runCommand, takePatch } from "../patch-pr.ts";
+import { namedPatch, openDraftPr, runCommand, takePatch } from "../patch-pr.ts";
 import { ghApi } from "../git-data.ts";
 import { bundlePlanBranch, landFiles, landPatch, openPlanBranch, planBranchNote, planFilesNote, type PlanBranch } from "../plan-branch.ts";
 import { requireOwner } from "./shared.ts";
@@ -561,6 +561,11 @@ async function runTaskInThread(
       return false;
     }
     if (!landing) {
+      const named = mode.repo ? namedPatch(reply.files, reply.text) : undefined;
+      if (named && "error" in named && reply.files?.some((f) => /\.(patch|diff)$/i.test(f.name))) {
+        await say(`❌ Patch rejected: ${named.error}. Nothing was committed to \`${pb.branch}\`.`);
+        return false;
+      }
       const cut = /stopping after (several|\d+) tool calls/i.test(reply.text);
       await say(
         `❌ No ${mode.repo ? "patch" : "files"} came back${cut ? ` (${brain.label} kept hitting its tool limit)` : ""}, so nothing was committed to \`${pb.branch}\`. ` +

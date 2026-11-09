@@ -228,7 +228,7 @@ describe("patches", () => {
     const sent: { content?: string; components?: unknown[] }[] = [];
     const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: `p${sent.length}` }) };
     const file = { name: "fix.patch", data: new TextEncoder().encode("diff --git a/x b/x\n") };
-    await postBrainReply(channel, "waymond", "c1", { text: "Fixed the split.\nrepo: owner/name", files: [file] });
+    await postBrainReply(channel, "waymond", "c1", { text: "Fixed the split.\n[fix.patch](/x)\nrepo: owner/name", files: [file] });
     expect(sent).toHaveLength(2);
     expect(sent[1].content).toContain("owner/name");
     const ids = (sent[1].components![0] as { toJSON(): { components: { custom_id: string }[] } }).toJSON().components;
@@ -362,7 +362,7 @@ describe("what a plan task commits", () => {
           { n: 3, mode: "ask", title: "C", spec: "" },
         ],
       };
-      expect(landingFor(board, 0, [f("wip.patch"), f("a.patch")])).toEqual({ kind: "patch", files: [f("a.patch")] });
+      expect(landingFor(board, 0, [f("wip.patch"), f("a.patch")], "a.patch (earlier: wip.patch)")).toEqual({ kind: "patch", files: [f("a.patch")] });
       expect(landingFor(board, 0, [f("a.png")])).toBeUndefined();
       expect(landingFor(board, 1, [f("m.scad"), f("m.stl"), f("x.patch")])).toEqual({ kind: "files", files: [f("m.scad"), f("m.stl")], folder: "cad" });
       expect(landingFor(board, 2, [f("m.scad")])).toBeUndefined();

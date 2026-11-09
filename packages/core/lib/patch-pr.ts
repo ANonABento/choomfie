@@ -24,6 +24,46 @@ export interface PatchOffer {
   title: string;
   /** PR body: the answer, as the brain wrote it. */
   body: string;
+  /** Branch the task asked for (`fix/`, `feat/` or `waymond/`), else a generated `waymond/<slug>-<ts>`. */
+  branch?: string;
+}
+
+const PATCH_FILE = /\.(patch|diff)$/i;
+const base = (name: string) => name.split(/[\\/]/).pop()!;
+
+/**
+ * The patch a reply names, by file name - never by position. Patch files the
+ * text doesn't name are ignored; when it names several, the last non-wip one
+ * wins. No named patch, or a name with no such file, is an error.
+ */
+export function namedPatch(files: BrainFile[] | undefined, text: string): { file: BrainFile } | { error: string } {
+  const patches = (files ?? []).filter((f) => PATCH_FILE.test(f.name));
+  const at = (f: BrainFile) => text.lastIndexOf(base(f.name));
+  const named = patches.filter((f) => at(f) >= 0).sort((a, b) => at(a) - at(b));
+  const final = named.filter((f) => !/(^|[^a-z])wip([^a-z]|$)/i.test(base(f.name)));
+  const file = (final.length ? final : named).at(-1);
+  if (file) return { file };
+  const said = text.match(/[\w.-]+\.(?:patch|diff)\b/i)?.[0];
+  if (said) return { error: `the reply names ${said}, but no such patch came back` };
+  return {
+    error: patches.length
+      ? `the reply doesn't name its patch (got ${patches.map((f) => base(f.name)).join(", ")}; patches aren't picked by position)`
+      : "no .patch/.diff came back",
+  };
+}
+
+const BRANCH_OK = /^(fix|feat|waymond)\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
+
+/** A task-given branch name is used only under fix/, feat/ or waymond/ - never main or the default branch. */
+export function validBranch(name: string, defaultBranch = "main"): boolean {
+  return BRANCH_OK.test(name) && !name.includes("..") && !name.endsWith(".lock") && name !== defaultBranch && name !== "main";
+}
+
+/** The branch a task's text asks for ("branch `fix/x`"), if it is a valid one. */
+export function taskBranch(text: string): string | undefined {
+  const m = text.match(/\bbranch\b[^`\n]{0,24}`([^`\s]+)`/i) ?? text.match(/\bbranch:?\s+((?:fix|feat|waymond)\/[\w.\/-]+)/i);
+  const name = m?.[1].replace(/[.,;:]+$/, "");
+  return name && validBranch(name) ? name : undefined;
 }
 
 const REPO_LINE = /^[\s>*_-]*repo:?\**\s*`?(?:https?:\/\/github\.com\/)?([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?`?\s*$/im;
@@ -31,7 +71,8 @@ const SAFE_REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /** A patch the answer offers, or null: needs both a `.patch`/`.diff` file and a `repo:` line. */
 export function findPatch(text: string, files: BrainFile[] | undefined): PatchOffer | null {
-  const file = files?.find((f) => /\.(patch|diff)$/i.test(f.name));
+  const picked = namedPatch(files, text);
+  const file = "file" in picked ? picked.file : undefined;
   const repo = REPO_LINE.exec(text)?.[1];
   if (!file || !repo || !SAFE_REPO.test(repo) || repo.includes("..")) return null;
   const first = text
@@ -39,7 +80,8 @@ export function findPatch(text: string, files: BrainFile[] | undefined): PatchOf
     .map((l) => l.replace(/[*_`#>]/g, "").trim())
     .find((l) => l && !/^repo:/i.test(l));
   const title = (first ?? file.name.replace(/\.(patch|diff)$/i, "")).slice(0, 72);
-  return { repo, file, title, body: text };
+  const branch = taskBranch(text);
+  return { repo, file, title, body: text, ...(branch ? { branch } : {}) };
 }
 
 /** Button message id → the patch it offers. In memory: a restart expires them. */
@@ -129,7 +171,7 @@ export async function openDraftPr(offer: PatchOffer, run: Runner = runCommand): 
       return { url: url.trim() || `https://github.com/${offer.repo}`, kind: "repo" };
     }
     await run(["gh", "repo", "clone", offer.repo, repoDir, "--", "--depth", "1", "-q"]);
-    const branch = branchName(offer.title);
+    const branch = offer.branch && validBranch(offer.branch) ? offer.branch : branchName(offer.title);
     await run(["git", "checkout", "-q", "-b", branch], repoDir);
     await apply();
     await run(["git", ...noHooks, "commit", "-q", "-m", offer.title, "-m", "Patch written by Waymond, opened from Discord."], repoDir);
