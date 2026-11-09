@@ -29,6 +29,7 @@ import {
   MessageFlags,
   SlashCommandBuilder,
   type ButtonInteraction,
+  type ChatInputCommandInteraction,
 } from "discord.js";
 import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds } from "@choomfie/shared";
 import { join } from "node:path";
@@ -617,11 +618,11 @@ const restartRow = (force = false) =>
   );
 
 /**
- * Restart Choomfie on the code on disk (after a merge into its own repo).
- * Lists what would be cut off first; "Restart anyway" goes ahead. The daemon
- * still lets each Claude session finish its turn.
+ * Restart Choomfie on the code on disk (the button after a merge into its own
+ * repo, or /restart). Lists what would be cut off first; "Restart anyway" goes
+ * ahead. The daemon still lets each Claude session finish its turn.
  */
-async function handleRestart(interaction: ButtonInteraction, force: boolean, ctx: Ctx): Promise<void> {
+async function handleRestart(interaction: ButtonInteraction | ChatInputCommandInteraction, force: boolean, ctx: Ctx): Promise<void> {
   const ephemeral = (content: string, components?: unknown[]) =>
     interaction.reply({ content, flags: MessageFlags.Ephemeral, ...(components ? { components } : {}) } as never);
   if (!isOwner(ctx, interaction.user.id)) return void (await ephemeral("Only the owner can restart Choomfie~"));
@@ -635,6 +636,14 @@ async function handleRestart(interaction: ButtonInteraction, force: boolean, ctx
   }
   await ephemeral("Restarting once every Claude session finishes its turn — back in a few seconds.");
 }
+
+registerCommand("restart", {
+  data: new SlashCommandBuilder()
+    .setName("restart")
+    .setDescription("Restart Choomfie on the code on disk; says first what it would cut off (owner only)")
+    .toJSON(),
+  handler: (interaction, ctx) => handleRestart(interaction, false, ctx),
+});
 
 /**
  * The brain as the reviewer: one message in the review thread's chat (in its

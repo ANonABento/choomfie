@@ -22,7 +22,7 @@ describe("slash command set", () => {
   // so pin what must exist and what must be gone rather than the exact list.
   const EXPECTED = [
     "access", "brain", "choomfie", "clear", "compact", "config", "github", "help", "memory",
-    "model", "persona", "plugins", "remind", "status", "stop", "usage", "voice",
+    "model", "persona", "plugins", "remind", "restart", "status", "stop", "usage", "voice",
   ];
   const REMOVED = ["reminders", "cancel", "savememory", "newpersona", "allow", "revoke"];
 
@@ -30,7 +30,7 @@ describe("slash command set", () => {
     const names = new Set(slash().map((c) => c.name));
     for (const n of EXPECTED) expect(names.has(n)).toBe(true);
     for (const n of REMOVED) expect(names.has(n)).toBe(false);
-    expect(EXPECTED).toHaveLength(17);
+    expect(EXPECTED).toHaveLength(18);
   });
 
   test("merged commands expose their verbs as subcommands", () => {
