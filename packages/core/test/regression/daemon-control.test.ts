@@ -37,12 +37,12 @@ afterEach(() => {
 describe("control request parsing", () => {
   test("accepts the real commands and nothing else", () => {
     const base = { requestedAt: Date.now(), location: "t1" };
-    for (const command of ["compact", "clear", "stop", "resume"] as const) {
+    for (const command of ["compact", "clear", "stop", "resume", "restart"] as const) {
       expect(parseDaemonControlRequest({ ...base, command })?.command).toBe(command);
     }
 
     // A command the daemon has no handler for must not be acted on.
-    expect(parseDaemonControlRequest({ ...base, command: "restart" })).toBeNull();
+    expect(parseDaemonControlRequest({ ...base, command: "reboot" })).toBeNull();
     expect(parseDaemonControlRequest({ ...base, command: "" })).toBeNull();
   });
 

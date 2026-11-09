@@ -12,7 +12,9 @@
  * Also handles the buttons a brain's answer can carry: quick replies
  * (`brain:choice:<n>`), approvals (`brain:approval:yes|no`) and patches
  * (`brain:pr`, owner only: opens a draft PR from the patch) and plan tasks
- * (`brain:task:<n>`, owner only: runs the task in its own thread, in its mode).
+ * (`brain:task:<n>`, owner only: runs the task in its own thread, in its mode),
+ * a plan's review (`brain:review`, started by itself once every task landed)
+ * and its merge (`brain:merge:<board>:<repo>`, owner only).
  *
  * Threads inherit their parent channel's brain unless set directly, but each
  * thread is its own backend conversation.
@@ -28,12 +30,15 @@ import {
   SlashCommandBuilder,
   type ButtonInteraction,
 } from "discord.js";
-import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds } from "@choomfie/shared";
+import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, isDaemonOwnedProcess, listBrainIds } from "@choomfie/shared";
 import { join } from "node:path";
 import { botIsAbsent, interactionChannel, rememberBrainRelay, settleAskRelays } from "../ask-relay.ts";
 import { registerButtonHandler, registerCommand } from "../register.ts";
 import {
+  appendTask,
+  brainWorkIdle,
   clearPendingApproval,
+  reviewable,
   dispatchToBrain,
   getPendingApproval,
   getTaskBoard,
@@ -56,6 +61,9 @@ import { onMessageReceived, onReplySent } from "../typing.ts";
 import { isDaemonMode, requestDaemonControl, waitForClaudeIdle } from "../daemon-status.ts";
 import { openDraftPr, takePatch } from "../patch-pr.ts";
 import { bundlePlanBranch, landFiles, landPatch, openPlanBranch, planBranchNote, planFilesNote, planReadNote, type PlanBranch } from "../plan-branch.ts";
+import { mergePlanPr } from "../plan-branch.ts";
+import { claudeReviewer, reviewLoop, type ReviewState } from "../plan-review.ts";
+import { pullRunningCheckout, restartWhenIdle } from "../self-update.ts";
 import { requireOwner } from "./shared.ts";
 
 function label(id: string): string {
@@ -228,6 +236,8 @@ registerButtonHandler("brain", async (interaction, parts, ctx) => {
   if (parts[1] === "landtask") return handleLandTask(interaction, ctx);
   if (parts[1] === "task") return handleTask(interaction, Number(parts[2]), ctx);
   if (parts[1] === "taskall") return handleTask(interaction, "all", ctx);
+  if (parts[1] === "review") return handleReview(interaction, ctx);
+  if (parts[1] === "merge") return handleMerge(interaction, parts[2], parts.slice(3).join(":"), ctx);
   if (parts[1] !== "choice") return;
   const userId = interaction.user.id;
   const owner = isOwner(ctx, userId);
@@ -351,6 +361,8 @@ async function handleTask(interaction: ButtonInteraction, which: number | "all",
     saveTaskBoards();
     await redraw();
   }
+  // The last task landed: the plan reviews itself.
+  if (reviewable(board)) void startReview(ctx, boardId, board, parent as ThreadParent, interaction.user, redraw);
 }
 
 type ThreadParent = { threads?: { create(o: { name: string }): Promise<unknown> } };
@@ -414,8 +426,137 @@ setPlanTaskStarter(async (ctx, boardId, index, user) => {
   const msg = await w.messages?.fetch(boardId).catch(() => null);
   const redraw = () => msg?.edit({ components: taskBoardRows(board) }).catch(() => {}) ?? Promise.resolve();
   if (board.busy || board.states[index]?.kind === "running") return false;
-  return (await runBoardTask(ctx as Ctx, brain, board, index, parent, user, redraw)) === true;
+  const ok = (await runBoardTask(ctx as Ctx, brain, board, index, parent, user, redraw)) === true;
+  if (ok && reviewable(board)) void startReview(ctx as Ctx, boardId, board, parent, user, redraw);
+  return ok;
 });
+
+/** Threads can't nest: a board in a thread gets its review thread in the parent channel. */
+function threadParentOf(channel: unknown): (ThreadParent & { type?: ChannelType }) | null {
+  const here = channel as { isThread?: () => boolean; parent?: unknown } | null;
+  return ((here?.isThread?.() ? here.parent : here) ?? null) as (ThreadParent & { type?: ChannelType }) | null;
+}
+
+/** "🔎 Review" on a board whose tasks all landed: run the review loop now. */
+async function handleReview(interaction: ButtonInteraction, ctx: Ctx): Promise<void> {
+  const ephemeral = (content: string) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
+  if (!isOwner(ctx, interaction.user.id)) return void (await ephemeral("Only the owner can review a plan~"));
+  const boardId = interaction.message.id;
+  const board = getTaskBoard(boardId);
+  if (!board) return void (await ephemeral("These tasks expired."));
+  if (!reviewable(board)) return void (await ephemeral("Not yet: every task has to land first, and one review runs at a time."));
+  const parent = threadParentOf(interaction.channel);
+  if (parent?.type !== ChannelType.GuildText || !parent.threads) return void (await ephemeral("Reviews run in a thread, so they need a server text channel."));
+  await interaction.deferUpdate();
+  const redraw = () => interaction.message.edit({ components: taskBoardRows(board) }).catch(() => {});
+  void startReview(ctx, boardId, board, parent, interaction.user, redraw);
+}
+
+/**
+ * The review loop for each of the board's plan branches, in a thread of its
+ * own: review → fix tasks on the board → review, until clean and CI passes
+ * (a Merge button) or it needs the owner.
+ */
+async function startReview(
+  ctx: Ctx,
+  boardId: string,
+  board: TaskBoard,
+  parent: ThreadParent,
+  user: { username: string; id: string },
+  redraw: () => Promise<unknown>
+): Promise<void> {
+  const brain = getBrain(board.brainId);
+  const fixMode = brain?.modes?.find((m) => m.repo)?.id;
+  if (!brain || !fixMode || !reviewable(board)) return;
+  for (const pb of Object.values(board.plans ?? {})) {
+    const state: ReviewState = { status: "reviewing", round: 0 };
+    board.reviews = { ...board.reviews, [pb.repo]: state };
+    saveTaskBoards();
+    await redraw();
+    let thread: SendableChannel & { id: string; url: string; members?: { add(id: string): Promise<unknown> } };
+    try {
+      thread = (await parent.threads!.create({ name: `🔎 Review · ${pb.repo}`.slice(0, 100) })) as typeof thread;
+    } catch (e) {
+      console.error(`[review] couldn't open a thread: ${errorText(e)}`);
+      state.status = "stuck";
+      continue;
+    }
+    await thread.members?.add(user.id).catch(() => {});
+    state.threadId = thread.id;
+    state.threadUrl = thread.url;
+    const say = (content: string, components?: unknown[]) =>
+      thread.send({ content: content.slice(0, 2000), allowedMentions: { parse: [] }, ...(components ? { components } : {}) } as never).catch(() => {});
+    await say(`Reviewing \`${pb.branch}\` of **${pb.repo}** against its rules and the plan's tasks${pb.prUrl ? ` · ${pb.prUrl}` : ""}.`);
+    try {
+      await reviewLoop(pb, board.tasks, state, {
+        reviewer: claudeReviewer(ctx.config.getModel()),
+        say: (content) => say(content),
+        fixMode,
+        save: () => {
+          saveTaskBoards();
+          void redraw();
+        },
+        runFix: async (task) => {
+          const index = appendTask(board, task);
+          await redraw();
+          return (await runBoardTask(ctx, brain, board, index, parent, user, redraw)) === true;
+        },
+        offerMerge: (head, checks) =>
+          say(
+            `✅ **Ready to merge:** review clean, CI ${checks.kind === "none" ? "— this repo has none" : "passed"}. ` +
+              `Merges \`${head.slice(0, 7)}\` (exactly what was reviewed) into the default branch. If this is Choomfie's own repo, it then updates and restarts itself once nothing is running.`,
+            [
+              new ActionRowBuilder<ButtonBuilder>().addComponents(
+                new ButtonBuilder().setCustomId(`brain:merge:${boardId}:${pb.repo}`).setLabel("Merge").setStyle(ButtonStyle.Success)
+              ),
+            ]
+          ),
+      });
+    } catch (e) {
+      state.status = "stuck";
+      await say(`❌ The review stopped: ${errorText(e).slice(0, 1500)}`);
+    }
+    saveTaskBoards();
+    await redraw();
+  }
+}
+
+/** The Merge button under a clean review: merge exactly the reviewed head, then update and restart if it's Choomfie. */
+async function handleMerge(interaction: ButtonInteraction, boardId: string, repo: string, ctx: Ctx): Promise<void> {
+  const ephemeral = (content: string) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
+  if (!isOwner(ctx, interaction.user.id)) return void (await ephemeral("Only the owner can merge~"));
+  const board = getTaskBoard(boardId);
+  const pb = board?.plans?.[repo];
+  const state = board?.reviews?.[repo];
+  if (!board || !pb || !state) return void (await ephemeral("This plan expired."));
+  if (state.status === "merged") return void (await ephemeral("Already merged."));
+  if (state.status !== "ready" || !state.head) return void (await ephemeral("This review isn't ready to merge any more — review the plan again."));
+  await interaction.update({ components: [] });
+  const say = (content: string) => (interaction.channel as unknown as SendableChannel).send({ content: content.slice(0, 2000), allowedMentions: { parse: [] } }).catch(() => {});
+  try {
+    await mergePlanPr(pb, state.head);
+  } catch (e) {
+    state.status = "stuck";
+    saveTaskBoards();
+    await say(`❌ Couldn't merge: ${errorText(e).slice(0, 1500)}\nPress **🔎 Review** on the board to go again.`);
+    return;
+  }
+  state.status = "merged";
+  saveTaskBoards();
+  await say(`🎉 Merged: ${pb.prUrl}`);
+  const update = await pullRunningCheckout(pb.repo);
+  if (update.kind === "skipped") return void (await say(`⚠️ Didn't update the running Choomfie: ${update.why}. Pull and restart it yourself.`));
+  if (update.kind !== "pulled") return;
+  const restarting = isDaemonOwnedProcess();
+  await say(
+    `⬇️ Updated the running Choomfie \`${update.from}\` → \`${update.to}\`.` +
+      (restarting ? " Restarting once nothing is running (tasks, reviews, replies)…" : " Restart it to load the change (foreground mode can't restart itself).")
+  );
+  if (restarting) {
+    const ok = await restartWhenIdle(ctx.DATA_DIR, interaction.channelId, brainWorkIdle);
+    if (!ok) await say("⚠️ Still busy after 6 hours — restart it yourself.");
+  }
+}
 
 /** The plan's branch on `repo`: saved, being opened, or opened now (once, however many tasks ask). */
 async function planBranchFor(ctx: Ctx, board: TaskBoard, repo: string): Promise<PlanBranch> {

@@ -390,3 +390,107 @@ export function planBranchNote(pb: PlanBranch, bundleName: string, snapshot = fa
     `Finish as usual (diff → patch link, \`repo: ${pb.repo}\`); Choomfie commits your patch to the branch, so it must be built on exactly this bundle.`
   );
 }
+
+/** The plan's changes, ready to review: the default branch brought in, then everything since it. */
+export type ReviewDiff =
+  | { base: string; head: string; stat: string; diff: string; rules: string }
+  | { conflict: string; base: string };
+
+/** Repo rules a reviewer holds the change to, read from the default branch (a patch can't rewrite its own rules). */
+const RULE_FILES = ["CLAUDE.md", "AGENTS.md", "CONTRIBUTING.md"];
+const MAX_RULES_CHARS = 60_000;
+
+export function prepareReview(pb: PlanBranch, run: Runner = runCommand): Promise<ReviewDiff> {
+  return locked(pb.dir, async () => {
+    await syncClone(pb, run);
+    const caught = await catchUpWithBase(pb, run);
+    const base = await baseBranch(pb, run);
+    if (caught && "conflict" in caught) return { conflict: caught.conflict, base };
+    await tryRun(run, ["git", "fetch", "-q", "origin", `+refs/heads/${base}:refs/remotes/origin/${base}`], pb.dir);
+    const range = `origin/${base}...HEAD`;
+    const head = (await run(["git", "rev-parse", "HEAD"], pb.dir)).trim();
+    const stat = (await run(["git", "diff", "--stat", range], pb.dir)).trim();
+    const diff = await run(["git", "diff", range], pb.dir);
+    const rules: string[] = [];
+    for (const f of RULE_FILES) {
+      const text = await tryRun(run, ["git", "show", `origin/${base}:${f}`], pb.dir);
+      if (text?.trim()) rules.push(`--- ${f} ---\n${text.trim()}`);
+    }
+    return { base, head, stat, diff, rules: rules.join("\n\n").slice(0, MAX_RULES_CHARS) };
+  });
+}
+
+export interface PrStatus {
+  state: "OPEN" | "MERGED" | "CLOSED";
+  isDraft: boolean;
+  mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
+  headSha: string;
+  /** Each check: name, and its conclusion once it finished (null while it runs). */
+  checks: { name: string; done: boolean; ok: boolean }[];
+}
+
+/** The plan's PR as GitHub sees it now. */
+export async function prStatus(pb: PlanBranch, run: Runner = runCommand): Promise<PrStatus> {
+  if (!pb.prUrl) throw new Error(`${pb.branch} has no PR yet`);
+  const raw = JSON.parse(
+    await run(["gh", "pr", "view", pb.prUrl, "--json", "state,isDraft,mergeable,headRefOid,statusCheckRollup"])
+  ) as {
+    state: PrStatus["state"];
+    isDraft: boolean;
+    mergeable: PrStatus["mergeable"];
+    headRefOid: string;
+    statusCheckRollup?: { name?: string; context?: string; status?: string; conclusion?: string; state?: string }[];
+  };
+  const checks = (raw.statusCheckRollup ?? []).map((c) => {
+    // Check runs carry status/conclusion; commit statuses carry state.
+    const done = c.status ? c.status === "COMPLETED" : c.state !== "PENDING" && c.state !== "EXPECTED";
+    const result = (c.conclusion ?? c.state ?? "").toUpperCase();
+    return { name: c.name ?? c.context ?? "check", done, ok: ["SUCCESS", "NEUTRAL", "SKIPPED"].includes(result) };
+  });
+  return { state: raw.state, isDraft: raw.isDraft, mergeable: raw.mergeable, headSha: raw.headRefOid, checks };
+}
+
+export type ChecksResult = { kind: "passed" | "none" } | { kind: "failed"; failed: string[] } | { kind: "timeout"; pending: string[] };
+
+/**
+ * Wait for the PR's CI on `head`. No check appearing within `startMs` means the
+ * repo has no CI ("none"). Polls every `everyMs` up to `maxMs`.
+ */
+export async function waitForChecks(
+  pb: PlanBranch,
+  head: string,
+  run: Runner = runCommand,
+  { everyMs = 30_000, startMs = 120_000, maxMs = 30 * 60_000, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)) } = {}
+): Promise<ChecksResult> {
+  const started = Date.now();
+  for (;;) {
+    const s = await prStatus(pb, run).catch(() => null);
+    const elapsed = Date.now() - started;
+    if (s && s.headSha === head && s.checks.length) {
+      const failed = s.checks.filter((c) => c.done && !c.ok).map((c) => c.name);
+      if (failed.length) return { kind: "failed", failed };
+      if (s.checks.every((c) => c.done)) return { kind: "passed" };
+    } else if (s && s.headSha === head && elapsed >= startMs) {
+      return { kind: "none" };
+    }
+    if (elapsed >= maxMs) return { kind: "timeout", pending: s?.checks.filter((c) => !c.done).map((c) => c.name) ?? [] };
+    await sleep(everyMs);
+  }
+}
+
+/**
+ * Merge the plan's PR (a merge commit, so each task stays its own commit),
+ * marking it ready first. Only when GitHub's head is still `head`: what was
+ * reviewed is what gets merged. Resolves to the merged state, checked.
+ */
+export async function mergePlanPr(pb: PlanBranch, head: string, run: Runner = runCommand): Promise<void> {
+  const s = await prStatus(pb, run);
+  if (s.state === "MERGED") return;
+  if (s.state === "CLOSED") throw new Error(`${pb.prUrl} was closed`);
+  if (s.headSha !== head) throw new Error(`${pb.branch} changed since the review (now ${s.headSha.slice(0, 7)}) — review it again`);
+  if (s.mergeable === "CONFLICTING") throw new Error(`${pb.prUrl} conflicts with its base — review it again to bring the base in`);
+  if (s.isDraft) await run(["gh", "pr", "ready", pb.prUrl!]);
+  await run(["gh", "pr", "merge", pb.prUrl!, "--merge", "--match-head-commit", head]);
+  const after = await prStatus(pb, run);
+  if (after.state !== "MERGED") throw new Error(`GitHub says ${pb.prUrl} is ${after.state} after merging`);
+}

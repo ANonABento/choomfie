@@ -36,6 +36,7 @@ import { findPatch, offerPatch } from "./patch-pr.ts";
 import { takeChatNotes } from "./chat-notes.ts";
 import { recordThreadFiles } from "./pipelines/thread-files.ts";
 import { pickPatch, pruneClones, type PlanBranch } from "./plan-branch.ts";
+import type { ReviewState } from "./plan-review.ts";
 
 export type RouteDecision =
   /** Forward to the Claude session as usual. */
@@ -212,6 +213,8 @@ export interface TaskBoard {
   plans?: Record<string, PlanBranch>;
   /** Task thread id → task index. */
   threads?: Record<string, number>;
+  /** Repo → how the plan's review loop stands (lib/plan-review.ts). */
+  reviews?: Record<string, ReviewState>;
   /** Not saved: "Run all" is working through the list. */
   busy?: boolean;
   /** Not saved: branches being opened right now. */
@@ -261,6 +264,8 @@ export function loadTaskBoards(dataDir: string, now = Date.now()): void {
     for (const [id, b] of Object.entries(saved)) {
       if (!b || !Array.isArray(b.tasks) || !Array.isArray(b.states) || now - (b.createdAt ?? 0) > BOARD_TTL_MS) continue;
       b.states = b.states.map((s) => (s.kind === "running" ? { kind: "failed", url: s.url } : s));
+      // A review a restart cut off can be started again from the board.
+      for (const r of Object.values(b.reviews ?? {})) if (reviewActive(r)) r.status = "stuck";
       taskBoards.set(id, b);
     }
   } catch (e) {
@@ -271,6 +276,22 @@ export function loadTaskBoards(dataDir: string, now = Date.now()): void {
   const keep = new Set([...taskBoards.values()].flatMap((b) => Object.values(b.plans ?? {}).map((p) => p.dir)));
   const removed = pruneClones(join(dataDir, "plans"), keep, now);
   if (removed.length) console.error(`[tasks] removed ${removed.length} old plan clone(s)`);
+}
+
+/** A review loop that's working right now (reviewing, fixing, or waiting for CI). */
+export function reviewActive(r: ReviewState | undefined): boolean {
+  return r?.status === "reviewing" || r?.status === "fixing" || r?.status === "checks";
+}
+
+/** Every task landed, the plan has a branch, and no review is running: the board offers 🔎 Review. */
+export function reviewable(board: Pick<TaskBoard, "states" | "plans" | "reviews" | "busy">): boolean {
+  return (
+    !board.busy &&
+    board.states.length > 0 &&
+    board.states.every((s) => s.kind === "done") &&
+    Object.values(board.plans ?? {}).length > 0 &&
+    !Object.values(board.reviews ?? {}).some(reviewActive)
+  );
 }
 
 /** The newest board posted in this chat (the plan's own thread or channel), if any. */
@@ -294,13 +315,26 @@ export function planStatusNote(chatKey: string): string | undefined {
   const { board } = plan;
   const word = { idle: "not run yet", running: "running now", done: "done", failed: "failed" } as const;
   const lines = board.tasks.map((t, i) => `${t.n}. ${t.title} [${t.mode}] — ${word[board.states[i]?.kind ?? "idle"]}`);
-  const branches = Object.values(board.plans ?? {}).map(
-    (p) => `${p.repo} (private — read it through the user's connected GitHub account), branch ${p.branch}${p.prUrl ? `, PR ${p.prUrl} (opened as a draft — mark it ready for review before merging it)` : ""}`
-  );
+  const reviewWord = {
+    reviewing: "being reviewed",
+    fixing: "review fixes running",
+    checks: "review clean, waiting for CI",
+    ready: "review clean and CI passed — the owner has a Merge button in the review thread",
+    merged: "merged",
+    stuck: "review needs the owner (see the review thread)",
+  } as const;
+  const branches = Object.values(board.plans ?? {}).map((p) => {
+    const r = board.reviews?.[p.repo];
+    return (
+      `${p.repo} (read it through the user's connected GitHub account), branch ${p.branch}${p.prUrl ? `, PR ${p.prUrl}` : ""}` +
+      (r ? ` — ${reviewWord[r.status]}` : "")
+    );
+  });
   return [
     "[Plan status, from Choomfie (not the user): each task ran in its own chat; finished code/cad tasks are committed to the plan's branch, one commit per task.",
     ...lines,
     ...(branches.length ? [`Repo: ${branches.join("; ")}`] : []),
+    "When every task is done, Choomfie reviews the PR, sends you fix tasks for what it finds, waits for CI and offers the owner a Merge button. Don't tell the user to merge or mark the PR ready themselves. More tasks for this plan go on the same branch.",
     "]",
   ].join("\n");
 }
@@ -337,11 +371,12 @@ export function taskPrompt(task: { n: number; spec: string }, context?: string):
 }
 
 /** A button per task: runnable until started, then a link to its thread showing how it went. Plus "Run all" while 2+ are idle. */
-export function taskBoardRows(board: Pick<TaskBoard, "tasks" | "states" | "busy">) {
+export function taskBoardRows(board: Pick<TaskBoard, "tasks" | "states" | "busy" | "plans" | "reviews">) {
   const rows = [];
   // Failed tasks can run again (their thread is still linked from the retry).
   const idle = board.busy ? 0 : board.states.filter((s) => s.kind === "idle" || s.kind === "failed").length;
-  const tasks = board.tasks.slice(0, idle >= 2 ? 20 : 25);
+  const review = reviewable(board);
+  const tasks = board.tasks.slice(0, idle >= 2 || review ? 20 : 25);
   for (let r = 0; r * 5 < tasks.length; r++) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -365,6 +400,14 @@ export function taskBoardRows(board: Pick<TaskBoard, "tasks" | "states" | "busy"
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId("brain:taskall").setLabel(`▶ Run the remaining ${idle}, in order`).setStyle(ButtonStyle.Primary)
+      )
+    );
+  }
+  if (review) {
+    const merged = Object.values(board.reviews ?? {}).some((r) => r.status === "merged");
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("brain:review").setLabel(merged ? "🔎 Review again" : "🔎 Review and merge").setStyle(ButtonStyle.Primary)
       )
     );
   }
@@ -455,6 +498,8 @@ export async function postBrainReply(
   // A plan's tasks: one button each, which runs it in its own thread (owner only).
   // A single task the brain will run right away needs no buttons.
   if (reply.tasks?.length && !reply.runNow) {
+    // A new list in a plan's chat continues that plan: same branch, same PR, not a fresh branch off main.
+    const earlier = latestBoardIn(chatKey)?.board;
     const board: TaskBoard = {
       brainId,
       tasks: reply.tasks,
@@ -462,6 +507,7 @@ export async function postBrainReply(
       states: reply.tasks.map(() => ({ kind: "idle" })),
       createdAt: Date.now(),
       channelId: chatKey,
+      ...(earlier?.plans && earlier.brainId === brainId ? { plans: { ...earlier.plans } } : {}),
     };
     const sent = await channel.send({
       allowedMentions: NO_MENTIONS,
@@ -535,6 +581,15 @@ export function installBrainPoster(ctx: AppContext): void {
 
 /** One in-flight request per backend conversation; later ones queue behind it. */
 const queues = new Map<string, Promise<void>>();
+
+/** No brain turn, plan task or review is running: safe to restart. */
+export function brainWorkIdle(): boolean {
+  if (queues.size) return false;
+  for (const b of taskBoards.values()) {
+    if (b.busy || b.states.some((s) => s.kind === "running") || Object.values(b.reviews ?? {}).some(reviewActive)) return false;
+  }
+  return true;
+}
 
 /**
  * Run `job` when the conversation `chatKey` is free: Discord messages and

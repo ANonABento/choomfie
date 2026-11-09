@@ -51,6 +51,12 @@ import { SessionPool, type PoolChat } from "./pool.ts";
 const IDLE_CLOSE_MS = 20 * 60_000;
 const EVICT_INTERVAL_MS = 60_000;
 const STATE_INTERVAL_MS = 30_000;
+/**
+ * Exit code for a requested restart: not 0, so launchd's KeepAlive
+ * (SuccessfulExit = false) starts the daemon again.
+ */
+export const RESTART_EXIT_CODE = 75;
+
 /** Health-triggered worker restarts allowed per hour; past that, stop and say so. */
 const MAX_HEALTH_RESTARTS_PER_HOUR = 3;
 
@@ -201,15 +207,24 @@ export async function runDaemon(settings: DaemonSettings): Promise<void> {
     }
   }, INCOMING_POLL_INTERVAL_MS);
 
-  // --- Control: /stop, /compact, /clear, /resume for one location ---
+  // --- Control: /stop, /compact, /clear, /resume for one location; restart for all ---
+  let restartRequested = false;
   const controlTimer = setInterval(async () => {
     let request: DaemonControlRequest | null = null;
+    // A restart waits for every session to finish its turn; launchd starts the daemon again.
+    if (restartRequested && !pool.anyBusy()) {
+      log("Restarting on the code on disk");
+      return void shutdown(RESTART_EXIT_CODE);
+    }
     try {
       request = await takeControlRequest();
       if (!request) return;
       log(`Control request: ${request.command} at ${request.location}`);
       if (request.command === "stop") {
         if (!(await pool.stop(request.location))) log("Nothing to stop there");
+      } else if (request.command === "restart") {
+        restartRequested = true;
+        log("Restart requested: once no session is mid-turn");
       } else if (request.command === "compact") {
         if (!(await pool.compact(request.location, request.chatId))) log("No live session there to compact");
       } else {
@@ -250,7 +265,7 @@ export async function runDaemon(settings: DaemonSettings): Promise<void> {
   }, WORKER_HEALTH_INTERVAL);
 
   let shuttingDown = false;
-  const shutdown = async () => {
+  const shutdown = async (code = 0) => {
     if (shuttingDown) return;
     shuttingDown = true;
     log("Shutting down...");
@@ -263,11 +278,11 @@ export async function runDaemon(settings: DaemonSettings): Promise<void> {
     await unlink(DAEMON_STATE_PATH).catch(() => {});
     await releasePid();
     log("Shutdown complete");
-    process.exit(0);
+    process.exit(code);
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
-  process.on("SIGHUP", shutdown);
+  process.on("SIGINT", () => shutdown());
+  process.on("SIGTERM", () => shutdown());
+  process.on("SIGHUP", () => shutdown());
 
   log(`Running: up to ${settings.maxSessions} Claude sessions, one per thread / channel / DM`);
 }

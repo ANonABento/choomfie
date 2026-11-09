@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileBatches, type Brain } from "@choomfie/shared";
 import {
+  brainWorkIdle,
   chunkForDiscord,
+  reviewable,
   decideRoute,
   dispatchToBrain,
   getPendingApproval,
@@ -392,7 +394,8 @@ describe("a plan's own chat", () => {
     const note = planStatusNote("planchat")!;
     expect(note).toContain("1. Scaffold [code] — done");
     expect(note).toContain("2. Turning [code] — failed");
-    expect(note).toContain("me/cube (private");
+    expect(note).toContain("me/cube (read it");
+    expect(note).toContain("Choomfie reviews the PR");
     expect(note).toContain("https://pr/2");
 
     const started: { boardId: string; index: number }[] = [];
@@ -534,3 +537,54 @@ describe("/clear and /compact follow the channel's brain", () => {
     expect(replies[0].content).toContain("foreground mode");
   });
 });
+
+describe("a plan's review", () => {
+  const ids = (rows: ReturnType<typeof taskBoardRows>) =>
+    rows.flatMap((r) => r.toJSON().components.map((c) => ("custom_id" in c ? c.custom_id : "url" in c ? "link" : "")));
+  const pb = { repo: "me/cube", branch: "plan/cube-1", dir: "/x", created: false, prUrl: "https://pr/1" };
+
+  test("🔎 Review shows once every task landed on a plan branch, and not while one runs or a review is going", () => {
+    const board = {
+      tasks: [
+        { n: 1, mode: "code", title: "A", spec: "a" },
+        { n: 2, mode: "code", title: "B", spec: "b" },
+      ],
+      states: [{ kind: "done" as const, url: "https://d/u" }, { kind: "idle" as const }],
+      plans: { "me/cube": pb },
+    };
+    expect(reviewable(board)).toBe(false);
+    expect(ids(taskBoardRows(board))).not.toContain("brain:review");
+    board.states[1] = { kind: "done", url: "https://d/u2" } as never;
+    expect(reviewable(board)).toBe(true);
+    expect(ids(taskBoardRows(board))).toContain("brain:review");
+    expect(reviewable({ ...board, plans: {} })).toBe(false); // nothing to review (research only)
+    expect(reviewable({ ...board, reviews: { "me/cube": { status: "fixing", round: 1 } } })).toBe(false);
+    expect(reviewable({ ...board, reviews: { "me/cube": { status: "stuck", round: 2 } } })).toBe(true); // the owner can go again
+  });
+
+  test("a new task list in the plan's chat keeps the plan's branch; a review a restart cut off can be started again", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "boards-"));
+    mkdirSync(join(dir, "meta"));
+    loadTaskBoards(dir);
+    let id = 0;
+    const channel = { send: async (o: { components?: unknown[] }) => ({ id: o.components ? `rb${++id}` : "text" }) };
+    await postBrainReply(channel, "waymond", "rchat", { text: "Plan.", tasks: [{ n: 1, mode: "code", title: "A", spec: "a — in me/cube", repo: "me/cube" }] });
+    const first = getTaskBoard("rb1")!;
+    first.plans = { "me/cube": pb };
+    first.states = [{ kind: "done", url: "https://d/u" }];
+    first.reviews = { "me/cube": { status: "reviewing", round: 0 } };
+    saveTaskBoards();
+    expect(brainWorkIdle()).toBe(false); // a review is running
+    await postBrainReply(channel, "waymond", "rchat", { text: "Two more.", tasks: [{ n: 1, mode: "code", title: "B", spec: "b" }] });
+    expect(getTaskBoard("rb2")!.plans).toEqual({ "me/cube": pb });
+    // Another chat starts its own plan.
+    await postBrainReply(channel, "waymond", "otherchat", { text: "Plan.", tasks: [{ n: 1, mode: "code", title: "C", spec: "c" }] });
+    expect(getTaskBoard("rb3")!.plans).toBeUndefined();
+
+    loadTaskBoards(dir);
+    expect(getTaskBoard("rb1")!.reviews!["me/cube"].status).toBe("stuck");
+    expect(brainWorkIdle()).toBe(true);
+    resetTaskBoards();
+  });
+});
+

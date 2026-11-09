@@ -140,6 +140,11 @@ export class SessionPool<S extends LiveSession = LiveSession> {
     }
   }
 
+  /** Some session has a turn in flight. */
+  anyBusy(): boolean {
+    return [...this.sessions.values()].some((s) => s.busy());
+  }
+
   async closeAll(): Promise<void> {
     for (const location of [...this.sessions.keys()]) await this.closeAt(location, "shutdown");
   }
