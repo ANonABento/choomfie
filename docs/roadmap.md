@@ -256,6 +256,17 @@
   - [ ] Each sim bot as a task, agents build them concurrently
   - [ ] Pipeline: scrape → train persona → deploy bot → monitor
 
+## Brain Library (On hold)
+
+Per-mode working rules for brains that have modes, plus a lessons memory, so one-shot tasks come out right more often. The content exists (`plugins/waymond/library/`); nothing sends it yet.
+
+- [ ] Move the library to a top-level `library/`: `core/`, `checklists/`, `lessons/`, `ref/` are not brain-specific. Brain-specific wording (sandbox limits, tool fetch, `mesh_check.py`) stays with the brain
+- [ ] Router sends `core/shared` + `core/<mode>` + `checklists/<mode>` + that mode's lessons on a chat's first message in a mode, and again only on a mode change (like a `/pipeline` thread's note). Never in the per-message frame. `ref/*` fetched on demand from a pinned commit, per `INDEX.md`
+- [ ] Lessons as archival memories tagged `lesson,<mode>` (private, in the data dir; searchable by every brain; `/memory forget` removes one). A brain adds one by ending a reply with `Lesson: …`; Choomfie strips that line
+- [ ] Claude sessions get nothing pushed (CLAUDE.md, skills and memory already cover it; resident tokens cost every turn); they find lessons via `search_memory`
+- [ ] Before keeping it: rerun the code/cad benchmark with and without the library. No measurable change → don't ship the tokens
+- No per-brain overrides or separate package until a second brain with modes uses it
+
 ## Smart Memory (Ongoing)
 
 - [ ] Cross-session recall — auto-search archival when context seems relevant
