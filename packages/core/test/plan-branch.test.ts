@@ -12,6 +12,7 @@ import {
   planBranchName,
   planBranchNote,
   planFilesNote,
+  planReadNote,
   pruneClones,
   safeFileName,
   type PlanBranch,
@@ -363,6 +364,9 @@ describe("plan branch", () => {
     const note = planFilesNote({ repo: "a/b", branch: "plan/b-1", dir: "/x", created: false }, "b.bundle", "cad");
     expect(note).toContain("cad/ folder");
     expect(note).toContain("git clone b.bundle");
+    const read = planReadNote({ repo: "a/b", branch: "plan/b-1", dir: "/x", created: false }, "b.bundle");
+    expect(read).toContain("git clone b.bundle");
+    expect(read).toContain("Nothing you make is committed");
   });
 
   test("old clones nothing uses are removed; kept and recent ones stay", () => {

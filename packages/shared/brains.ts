@@ -169,6 +169,12 @@ export interface BrainMode {
   repo?: boolean;
   /** Makes files (parts, models): in a plan with a repo, they're committed to this folder of its branch. */
   files?: string;
+  /**
+   * Reads a plan's repo (gets its branch as a bundle) but commits nothing: its
+   * answer is the result, and its files stay with the brain (research reports
+   * live in Waymond's workspace, not in a public repo).
+   */
+  readsRepo?: boolean;
 }
 
 export interface Brain {

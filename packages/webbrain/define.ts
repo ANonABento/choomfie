@@ -111,7 +111,7 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
     const human = createHuman(new Pacer());
     const timeoutMs = opts.turnTimeoutMs ?? 15 * 60_000;
     const workTimeoutMs = opts.workTurnTimeoutMs ?? 45 * 60_000;
-    const isWorkMode = (mode: string | null | undefined) => !!adapter.modes?.some((m) => m.id === mode && (m.repo || m.files));
+    const isWorkMode = (mode: string | null | undefined) => !!adapter.modes?.some((m) => m.id === mode && (m.repo || m.files || m.readsRepo));
     /** Continues sent for late answers, per chat, since the owner last wrote: bounded like the in-turn ones. */
     const lateContinues = new Map<string, number>();
     const active = new Map<string, ActiveTurn>();

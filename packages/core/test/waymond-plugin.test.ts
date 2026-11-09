@@ -363,9 +363,10 @@ describe("modes", () => {
     expect(WAYMOND_MODES.find((m) => m.id === "code")!.frame).toContain("repo: <owner>/<name>");
   });
 
-  test("research is a files mode (its report lands in research/ on a plan's branch) and plans can hand it tasks", () => {
+  test("research reads a plan's repo but commits nothing (reports stay in the workspace) and plans can hand it tasks", () => {
     const research = WAYMOND_MODES.find((m) => m.id === "research")!;
-    expect(research.files).toBe("research");
+    expect(research).toMatchObject({ readsRepo: true });
+    expect(research.files).toBeUndefined();
     expect(research.frame).toContain("research/<short-name>/report.md");
     expect(WAYMOND_MODES.find((m) => m.id === "plan")!.frame).toContain("research (");
     // A turn that stops on narration carries on; the finished reply (with its report link) doesn't.

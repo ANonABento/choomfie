@@ -55,7 +55,7 @@ import { isAllowed, isOwner } from "../access.ts";
 import { onMessageReceived, onReplySent } from "../typing.ts";
 import { isDaemonMode, requestDaemonControl, waitForClaudeIdle } from "../daemon-status.ts";
 import { openDraftPr, takePatch } from "../patch-pr.ts";
-import { bundlePlanBranch, landFiles, landPatch, openPlanBranch, planBranchNote, planFilesNote, type PlanBranch } from "../plan-branch.ts";
+import { bundlePlanBranch, landFiles, landPatch, openPlanBranch, planBranchNote, planFilesNote, planReadNote, type PlanBranch } from "../plan-branch.ts";
 import { requireOwner } from "./shared.ts";
 
 function label(id: string): string {
@@ -485,7 +485,7 @@ async function runTaskInThread(
   };
   const mode = brain.modes?.find((m) => m.id === task.mode);
   const repo = planTaskRepo(board, index);
-  if (!repo || !(mode?.repo || mode?.files)) {
+  if (!repo || !(mode?.repo || mode?.files || mode?.readsRepo)) {
     const reply = await dispatchToBrain(ctx, brain, thread, message);
     return !!reply && !reply.stopped;
   }
@@ -506,11 +506,15 @@ async function runTaskInThread(
   }
   try {
     const name = bundle.path.split("/").pop()!;
-    const note = mode.repo ? planBranchNote(pb, name, bundle.snapshot) : planFilesNote(pb, name, mode.files!);
+    const note = mode.repo
+      ? planBranchNote(pb, name, bundle.snapshot)
+      : mode.files
+        ? planFilesNote(pb, name, mode.files)
+        : planReadNote(pb, name);
     const caught = bundle.caughtUp;
     await say(
       `-# 🌿 works on \`${pb.branch}\` of **${pb.repo}**${pb.created ? " (new, private)" : ""}` +
-        (mode.repo ? ` — attached as ${name}` : ` — its files go in ${mode.files}/`) +
+        (mode.repo ? ` — attached as ${name}` : mode.files ? ` — its files go in ${mode.files}/` : ` — reads it (attached as ${name}); nothing is committed`) +
         (caught && "merged" in caught ? ` · brought in ${caught.merged} new commit${caught.merged === 1 ? "" : "s"} from \`${caught.base}\`` : "")
     );
     if (caught && "conflict" in caught) {
@@ -530,6 +534,15 @@ async function runTaskInThread(
     if (reply.stopped) {
       await say(`⏹ Stopped — nothing was committed to \`${pb.branch}\`.`);
       return false;
+    }
+    if (!mode.repo && !mode.files) {
+      // Reads only: the answer is the result.
+      if (reply.background) {
+        await say(`⏳ ${brain.label} is still on it; its answer is posted here when it finishes. The next task waits for you to start it from the board.`);
+        return false;
+      }
+      await say(`📄 Done — the report stays in ${brain.label}'s workspace; nothing is committed to \`${pb.branch}\`.`);
+      return true;
     }
     const landing = landingFor(board, index, reply.files);
     if (!landing && reply.background) {
