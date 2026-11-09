@@ -384,6 +384,19 @@ export function planTaskRepo(board: Pick<TaskBoard, "tasks">, index: number): st
   return task.repo ?? (repos.length === 1 ? repos[0] : undefined);
 }
 
+const TASK_BRANCH = /^(fix|feat|waymond)\/[\w.-]+$/;
+
+/**
+ * The branch a plan task lands on: its line's `branch: <name>` when that's a
+ * fix/, feat/ or waymond/ branch and not main or the repo's default branch;
+ * otherwise `current` (the plan's branch), as before.
+ */
+export function planTaskBranch(board: Pick<TaskBoard, "tasks">, index: number, current: string, defaultBranch = "main"): string {
+  const name = board.tasks[index]?.spec.match(/\bbranch:\s*`?([^\s`]+)`?/)?.[1];
+  if (!name || name === "main" || name === defaultBranch || !TASK_BRANCH.test(name)) return current;
+  return name;
+}
+
 export type Landing = { kind: "patch"; files: [BrainFile] } | { kind: "files"; files: BrainFile[]; folder: string };
 
 /**

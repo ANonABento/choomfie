@@ -13,6 +13,7 @@ import {
   planStatusNote,
   setPlanTaskStarter,
   loadTaskBoards,
+  planTaskBranch,
   planTaskRepo,
   postBrainReply,
   resetTaskBoards,
@@ -532,5 +533,30 @@ describe("/clear and /compact follow the channel's brain", () => {
   test("Claude channels keep the daemon behaviour (foreground notice here)", async () => {
     const { replies } = await run("clear", undefined);
     expect(replies[0].content).toContain("foreground mode");
+  });
+});
+
+describe("planTaskBranch", () => {
+  const board = (spec: string) => ({ tasks: [{ n: 1, mode: "code", title: "t", spec }] });
+  test("a valid branch is used", () => {
+    expect(planTaskBranch(board("do it — branch: feat/task-names"), 0, "plan/x")).toBe("feat/task-names");
+    expect(planTaskBranch(board("branch: waymond/a.b_c"), 0, "plan/x")).toBe("waymond/a.b_c");
+  });
+  test("a bad prefix, main, the default branch or no branch keeps the current branch", () => {
+    expect(planTaskBranch(board("branch: hack/x"), 0, "plan/x")).toBe("plan/x");
+    expect(planTaskBranch(board("branch: main"), 0, "plan/x")).toBe("plan/x");
+    expect(planTaskBranch(board("branch: fix/dev"), 0, "plan/x", "fix/dev")).toBe("plan/x");
+    expect(planTaskBranch(board("no branch here"), 0, "plan/x")).toBe("plan/x");
+    expect(planTaskBranch(board("x"), 5, "plan/x")).toBe("plan/x");
+  });
+});
+
+describe("swe-push", () => {
+  test("swe.sh push without GH_TOKEN exits non-zero", () => {
+    const env = { ...process.env };
+    delete env.GH_TOKEN;
+    const r = Bun.spawnSync(["bash", join(import.meta.dir, "../../../plugins/waymond/tools/swe.sh"), "push"], { env });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stdout.toString()).toContain("GH_TOKEN");
   });
 });

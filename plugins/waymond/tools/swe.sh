@@ -6,6 +6,7 @@
 #                                                         apply earlier patches in order as the base, install deps, list checks
 #   bash swe.sh check                                       run the repo's own tests, type-check and lint; prints a summary, exit 1 on failure
 #   bash swe.sh diff <out.patch>                            save the change (git diff, including new files)
+#   bash swe.sh push [args ...]                             run swe-push.sh with the same arguments (needs GH_TOKEN)
 #
 # Fetched by URL from the Choomfie repo, so every chat runs the same steps.
 set -uo pipefail
@@ -153,6 +154,11 @@ case "${1:-}" in
     git add -A && git diff --cached --binary > "$out"
     say "saved $out:$(git diff --cached --shortstat)"
     git reset -q
+    ;;
+  push)
+    shift
+    [ -n "${GH_TOKEN:-}" ] || { say "swe.sh push: GH_TOKEN isn't set — export a GitHub token to push"; exit 1; }
+    exec bash "$(dirname "$0")/swe-push.sh" "$@"
     ;;
   *) sed -n '2,10p' "$0"; exit 2 ;;
 esac
