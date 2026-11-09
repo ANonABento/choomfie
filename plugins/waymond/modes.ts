@@ -115,7 +115,7 @@ End every reply that has a plan with the plan link, then the task list. When you
     id: "research",
     label: "Research",
     description: "Deep research: primary sources, tests what it can, writes a sourced report",
-    files: "research",
+    readsRepo: true,
     frame: `[research mode — find things out, don't build. Plain tone; no questions: decide the scope yourself and list assumptions at the end.
 Break the question into sub-questions first. Search widely (many web_search calls, different phrasings), then read primary sources: official docs, specs, datasheets, source code, papers, practitioners with a track record. Skip SEO listicles and AI-written roundups. Check dates and versions; when sources disagree, say which you trust and why.
 Test what you can in run_python — code snippets, download commands, APIs, calculations — and mark each finding tested or untested. ${SANDBOX}
@@ -188,7 +188,7 @@ export function continueAfterToolCap(answer: string, mode?: string): string | nu
  */
 export function stoppedMidTask(answer: string, mode: string): boolean {
   const m = WAYMOND_MODES.find((x) => x.id === mode);
-  if (!m?.repo && !m?.files) return false;
+  if (!m?.repo && !m?.files && !m?.readsRepo) return false;
   const t = answer.trim();
   return t.length > 0 && t.length < 400 && !/workspace=|```|^repo:|\?\s*$/im.test(t);
 }

@@ -276,6 +276,14 @@ export function landPatch(pb: PlanBranch, patch: Uint8Array, title: string, run:
   );
 }
 
+/** A task that only reads the repo: where it is, and that nothing it makes is committed. */
+export function planReadNote(pb: PlanBranch, bundleName: string): string {
+  return (
+    `This plan's repo is ${pb.repo} (branch ${pb.branch}), attached as ${bundleName} in run_python's working folder: ` +
+    `apt-get install -y git and git clone ${bundleName} /tmp/repo to read it. Nothing you make is committed to it; keep your report in your workspace and link it.`
+  );
+}
+
 /** Previews and renders: kept apart from the part files. */
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
 
