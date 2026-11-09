@@ -47,7 +47,7 @@ bpy.ops.object.mode_set(mode='OBJECT')
 ```
 https://docs.blender.org/api/3.4/bpy.ops.uv.html
 
-## PBR + imperfection — tested (exit 0)
+## PBR + imperfection — untested (no Blender 3.4 in the sandbox to run it headless)
 ```python
 m=bpy.data.materials.new("Metal"); m.use_nodes=True; nt=m.node_tree
 p=nt.nodes["Principled BSDF"]
@@ -61,6 +61,7 @@ r.color_ramp.elements[1].position=0.6; r.color_ramp.elements[1].color=(0.5,0.5,0
 bm=nt.nodes.new("ShaderNodeBump"); bm.inputs["Strength"].default_value=0.05
 nt.links.new(n.outputs["Fac"],r.inputs["Fac"]); nt.links.new(r.outputs["Color"],p.inputs["Roughness"])
 nt.links.new(n.outputs["Fac"],bm.inputs["Height"]); nt.links.new(bm.outputs["Normal"],p.inputs["Normal"])
+img=bpy.data.images.load("/path/roughness.png")  # any data map
 img.colorspace_settings.name='Non-Color'        # for roughness/metal/normal image maps
 ```
 Input names are the 3.4 Principled v1 names. 4.0 renamed several, e.g. "Specular" → "Specular IOR Level". https://docs.blender.org/manual/en/3.4/render/shader_nodes/shader/principled.html
