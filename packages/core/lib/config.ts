@@ -8,6 +8,7 @@
 
 import { readFileSync } from "node:fs";
 import { writeJsonAtomicSync, type SocialsPlatformConfig } from "@choomfie/shared";
+import { parsePipelines, type PipelineConfig } from "./pipelines/config.ts";
 
 export interface Persona {
   name: string;
@@ -109,6 +110,11 @@ export interface Config {
    * Edited in config.json: it widens what a bypassPermissions session can reach.
    */
   chatRoots?: string[];
+  /**
+   * Local tools a brain may run through `pipeline_run`, by name. Edited in
+   * config.json, like chatRoots: see lib/pipelines/config.ts.
+   */
+  pipelines?: unknown;
   [key: string]: unknown;
 }
 
@@ -398,6 +404,13 @@ export class ConfigManager {
   }
 
   // --- Brains ---
+
+  /** Pipelines a brain may run (`pipeline_run`); entries that don't validate are left out. */
+  getPipelines(): Map<string, PipelineConfig> {
+    const { pipelines, problems } = parsePipelines(this.config.pipelines);
+    for (const p of problems) console.error(`[config] ${p}`);
+    return pipelines;
+  }
 
   /** Roots a Claude chat may run under, `~` expanded. */
   getChatRoots(): string[] {

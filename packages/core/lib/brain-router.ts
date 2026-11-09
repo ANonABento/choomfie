@@ -33,6 +33,8 @@ import type { AppContext } from "./types.ts";
 import { onReplySent } from "./typing.ts";
 import { getBrainRelay } from "./ask-relay.ts";
 import { findPatch, offerPatch } from "./patch-pr.ts";
+import { takeChatNotes } from "./chat-notes.ts";
+import { recordThreadFiles } from "./pipelines/thread-files.ts";
 import { pickPatch, pruneClones, type PlanBranch } from "./plan-branch.ts";
 
 export type RouteDecision =
@@ -440,6 +442,14 @@ export async function postBrainReply(
     });
     const id = (sent as { id?: unknown } | undefined)?.id;
     if (last && choices.length && typeof id === "string") pendingChoices.set(id, { brainId, chatKey, choices });
+    // The reply's images, kept so a tool can ask for "the last reply" (pipeline_run files).
+    if (last && reply.files?.length && threadFilesDir) {
+      try {
+        recordThreadFiles(threadFilesDir, chatKey, typeof id === "string" ? id : `reply-${Date.now()}`, "brain", reply.files);
+      } catch (e) {
+        console.error(`[brain:${brainId}] couldn't keep the reply's files: ${errorMessage(e)}`);
+      }
+    }
   }
   for (const files of moreFiles) await channel.send({ allowedMentions: NO_MENTIONS, files: attach(files) });
   // A plan's tasks: one button each, which runs it in its own thread (owner only).
@@ -506,8 +516,12 @@ export async function postBrainReply(
   }
 }
 
+/** Where brain replies' images are kept (the data dir); set at boot by installBrainPoster. */
+let threadFilesDir: string | null = null;
+
 /** Lets plugins post late results (background jobs) through the same formatting. */
 export function installBrainPoster(ctx: AppContext): void {
+  threadFilesDir = ctx.DATA_DIR;
   loadTaskBoards(ctx.DATA_DIR);
   setBrainPoster(async (brainId, chatKey, reply) => {
     const fetched = await ctx.discord?.channels.fetch(chatKey).catch(() => null);
@@ -550,8 +564,9 @@ export function dispatchToBrain(
 ): Promise<BrainReply | null> {
   return inConversation(message.chatKey, async () => {
     try {
-      const status = message.meta?.role === "owner" ? planStatusNote(message.chatKey) : undefined;
-      const reply = await brain.send(status ? { ...message, content: `${message.content}\n\n${status}` } : message, ctx);
+      const owner = message.meta?.role === "owner";
+      const notes = [owner ? planStatusNote(message.chatKey) : undefined, owner ? takeChatNotes(message.chatKey) : undefined].filter(Boolean);
+      const reply = await brain.send(notes.length ? { ...message, content: [message.content, ...notes].join("\n\n") } : message, ctx);
       await postBrainReply(channel, brain.id, message.chatKey, reply, message.messageId, opts);
       const task = reply.runNow ? reply.tasks?.[0] : undefined;
       const plan = task && message.meta?.role === "owner" && planTaskStarter ? latestBoardIn(message.chatKey) : undefined;

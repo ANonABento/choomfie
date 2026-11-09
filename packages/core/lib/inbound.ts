@@ -14,6 +14,7 @@ import {
   type McpTransport,
 } from "@choomfie/shared";
 import { recordTurn } from "./caller.ts";
+import { takeChatNotes } from "./chat-notes.ts";
 import { deliverInboundMessage } from "./daemon-status.ts";
 import type { AppContext } from "./types.ts";
 
@@ -95,6 +96,9 @@ export async function forwardToClaude(
   location: string = meta.chat_id
 ): Promise<void> {
   recordTurn(meta, location);
+  // Choomfie's notes for this chat (a pipeline job ended, …), for the owner's next message.
+  const notes = meta.role === "owner" ? takeChatNotes(meta.chat_id) : undefined;
+  if (notes) content = `${content}\n\n${notes}`;
   if (isDaemonOwnedProcess()) {
     // The daemon opens whichever chat is bound at the location, so bind one
     // (titled from this message) before the message reaches it.

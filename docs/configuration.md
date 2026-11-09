@@ -56,6 +56,27 @@ Editing `config.json` by hand still works. `ConfigManager`'s setters are what `/
 
 A brain channel only answers messages addressed to it (DM, @mention, reply). Ambient conversation-mode messages are dropped there, because a web-UI driver can't decide to stay quiet the way Claude does.
 
+## Pipelines (`pipelines`)
+
+Local command-line tools a brain may run through `pipeline_run` (see `docs/tools.md`). Edited by hand, like `chatRoots`, because each one widens what a chat, and the remote endpoint if the tools are on its allowlist, can do on this machine. Read at startup: restart after editing.
+
+```json
+"pipelines": {
+  "lochara": {
+    "dir": "~/lochara",
+    "command": ["./lochara"],
+    "allow": ["next", "requests", "concept", "part", "deliver", "build", "check", "render", "export"],
+    "json": "--json"
+  }
+}
+```
+
+- **`dir`**: where it runs, and the only folder a path argument may point into (besides the job's own files folder).
+- **`command`**: the program and fixed leading arguments, run without a shell.
+- **`allow`**: subcommands a caller may give as the first argument. Keep it to what you'd let a remote caller run with your authority; leave out anything that writes where you don't want.
+- **`json`** (optional): the flag that makes the tool print one JSON result on stdout; then its `show` pictures are posted and its `next` step is noted.
+- An entry that doesn't validate is left out and logged.
+
 ## Remote MCP endpoint (`remoteMcp`)
 
 Lets a cloud agent — built for Ambition's Waymond, which only accepts remote MCP servers by URL — call a small allowlisted set of Choomfie tools over streamable HTTP. Code: `packages/core/lib/remote-mcp.ts`, started by the supervisor after stdio connects, or by the daemon. Off by default.
