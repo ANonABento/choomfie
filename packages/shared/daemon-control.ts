@@ -39,11 +39,15 @@ export const STOP_REQUEST_STALE_MS = 20_000;
  *   earlier one); the daemon closes the old session and the next message opens
  *   the bound chat's (Claude Code's `/clear`, `--resume`)
  *
+ * - `restart` restarts the whole daemon on the code now on disk (after a plan
+ *   merged into Choomfie itself), once no session is mid-turn; `location` is
+ *   the chat that asked
+ *
  * None touches memories, reminders or personas — those live in SQLite.
  */
-export type DaemonControlCommand = "compact" | "clear" | "stop" | "resume";
+export type DaemonControlCommand = "compact" | "clear" | "stop" | "resume" | "restart";
 
-const COMMANDS: readonly DaemonControlCommand[] = ["compact", "clear", "stop", "resume"];
+const COMMANDS: readonly DaemonControlCommand[] = ["compact", "clear", "stop", "resume", "restart"];
 
 export type DaemonControlRequest = {
   command: DaemonControlCommand;
