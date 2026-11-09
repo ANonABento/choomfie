@@ -6,9 +6,9 @@ exposes the core set, and enabled plugins add their own.
 
 See [CLAUDE.md](../CLAUDE.md) for the architecture these run inside.
 
-## Tools (98 with every plugin enabled)
+## Tools (101 with every plugin enabled)
 
-Tool lists are dynamic: the supervisor always exposes `restart`, the worker exposes 35 core tools, and enabled plugins add their own. With all shipped plugins enabled (voice 3, browser 7, tutor 19, socials 33 = 62), Choomfie exposes 98 MCP tools total: 97 worker tools plus the supervisor-owned `restart` tool.
+Tool lists are dynamic: the supervisor always exposes `restart`, the worker exposes 38 core tools, and enabled plugins add their own. With all shipped plugins enabled (voice 3, browser 7, tutor 19, socials 33 = 62), Choomfie exposes 101 MCP tools total: 100 worker tools plus the supervisor-owned `restart` tool.
 
 Core Discord: reply (with embeds), react, edit_message, fetch_messages, search_messages, create_thread, create_poll, pin_message, unpin_message
 Core Memory: save_memory, search_memory, list_memories, delete_memory, save_conversation_summary, memory_stats
@@ -20,6 +20,7 @@ Core GitHub: check_github
 Core Status: choomfie_status
 Core Translation: translate
 Core Brains: ask_brain (owner only)
+Core Pipelines: pipeline_run, pipeline_status, pipeline_stop (owner only)
 System: restart (owner only, supervisor-owned — kills worker, spawns fresh one, reloads all code)
 
 Browser plugin: browse, browser_click, browser_type, browser_screenshot, browser_eval, browser_press_key, browser_close
@@ -34,6 +35,16 @@ Claude hands a job to another brain and reads the answer itself: `ask_brain(brai
 - **Files** it hands back are written to `save_to` (absolute) or `<data dir>/brain-files/<brain>/<time>/`, names reduced to a plain file name, and their paths are returned with the text.
 - **Owner only, in code:** the call is refused unless the latest message handed to Claude in the caller's chat came from the owner (`callerIsOwner`, `lib/caller.ts`). A daemon session is judged by its own chat (its endpoint token is bound to it), not by the `chat_id` it passes. It's also off the `role="user"` allowlist.
 - **Which brains:** any loaded brain except Claude. Claude as a target would let a caller start a session that runs commands; it stays off until there's a use and limits to go with it.
+
+### Pipelines (pipeline_run, pipeline_status, pipeline_stop)
+Run a local command-line tool on this machine for a chat, from any brain: Claude in a session, or Waymond over the remote endpoint (when the tools are on `remoteMcp.tools`). Pipelines are declared by hand in config.json (see `docs/configuration.md`); code in `lib/pipelines/`.
+- **`pipeline_run(pipeline, args, chat_id, files?)`**: `args` is a list, run without a shell, whose first item must be on the pipeline's `allow` list. A path argument (absolute, `~`, or with `..`) must stay inside the pipeline's folder or the job's files folder.
+- **Inline or background:** a command that ends within 20 s answers with its JSON result. A longer one becomes a job, one at a time per pipeline with the rest queued; when it ends, its line (✅/❌, how long) and its pictures are posted in `chat_id`, and a note goes on that chat's next message to its brain (`lib/chat-notes.ts`), so nothing polls.
+- **Pictures are posted for the brain:** every picture in the result's `show` and `next.show` is posted to the chat once (again only if it changes). Waymond can't attach a file from this machine; Claude needn't repeat it.
+- **Pictures from the chat:** `files` (`"last_reply"`, the images in the brain's latest reply; `"last_mine"`, the user's latest; or message ids) are copied into a folder that replaces `{files}` in `args`. Images posted in a chat are kept for 7 days for this (`<data dir>/thread-files/`).
+- **Result contract** (a pipeline with `json`): one JSON object on stdout, `{ok, show?: [paths], next?: {say, show, waiting}, problem?}`; progress on stderr, which goes to `<data dir>/pipeline-logs/<pipeline>/<job>.log`.
+- **`pipeline_status`** lists the pipelines and recent jobs, or one job with its result and log end; **`pipeline_stop`** stops a queued or running job. Jobs are kept in memory: a restart forgets them and stops running ones.
+- **Owner only, in code** (`callerIsOwner`), like `ask_brain`.
 
 ### Rich Embeds
 

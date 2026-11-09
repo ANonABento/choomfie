@@ -31,6 +31,7 @@ import { downloadAttachments, forwardToClaude } from "./inbound.ts";
 import { decideRoute, dispatchToBrain, installBrainPoster, parentChannelId } from "./brain-router.ts";
 import { isOwnThread, openThread, wantsThread } from "./chats/auto-thread.ts";
 import { replyExcerpt, replyPrompt, repliesToLatest } from "./ask-relay.ts";
+import { recordThreadFiles } from "./pipelines/thread-files.ts";
 import {
   dispatchPluginMessage,
   initializePlugins,
@@ -305,6 +306,14 @@ export function createDiscordClient(ctx: AppContext): Client {
 
     // Handle image/file attachments
     const filePaths = await downloadAttachments(ctx, message.attachments.values(), meta);
+    if (filePaths.length) {
+      // Kept so a tool can ask for "the user's last pictures" (pipeline_run files).
+      try {
+        recordThreadFiles(ctx.DATA_DIR, message.channelId, message.id, "user", filePaths.map((path) => ({ path })));
+      } catch (e) {
+        console.error(`[choomfie] couldn't keep attachments: ${errorMessage(e)}`);
+      }
+    }
 
     const isConversationMode = meta.conversation_mode === "true";
 

@@ -20,6 +20,7 @@ import { destroyAll as destroyTyping } from "./lib/typing.ts";
 import { McpProxy } from "./lib/mcp-proxy.ts";
 import { destroyPlugins } from "./lib/plugin-lifecycle.ts";
 import { settleAllRelays } from "./lib/ask-relay.ts";
+import { stopPipelines } from "./lib/pipelines/index.ts";
 import type { SupervisorMessage, IpcToolDef } from "./lib/ipc-types.ts";
 import type { ToolResult } from "./lib/types.ts";
 import { errorMessage } from "@choomfie/shared";
@@ -167,6 +168,7 @@ async function shutdown() {
   ctx.reminderScheduler.destroy();
   ctx.birthdayScheduler.destroy();
   destroyTyping();
+  stopPipelines();
   // Before Discord goes away: unanswered "thinking…" replies would otherwise hang.
   await settleAllRelays();
   await destroyPlugins(ctx.plugins);
