@@ -1,6 +1,6 @@
 /**
  * Turning a caller's arguments into a command line, safely. This is the
- * boundary for `pipeline_run`: it runs with the owner's authority, possibly
+ * boundary for the `pipeline` tool: it runs with the owner's authority, possibly
  * for a remote caller.
  *
  * - Arguments are a list, run without a shell: nothing is interpreted.

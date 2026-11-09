@@ -15,6 +15,7 @@ import {
 } from "@choomfie/shared";
 import { recordTurn } from "./caller.ts";
 import { takeChatNotes } from "./chat-notes.ts";
+import { pipelineNote } from "./pipelines/thread-mode.ts";
 import { deliverInboundMessage } from "./daemon-status.ts";
 import type { AppContext } from "./types.ts";
 
@@ -96,17 +97,24 @@ export async function forwardToClaude(
   location: string = meta.chat_id
 ): Promise<void> {
   recordTurn(meta, location);
-  // Choomfie's notes for this chat (a pipeline job ended, …), for the owner's next message.
-  const notes = meta.role === "owner" ? takeChatNotes(meta.chat_id) : undefined;
-  if (notes) content = `${content}\n\n${notes}`;
-  if (isDaemonOwnedProcess()) {
-    // The daemon opens whichever chat is bound at the location, so bind one
-    // (titled from this message) before the message reaches it.
+  const daemon = isDaemonOwnedProcess();
+  // The daemon opens whichever chat is bound at the location, so bind one
+  // (titled from this message) before the message reaches it.
+  let chatId = "foreground";
+  if (daemon) {
     try {
-      ctx.chats.current(location, CLAUDE_BRAIN, titleHint);
+      chatId = ctx.chats.current(location, CLAUDE_BRAIN, titleHint).id;
     } catch (error: unknown) {
       console.error(`[choomfie] chat binding failed: ${errorMessage(error)}`);
     }
+  }
+  // Choomfie's notes for the owner's next message: the thread's pipeline (once
+  // per chat), and what happened since (a pipeline job ended, …).
+  if (meta.role === "owner") {
+    const notes = [pipelineNote(ctx, location, chatId), takeChatNotes(meta.chat_id)].filter(Boolean);
+    if (notes.length) content = [content, ...notes].join("\n\n");
+  }
+  if (daemon) {
     meta = { ...meta, [INBOUND_LOCATION_KEY]: location };
     try {
       await deliverInboundMessage(ctx.DATA_DIR, content, meta);

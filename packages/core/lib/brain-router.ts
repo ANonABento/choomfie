@@ -34,6 +34,7 @@ import { onReplySent } from "./typing.ts";
 import { getBrainRelay } from "./ask-relay.ts";
 import { findPatch, offerPatch } from "./patch-pr.ts";
 import { takeChatNotes } from "./chat-notes.ts";
+import { pipelineNote } from "./pipelines/thread-mode.ts";
 import { recordThreadFiles } from "./pipelines/thread-files.ts";
 import { pickPatch, pruneClones, type PlanBranch } from "./plan-branch.ts";
 import type { ReviewState } from "./plan-review.ts";
@@ -309,6 +310,12 @@ export function latestBoardIn(chatKey: string): { boardId: string; board: TaskBo
  * say none of them ran. Added to the owner's messages in a plan's chat once
  * any task has started.
  */
+/** The thread's pipeline note for this brain's chat here (binding the chat the brain is about to use). */
+function threadPipelineNote(ctx: AppContext, brainId: string, message: { chatKey: string; content: string }): string | undefined {
+  if (!ctx.chats.pipelineAt(message.chatKey)) return undefined;
+  return pipelineNote(ctx, message.chatKey, ctx.chats.current(message.chatKey, brainId, message.content).id);
+}
+
 export function planStatusNote(chatKey: string): string | undefined {
   const plan = latestBoardIn(chatKey);
   if (!plan || plan.board.states.every((s) => s.kind === "idle")) return undefined;
@@ -485,7 +492,7 @@ export async function postBrainReply(
     });
     const id = (sent as { id?: unknown } | undefined)?.id;
     if (last && choices.length && typeof id === "string") pendingChoices.set(id, { brainId, chatKey, choices });
-    // The reply's images, kept so a tool can ask for "the last reply" (pipeline_run files).
+    // The reply's images, kept so a tool can ask for "the last reply" (the pipeline tool's files).
     if (last && reply.files?.length && threadFilesDir) {
       try {
         recordThreadFiles(threadFilesDir, chatKey, typeof id === "string" ? id : `reply-${Date.now()}`, "brain", reply.files);
@@ -626,7 +633,9 @@ export function dispatchToBrain(
   return inConversation(message.chatKey, async () => {
     try {
       const owner = message.meta?.role === "owner";
-      const notes = [owner ? planStatusNote(message.chatKey) : undefined, owner ? takeChatNotes(message.chatKey) : undefined].filter(Boolean);
+      const notes = owner
+        ? [threadPipelineNote(ctx, brain.id, message), planStatusNote(message.chatKey), takeChatNotes(message.chatKey)].filter(Boolean)
+        : [];
       const reply = await brain.send(notes.length ? { ...message, content: [message.content, ...notes].join("\n\n") } : message, ctx);
       await postBrainReply(channel, brain.id, message.chatKey, reply, message.messageId, opts);
       const task = reply.runNow ? reply.tasks?.[0] : undefined;

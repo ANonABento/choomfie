@@ -80,6 +80,14 @@ export class ChatStore implements ChatsApi {
         updated_at TEXT NOT NULL,
         PRIMARY KEY (location_id, brain)
       );
+
+      -- A thread put on a pipeline (/pipeline): its brain is told once per chat.
+      CREATE TABLE IF NOT EXISTS location_pipelines (
+        location_id TEXT PRIMARY KEY,
+        pipeline TEXT NOT NULL,
+        told_chat TEXT,
+        updated_at TEXT NOT NULL
+      );
     `);
     // Added after the first release: older databases lack them.
     const have = new Set((db.query("PRAGMA table_info(chats)").all() as { name: string }[]).map((c) => c.name));
@@ -176,6 +184,32 @@ export class ChatStore implements ChatsApi {
 
   setMode(chatId: string, mode: string | null): void {
     this.db.query("UPDATE chats SET mode = ? WHERE id = ?").run(mode, chatId);
+  }
+
+  /** The pipeline this location is on, and the chat last told so. */
+  pipelineAt(locationId: string): { pipeline: string; toldChat: string | null } | null {
+    const row = this.db.query("SELECT pipeline, told_chat FROM location_pipelines WHERE location_id = ?").get(locationId) as
+      | { pipeline: string; told_chat: string | null }
+      | null;
+    return row ? { pipeline: row.pipeline, toldChat: row.told_chat } : null;
+  }
+
+  /** Put this location on a pipeline (its next chat is told), or take it off (null). */
+  setPipeline(locationId: string, pipeline: string | null): void {
+    if (!pipeline) {
+      this.db.query("DELETE FROM location_pipelines WHERE location_id = ?").run(locationId);
+      return;
+    }
+    this.db
+      .query(
+        `INSERT INTO location_pipelines (location_id, pipeline, told_chat, updated_at) VALUES (?, ?, NULL, ?)
+         ON CONFLICT (location_id) DO UPDATE SET pipeline = excluded.pipeline, told_chat = NULL, updated_at = excluded.updated_at`
+      )
+      .run(locationId, pipeline, nowUTC());
+  }
+
+  markPipelineTold(locationId: string, chatId: string): void {
+    this.db.query("UPDATE location_pipelines SET told_chat = ? WHERE location_id = ?").run(chatId, locationId);
   }
 
   touch(chatId: string): void {

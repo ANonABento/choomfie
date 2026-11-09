@@ -58,7 +58,7 @@ A brain channel only answers messages addressed to it (DM, @mention, reply). Amb
 
 ## Pipelines (`pipelines`)
 
-Local command-line tools a brain may run through `pipeline_run` (see `docs/tools.md`). Edited by hand, like `chatRoots`, because each one widens what a chat, and the remote endpoint if the tools are on its allowlist, can do on this machine. Read at startup: restart after editing.
+Local command-line tools a brain may run through the `pipeline` tool (see `docs/tools.md`). Edited by hand, like `chatRoots`, because each one widens what a chat, and the remote endpoint if the tools are on its allowlist, can do on this machine. Read at startup: restart after editing.
 
 ```json
 "pipelines": {
@@ -76,7 +76,7 @@ Local command-line tools a brain may run through `pipeline_run` (see `docs/tools
 - **`command`**: the program and fixed leading arguments, run without a shell.
 - **`allow`**: subcommands a caller may give as the first argument. Keep it to what you'd let a remote caller run with your authority; leave out anything that writes where you don't want.
 - **`json`** (optional): the flag that makes the tool print one JSON result on stdout; then its `show` pictures are posted and its `next` step is noted.
-- **`about`** (optional, up to 300 characters): what the tool is for and how to start. It's added to `pipeline_run`'s description, so a brain asked to "make a character" knows this pipeline does that; without it the brain sees only the name.
+- **`about`** (optional, up to 300 characters): what the tool is for and how to start. A thread put on the pipeline (`/pipeline <name>`) tells its brain this once per chat, so a plain "make me a character" goes to the right tool there; nothing is added anywhere else.
 - An entry that doesn't validate is left out and logged.
 
 ## Remote MCP endpoint (`remoteMcp`)

@@ -10,7 +10,10 @@ import { parsePipelines, type PipelineConfig } from "../lib/pipelines/config.ts"
 import { _setRunner } from "../lib/pipelines/index.ts";
 import { parseResult, PipelineRunner, type Job } from "../lib/pipelines/runner.ts";
 import { pruneByAge, recordThreadFiles, resolveThreadFiles } from "../lib/pipelines/thread-files.ts";
+import { pipelineNote } from "../lib/pipelines/thread-mode.ts";
 import { pipelineTools, pipelineToolsFor } from "../lib/tools/pipeline-tools.ts";
+import { ChatStore } from "../lib/chats/store.ts";
+import { Database } from "bun:sqlite";
 import type { AppContext } from "../lib/types.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pipelines-"));
@@ -197,8 +200,7 @@ describe("pipeline tools", () => {
     config: { getPipelines: () => new Map([["tool", tool]]) },
     discord: { channels: { fetch: async () => channel } },
   } as unknown as AppContext;
-  const tool$ = (name: string) => pipelineTools.find((t) => t.definition.name === name)!;
-  const call = (name: string, args: Record<string, unknown>) => tool$(name).handler({ chat_id: "c1", ...args }, ctx, { via: "local" });
+  const call = (action: string, args: Record<string, unknown>) => pipelineTools[0].handler({ action, chat_id: "c1", ...args }, ctx, { via: "local" });
   const textOf = (r: Awaited<ReturnType<typeof call>>) => (r.content[0] as { text: string }).text;
 
   beforeEach(() => {
@@ -211,7 +213,7 @@ describe("pipeline tools", () => {
   afterEach(() => _setRunner(null));
 
   test("runs inline, returns the result, posts the pictures", async () => {
-    const r = await call("pipeline_run", { pipeline: "tool", args: ["pic"] });
+    const r = await call("run", { pipeline: "tool", args: ["pic"] });
     expect(r.isError).toBeFalsy();
     expect(textOf(r)).toContain('"cmd": "pic"');
     expect(sent[0].files?.map((f) => f.name)).toEqual(["sheet.png"]);
@@ -219,44 +221,67 @@ describe("pipeline tools", () => {
 
   test("hands the chat's pictures over with {files}", async () => {
     recordThreadFiles(data, "c1", "m9", "brain", [{ name: "v1.png", data: new Uint8Array([1]) }]);
-    const t = textOf(await call("pipeline_run", { pipeline: "tool", args: ["deliver", "--from", "{files}"], files: "last_reply" }));
+    const t = textOf(await call("run", { pipeline: "tool", args: ["deliver", "--from", "{files}"], files: "last_reply" }));
     expect(t).toContain(join(data, "pipeline-files"));
   });
 
   test("refuses: not the owner, unknown pipeline, disallowed command", async () => {
     recordTurn({ chat_id: "c1", role: "user" });
-    expect(textOf(await call("pipeline_run", { pipeline: "tool", args: ["echo"] }))).toContain("owner only");
+    expect(textOf(await call("run", { pipeline: "tool", args: ["echo"] }))).toContain("owner only");
     recordTurn({ chat_id: "c1", role: "owner" });
-    expect((await call("pipeline_run", { pipeline: "nope", args: ["echo"] })).isError).toBe(true);
-    expect((await call("pipeline_run", { pipeline: "tool", args: ["rm"] })).isError).toBe(true);
+    expect((await call("run", { pipeline: "nope", args: ["echo"] })).isError).toBe(true);
+    expect((await call("run", { pipeline: "tool", args: ["rm"] })).isError).toBe(true);
   });
 
   test("status lists the configured pipelines and recent jobs", async () => {
-    await call("pipeline_run", { pipeline: "tool", args: ["echo"] });
-    const t = textOf(await call("pipeline_status", {}));
+    await call("run", { pipeline: "tool", args: ["echo"] });
+    const t = textOf(await call("status", {}));
     expect(t).toContain("pipelines: tool");
     expect(t).toContain("✅ tool `echo` finished");
   });
 });
 
 describe("pipelineToolsFor", () => {
-  const ctxWith = (names: string[], about?: string) =>
-    ({ config: { getPipelines: () => new Map(names.map((name) => [name, { name, ...(about ? { about } : {}) }])) } }) as unknown as AppContext;
+  const ctxWith = (names: string[]) =>
+    ({ config: { getPipelines: () => new Map(names.map((name) => [name, { name }])) } }) as unknown as AppContext;
 
-  test("no pipelines configured: no tools (their schemas would sit in every session)", () => {
+  test("no pipelines configured: no tool (its name would sit in every session)", () => {
     expect(pipelineToolsFor(ctxWith([]))).toEqual([]);
   });
 
-  test("configured: pipeline_run names them", () => {
-    const run = pipelineToolsFor(ctxWith(["lochara", "render"])).find((t) => t.definition.name === "pipeline_run")!;
-    expect(run.definition.description).toContain("(lochara, render)");
-    expect((run.definition.inputSchema as { properties: { pipeline: { enum: string[] } } }).properties.pipeline.enum).toEqual(["lochara", "render"]);
-    expect(pipelineToolsFor(ctxWith(["x"])).map((t) => t.definition.name)).toEqual(["pipeline_run", "pipeline_status", "pipeline_stop"]);
-    expect(run.definition.description).not.toContain("Pipelines:");
+  test("configured: one tool, the pipelines as its choices", () => {
+    const tools = pipelineToolsFor(ctxWith(["lochara", "render"]));
+    expect(tools.map((t) => t.definition.name)).toEqual(["pipeline"]);
+    expect((tools[0].definition.inputSchema as { properties: { pipeline: { enum: string[] } } }).properties.pipeline.enum).toEqual(["lochara", "render"]);
   });
 
-  test("each pipeline's about goes into pipeline_run's description", () => {
-    const run = pipelineToolsFor(ctxWith(["lochara"], "Makes anime 3D characters.")).find((t) => t.definition.name === "pipeline_run")!;
-    expect(run.definition.description).toContain("\nPipelines:\n- lochara: Makes anime 3D characters.");
+  test("an unknown action is refused", async () => {
+    recordTurn({ chat_id: "c1", role: "owner" });
+    const r = await pipelineTools[0].handler({ action: "explode", chat_id: "c1" }, ctxWith(["x"]), { via: "local" });
+    expect(r.isError).toBe(true);
+  });
+});
+
+describe("thread pipeline note", () => {
+  const chats = new ChatStore(new Database(":memory:"));
+  const ctx = { chats, config: { getPipelines: () => new Map([["tool", { ...tool, about: "Makes things." }]]) } } as unknown as AppContext;
+
+  test("told once per chat, again in a new chat, never off a pipeline", () => {
+    expect(pipelineNote(ctx, "thread", "chat-a")).toBeUndefined();
+    chats.setPipeline("thread", "tool");
+    const note = pipelineNote(ctx, "thread", "chat-a")!;
+    expect(note).toContain("drives the tool pipeline. Makes things.");
+    expect(note).toContain("`pipeline` tool");
+    expect(pipelineNote(ctx, "thread", "chat-a")).toBeUndefined();
+    expect(pipelineNote(ctx, "thread", "chat-b")).toBeDefined();
+    chats.setPipeline("thread", "tool"); // put on again: told again
+    expect(pipelineNote(ctx, "thread", "chat-b")).toBeDefined();
+    chats.setPipeline("thread", null);
+    expect(pipelineNote(ctx, "thread", "chat-c")).toBeUndefined();
+  });
+
+  test("a pipeline since removed from the config says nothing", () => {
+    chats.setPipeline("other", "gone");
+    expect(pipelineNote(ctx, "other", "chat-a")).toBeUndefined();
   });
 });
