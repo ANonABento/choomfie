@@ -10,7 +10,7 @@ import { parsePipelines, type PipelineConfig } from "../lib/pipelines/config.ts"
 import { _setRunner } from "../lib/pipelines/index.ts";
 import { parseResult, PipelineRunner, type Job } from "../lib/pipelines/runner.ts";
 import { pruneByAge, recordThreadFiles, resolveThreadFiles } from "../lib/pipelines/thread-files.ts";
-import { pipelineTools } from "../lib/tools/pipeline-tools.ts";
+import { pipelineTools, pipelineToolsFor } from "../lib/tools/pipeline-tools.ts";
 import type { AppContext } from "../lib/types.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pipelines-"));
@@ -233,5 +233,21 @@ describe("pipeline tools", () => {
     const t = textOf(await call("pipeline_status", {}));
     expect(t).toContain("pipelines: tool");
     expect(t).toContain("✅ tool `echo` finished");
+  });
+});
+
+describe("pipelineToolsFor", () => {
+  const ctxWith = (names: string[]) =>
+    ({ config: { getPipelines: () => new Map(names.map((n) => [n, {}])) } }) as unknown as AppContext;
+
+  test("no pipelines configured: no tools (their schemas would sit in every session)", () => {
+    expect(pipelineToolsFor(ctxWith([]))).toEqual([]);
+  });
+
+  test("configured: pipeline_run names them", () => {
+    const run = pipelineToolsFor(ctxWith(["lochara", "render"])).find((t) => t.definition.name === "pipeline_run")!;
+    expect(run.definition.description).toContain("(lochara, render)");
+    expect((run.definition.inputSchema as { properties: { pipeline: { enum: string[] } } }).properties.pipeline.enum).toEqual(["lochara", "render"]);
+    expect(pipelineToolsFor(ctxWith(["x"])).map((t) => t.definition.name)).toEqual(["pipeline_run", "pipeline_status", "pipeline_stop"]);
   });
 });

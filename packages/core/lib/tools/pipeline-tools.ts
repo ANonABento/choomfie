@@ -47,11 +47,11 @@ export const pipelineTools: ToolDef[] = [
     definition: {
       name: "pipeline_run",
       description:
-        "Owner only. Run a configured local pipeline (e.g. lochara, the character builder) on this machine. args is the argument list, never a shell string, starting with an allowed subcommand, e.g. [\"next\", \"aiko\"]. Commands that end within 20 s answer here with their JSON result; longer ones run as a background job (one at a time per pipeline): when it ends, its pictures and next step are posted in chat_id and noted on your next message. Pictures the result shows are posted to the chat for you. To hand pictures from the chat to the command, pass files (\"last_reply\": the images in the brain's latest reply here; \"last_mine\": the user's latest; or message ids) and write {files} in args where their folder goes.",
+        "Owner only. Run a configured local pipeline on this machine. args is the argument list, never a shell string, starting with an allowed subcommand, e.g. [\"next\", \"aiko\"]. Commands that end within 20 s answer here with their JSON result; longer ones run as a background job (one at a time per pipeline): when it ends, its pictures and next step are posted in chat_id and noted on your next message. Pictures the result shows are posted to the chat for you. To hand pictures from the chat to the command, pass files (\"last_reply\": the images in the brain's latest reply here; \"last_mine\": the user's latest; or message ids) and write {files} in args where their folder goes.",
       inputSchema: {
         type: "object" as const,
         properties: {
-          pipeline: { type: "string", description: 'Pipeline name, e.g. "lochara"' },
+          pipeline: { type: "string", description: "Pipeline name" },
           args: { type: "array", items: { type: "string" }, description: 'Arguments, e.g. ["next", "aiko"] or ["deliver", "aiko", "<request>", "--from", "{files}"]' },
           chat_id: { type: "string", description: "The chat this is for: results and pictures are posted there." },
           files: {
@@ -141,3 +141,25 @@ export const pipelineTools: ToolDef[] = [
     },
   },
 ];
+
+/**
+ * The tools as this config needs them: none when no pipeline is configured
+ * (their schemas are resident in every session), else with the configured
+ * names listed, so the brain knows what it can run.
+ */
+export function pipelineToolsFor(ctx: AppContext): ToolDef[] {
+  const names = [...(ctx.config?.getPipelines().keys() ?? [])];
+  if (!names.length) return [];
+  return pipelineTools.map((t) => {
+    if (t.definition.name !== "pipeline_run") return t;
+    const schema = t.definition.inputSchema as { properties: Record<string, object> };
+    return {
+      ...t,
+      definition: {
+        ...t.definition,
+        description: t.definition.description.replace("a configured local pipeline", `a configured local pipeline (${names.join(", ")})`),
+        inputSchema: { ...schema, properties: { ...schema.properties, pipeline: { type: "string", enum: names } } },
+      },
+    };
+  });
+}

@@ -14,7 +14,7 @@ import { accessTools } from "./access-tools.ts";
 import { systemTools } from "./system-tools.ts";
 import { translationTools } from "./translation-tools.ts";
 import { brainTools } from "./brain-tools.ts";
-import { pipelineTools } from "./pipeline-tools.ts";
+import { pipelineToolsFor } from "./pipeline-tools.ts";
 
 export function getAllTools(ctx: AppContext): ToolDef[] {
   return [
@@ -29,7 +29,7 @@ export function getAllTools(ctx: AppContext): ToolDef[] {
     ...translationTools,
     ...systemTools,
     ...brainTools,
-    ...pipelineTools,
+    ...pipelineToolsFor(ctx),
     ...(ctx.plugins.flatMap((p) => p.tools ?? []) as unknown as ToolDef[]),
   ];
 }

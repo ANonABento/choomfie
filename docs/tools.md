@@ -6,9 +6,9 @@ exposes the core set, and enabled plugins add their own.
 
 See [CLAUDE.md](../CLAUDE.md) for the architecture these run inside.
 
-## Tools (101 with every plugin enabled)
+## Tools (98 with every plugin enabled, 101 with pipelines)
 
-Tool lists are dynamic: the supervisor always exposes `restart`, the worker exposes 38 core tools, and enabled plugins add their own. With all shipped plugins enabled (voice 3, browser 7, tutor 19, socials 33 = 62), Choomfie exposes 101 MCP tools total: 100 worker tools plus the supervisor-owned `restart` tool.
+Tool lists are dynamic: the supervisor always exposes `restart`, the worker exposes 35 core tools (38 when `pipelines` is configured), and enabled plugins add their own. With all shipped plugins enabled (voice 3, browser 7, tutor 19, socials 33 = 62), Choomfie exposes 98 MCP tools total (101 with pipelines): 97 worker tools plus the supervisor-owned `restart` tool.
 
 Core Discord: reply (with embeds), react, edit_message, fetch_messages, search_messages, create_thread, create_poll, pin_message, unpin_message
 Core Memory: save_memory, search_memory, list_memories, delete_memory, save_conversation_summary, memory_stats
@@ -20,7 +20,7 @@ Core GitHub: check_github
 Core Status: choomfie_status
 Core Translation: translate
 Core Brains: ask_brain (owner only)
-Core Pipelines: pipeline_run, pipeline_status, pipeline_stop (owner only)
+Core Pipelines: pipeline_run, pipeline_status, pipeline_stop (owner only; only when `pipelines` is configured)
 System: restart (owner only, supervisor-owned — kills worker, spawns fresh one, reloads all code)
 
 Browser plugin: browse, browser_click, browser_type, browser_screenshot, browser_eval, browser_press_key, browser_close
