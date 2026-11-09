@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +6,9 @@ import { runCommand, type Runner } from "../lib/patch-pr.ts";
 import { bundlePlanBranch, landPatch, mergePlanPr, openPlanBranch, prepareReview, waitForChecks, type PlanBranch } from "../lib/plan-branch.ts";
 import { fixTask, MAX_FIX_ROUNDS, parseReviewText, reviewLoop, reviewMessage, type Review, type ReviewState } from "../lib/plan-review.ts";
 import { pullRunningCheckout, requestRestart } from "../lib/self-update.ts";
+
+// Real git and a fake gh: several clones and merges per test, slow on a busy machine.
+setDefaultTimeout(30_000);
 
 /**
  * Real git end to end: bare repos under <root>/remote stand in for GitHub

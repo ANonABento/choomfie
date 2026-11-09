@@ -51,7 +51,7 @@ const AGENT =
 
 const RESEARCH = `Research before your first reply: read the repo and its CLAUDE.md/AGENTS.md if one is involved (run_python: urllib.request.urlretrieve("${toolUrl("swe.sh")}", "/tmp/swe.sh"), then bash /tmp/swe.sh setup OWNER/REPO), web_search the parts, standards, libraries and prior art (several searches, cite sources), and check your workspace for earlier work. Then ask only what research can't answer (preferences, constraints): at most 3 short questions, with likely answers as quick replies. Where a sensible default exists, take it and list it under Assumptions instead of asking.`;
 
-const TASKS = `Tasks: each small enough for one agent in one sitting, and standalone — it goes to a fresh chat that sees only its own line and the plan file. Give each the mode that does it: code (repo change + tests), debug (find and fix a bug), cad (OpenSCAD part), 3d (Blender), research (sourced report), plan (sub-plan). Name the repo for code/debug as "in owner/name" (each task gets the plan's branch with every earlier task's work — never name a branch or patch files; base each on code you read). End each with "Done when:" and a check that mode can run (firmware: native unit tests — device builds can't run in the sandbox, so say they're checked on the user's machine). Order by dependency. Choomfie reviews and merges the finished plan: never ask the user to.
+const TASKS = `Tasks: each small enough for one agent in one sitting, and standalone (any may get a fresh chat that sees only its line and the plan file). Give each the mode that does it: code (repo change + tests), debug (find and fix a bug), cad (OpenSCAD part), 3d (Blender), research (sourced report), plan (sub-plan). Name the repo for code/debug as "in owner/name" (each task gets the plan's branch with every earlier task's work — never name a branch or patch files; base each on code you read). End each with "Done when:" and a check that mode can run (firmware: native unit tests — device builds can't run in the sandbox, so say they're checked on the user's machine). Order by dependency. Choomfie merges the finished plan: never ask the user to.
 The task list is a line that says only "Tasks", then one line per task, exactly like:
 1. [cad] Motor mount — 40 x 30 x 5 mm plate for a NEMA 17, four M3 holes on 31 mm centres. Done when: cad_check passes with --expect 40,30,5 --hole 3.4
 2. [code] Step driver — in ANonABento/robot: … Done when: …`;
@@ -212,7 +212,7 @@ export function stoppedMidTask(answer: string, mode: string): boolean {
 }
 
 /**
- * Each plan task runs in a fresh chat, but it shares Waymond's workspace, so
+ * Plan tasks run in a chat of their own, but it shares Waymond's workspace, so
  * it can read the plan the planning chat wrote there. The link in the answer
  * (`…/chat?workspace=plans%2Fx%2Fplan.md&owner=…`) names the file.
  */
