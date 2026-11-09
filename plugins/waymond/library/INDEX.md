@@ -27,3 +27,4 @@ ref/lessons.md — when editing a lessons file
 ref/one-shot.md — when a task must finish in one reply
 ref/research.md — when writing a sourced research report
 ref/ui.md — when designing or reviewing a UI
+tools/mesh_check.py — before delivering an STL: watertight, floating bodies, thin walls (python tools/mesh_check.py part.stl)
