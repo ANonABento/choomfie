@@ -79,14 +79,12 @@ describe("Git Data API relay", () => {
     expect(upd.body.force).toBe(false);
   });
 
-  test("retries a 422 on update-ref up to 3 times, then gives up", async () => {
+  test("a 422 on update-ref (branch moved) fails at once, never rebuilds", async () => {
     await applyPatchStrict(dir, await makePatch(), run);
-    const ok = fakeApi(2);
-    await commitStagedViaApi(dir, "o/r", "b", "m", ok.api, run);
-    expect(ok.calls.filter((c) => c.method === "PATCH").length).toBe(3);
-    const bad = fakeApi(10);
-    await expect(commitStagedViaApi(dir, "o/r", "b", "m", bad.api, run)).rejects.toThrow(/422/);
-    expect(bad.calls.filter((c) => c.method === "PATCH").length).toBe(4);
+    const moved = fakeApi(1);
+    await expect(commitStagedViaApi(dir, "o/r", "b", "m", moved.api, run)).rejects.toThrow("branch moved, re-run the task");
+    expect(moved.calls.filter((c) => c.method === "PATCH").length).toBe(1);
+    expect(moved.calls.some((c) => c.method === "GET" && c.path.includes("/ref/heads/"))).toBe(false);
     await run(["git", "reset", "-q", "--hard", head], dir);
   });
 

@@ -140,6 +140,24 @@ describe("plan branch", () => {
     expect([...readFileSync(join(pb.dir, "mesh.stl"))]).toEqual([0, 1, 2, 255]);
   });
 
+  test("a task's own branch is opened, and picked up again if it's already on GitHub", async () => {
+    const { run } = fakeGh();
+    const repo = repoName();
+    const pb = await openPlanBranch(repo, join(root, "plans"), run, 2000, "feat/thing");
+    expect(pb.branch).toBe("feat/thing");
+    await landPatch(pb, await task(pb, run, (d) => writeFileSync(join(d, "t.txt"), "t\n")), "Task 1: thing", run);
+    const again = await openPlanBranch(repo, join(root, "plans"), run, 3000, "feat/thing");
+    expect(again.branch).toBe("feat/thing");
+    expect(readFileSync(join(again.dir, "t.txt"), "utf8")).toBe("t\n");
+  });
+
+  test("a task's branch that is the default branch falls back to a plan branch", async () => {
+    const { run } = fakeGh();
+    const repo = repoName();
+    const pb = await openPlanBranch(repo, join(root, "plans"), run, 4000, "main");
+    expect(pb.branch).toBe(`plan/${repo.split("/")[1]}-${(4000).toString(36)}`);
+  });
+
   test("a patch not built on the branch fails and leaves the clone on GitHub's branch", async () => {
     const { run } = fakeGh();
     const pb = await openPlanBranch(repoName(), join(root, "plans"), run);

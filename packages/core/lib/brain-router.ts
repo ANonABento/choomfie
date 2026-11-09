@@ -384,6 +384,22 @@ export function planTaskRepo(board: Pick<TaskBoard, "tasks">, index: number): st
   return task.repo ?? (repos.length === 1 ? repos[0] : undefined);
 }
 
+/** Prefixes a task may name its own branch with; anything else stays on the plan's branch. */
+const TASK_BRANCH_PREFIXES = ["fix/", "feat/", "waymond/"];
+
+/**
+ * The branch a plan task's line asks for (`branch: feat/thing`), or undefined
+ * to keep the plan's branch: no `branch:`, a name without a fix/, feat/ or
+ * waymond/ prefix, a name git wouldn't take, or main / the default branch.
+ */
+export function planTaskBranch(spec: string, defaultBranch = "main"): string | undefined {
+  const name = spec.match(/(?:^|[\s(])branch:\s*`?([^\s`]+?)`?(?=[\s),;]|$)/im)?.[1]?.replace(/[.,;]$/, "");
+  if (!name || !TASK_BRANCH_PREFIXES.some((p) => name.startsWith(p) && name.length > p.length)) return undefined;
+  if (name === "main" || name === "master" || name === defaultBranch) return undefined;
+  if (!/^[A-Za-z0-9._\/-]+$/.test(name) || /\.\.|\/\/|\/$|\.lock$|^-|@\{/.test(name) || name.split("/").some((part) => part.startsWith("."))) return undefined;
+  return name;
+}
+
 /** A research task's outcome: done when its report is saved, else failed. Research never commits. */
 export type ResearchOutcome = { ok: boolean; path?: string; reason?: string };
 

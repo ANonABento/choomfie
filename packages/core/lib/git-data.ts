@@ -46,7 +46,6 @@ interface Entry {
   sha: string | null;
 }
 
-const MAX_RETRIES = 3;
 
 /** Commit what's staged in `dir` onto `branch` of `repo` via the API. Returns the new commit sha. */
 export async function commitStagedViaApi(
@@ -77,15 +76,13 @@ export async function commitStagedViaApi(
     entries.push({ path, mode, type: "blob", sha: blob.sha });
   }
   if (!entries.length) throw new Error("the patch changes nothing");
-  let parent = (await run(["git", "rev-parse", "HEAD"], dir)).trim();
-  for (let attempt = 0; ; attempt++) {
-    const parentCommit = await ok("GET", `${base}/commits/${parent}`);
-    const tree = await ok("POST", `${base}/trees`, { base_tree: parentCommit.tree.sha, tree: entries });
-    const commit = await ok("POST", `${base}/commits`, { message, tree: tree.sha, parents: [parent] });
-    const r = await api("PATCH", `${base}/refs/heads/${branch}`, { sha: commit.sha, force: false });
-    if (r.status >= 200 && r.status < 300) return commit.sha;
-    if (r.status !== 422 || attempt >= MAX_RETRIES) throw new Error(`GitHub API PATCH refs/heads/${branch}: ${r.status}`);
-    // The branch moved under us: rebuild on its new head (not a fast-forward otherwise).
-    parent = (await ok("GET", `${base}/ref/heads/${branch}`)).object.sha;
-  }
+  const parent = (await run(["git", "rev-parse", "HEAD"], dir)).trim();
+  const parentCommit = await ok("GET", `${base}/commits/${parent}`);
+  const tree = await ok("POST", `${base}/trees`, { base_tree: parentCommit.tree.sha, tree: entries });
+  const commit = await ok("POST", `${base}/commits`, { message, tree: tree.sha, parents: [parent] });
+  const r = await api("PATCH", `${base}/refs/heads/${branch}`, { sha: commit.sha, force: false });
+  if (r.status >= 200 && r.status < 300) return commit.sha;
+  // Not a fast-forward: the branch moved since the patch was made. Never rebuild onto it.
+  if (r.status === 422) throw new Error("branch moved, re-run the task");
+  throw new Error(`GitHub API PATCH refs/heads/${branch}: ${r.status}`);
 }

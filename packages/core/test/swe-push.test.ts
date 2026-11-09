@@ -69,4 +69,21 @@ describe("swe-push.sh", () => {
     expect(existsSync(join(root, "origin.git"))).toBe(true);
     expect(git(root, "--git-dir=origin.git", "show", "feat/x:c.txt").stdout).toBe("c\n");
   });
+
+  test("swe.sh push hands off to swe-push.sh", () => {
+    const SWE_SH = resolve(import.meta.dir, "../../../plugins/waymond/tools/swe.sh");
+    const run = (args: string[], env: Record<string, string>) => {
+      const r = spawnSync("bash", [SWE_SH, "push", ...args], {
+        encoding: "utf8",
+        env: { ...ID, PATH: `${root}/bin:${process.env.PATH}`, HOME: root, SWE_REPO_DIR: join(root, "work"), GH_LOG: `${root}/gh.log`, ...env },
+      });
+      return { code: r.status, out: r.stdout + r.stderr };
+    };
+    const noToken = run(["feat/y", "m"], {});
+    expect(noToken.code).not.toBe(0);
+    expect(noToken.out).toContain("GH_TOKEN");
+    const toMain = run(["main", "m"], { GH_TOKEN: TOKEN });
+    expect(toMain.code).not.toBe(0);
+    expect(toMain.out).toContain("refusing");
+  });
 });

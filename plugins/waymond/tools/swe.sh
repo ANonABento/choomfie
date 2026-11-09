@@ -6,6 +6,7 @@
 #                                                         apply earlier patches in order as the base, install deps, list checks
 #   bash swe.sh check                                       run the repo's own tests, type-check and lint; prints a summary, exit 1 on failure
 #   bash swe.sh diff <out.patch>                            save the change (git diff, including new files)
+#   bash swe.sh push <branch> "<msg>"                       commit, push the branch and open its PR (swe-push.sh; needs GH_TOKEN)
 #
 # Fetched by URL from the Choomfie repo, so every chat runs the same steps.
 set -uo pipefail
@@ -153,6 +154,10 @@ case "${1:-}" in
     git add -A && git diff --cached --binary > "$out"
     say "saved $out:$(git diff --cached --shortstat)"
     git reset -q
+    ;;
+  push)
+    # Commit and push a branch over HTTPS, then open or update its PR (needs GH_TOKEN; never main).
+    shift; exec bash "$(dirname "${BASH_SOURCE[0]}")/swe-push.sh" "$@"
     ;;
   *) sed -n '2,10p' "$0"; exit 2 ;;
 esac

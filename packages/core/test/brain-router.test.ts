@@ -13,6 +13,7 @@ import {
   planStatusNote,
   setPlanTaskStarter,
   loadTaskBoards,
+  planTaskBranch,
   planTaskRepo,
   postBrainReply,
   resetTaskBoards,
@@ -532,5 +533,25 @@ describe("/clear and /compact follow the channel's brain", () => {
   test("Claude channels keep the daemon behaviour (foreground notice here)", async () => {
     const { replies } = await run("clear", undefined);
     expect(replies[0].content).toContain("foreground mode");
+  });
+});
+
+describe("planTaskBranch", () => {
+  test("a task line names its branch with a fix/, feat/ or waymond/ prefix", () => {
+    expect(planTaskBranch("Fix the relay. branch: fix/relay-422")).toBe("fix/relay-422");
+    expect(planTaskBranch("Add it\nbranch: `feat/thing`")).toBe("feat/thing");
+    expect(planTaskBranch("branch: waymond/swe-push, repo: me/r")).toBe("waymond/swe-push");
+  });
+
+  test("no branch, a bad prefix, main or the default branch keep the plan's branch", () => {
+    expect(planTaskBranch("Fix the relay")).toBeUndefined();
+    expect(planTaskBranch("branch: main")).toBeUndefined();
+    expect(planTaskBranch("branch: master")).toBeUndefined();
+    expect(planTaskBranch("branch: dev")).toBeUndefined();
+    expect(planTaskBranch("branch: plan/other")).toBeUndefined();
+    expect(planTaskBranch("branch: feat/")).toBeUndefined();
+    expect(planTaskBranch("branch: feat/../main")).toBeUndefined();
+    expect(planTaskBranch("branch: feat/x.lock")).toBeUndefined();
+    expect(planTaskBranch("branch: feat/release", "feat/release")).toBeUndefined();
   });
 });

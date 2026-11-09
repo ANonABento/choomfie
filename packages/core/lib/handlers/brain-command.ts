@@ -39,6 +39,7 @@ import {
   getTaskBoard,
   landingFor,
   setPlanTaskStarter,
+  planTaskBranch,
   planTaskRepo,
   saveTaskBoards,
   takeLand,
@@ -420,22 +421,27 @@ setPlanTaskStarter(async (ctx, boardId, index, user) => {
 });
 
 /** The plan's branch on `repo`: saved, being opened, or opened now (once, however many tasks ask). */
-async function planBranchFor(ctx: Ctx, board: TaskBoard, repo: string): Promise<PlanBranch> {
-  const known = board.plans?.[repo];
+async function planBranchFor(ctx: Ctx, board: TaskBoard, repo: string, branch?: string): Promise<PlanBranch> {
+  // A task that names its own branch (`branch: feat/x`) gets that branch; the rest share the plan's.
+  const key = branch ? `${repo}#${branch}` : repo;
+  const known = board.plans?.[key];
   if (known) return known;
   board.opening ??= new Map();
-  let opening = board.opening.get(repo);
+  let opening = board.opening.get(key);
   if (!opening) {
-    opening = openPlanBranch(repo, join(ctx.DATA_DIR, "plans")).then((pb) => {
-      board.plans = { ...board.plans, [repo]: pb };
+    opening = openPlanBranch(repo, join(ctx.DATA_DIR, "plans"), runCommand, Date.now(), branch).then((pb) => {
+      board.plans = { ...board.plans, [key]: pb };
       saveTaskBoards();
       return pb;
     });
-    opening.catch(() => {}).finally(() => board.opening?.delete(repo));
-    board.opening.set(repo, opening);
+    opening.catch(() => {}).finally(() => board.opening?.delete(key));
+    board.opening.set(key, opening);
   }
   return opening;
 }
+
+/** Land through GitHub's git-data API instead of `git push` only when asked (CHOOMFIE_LAND_VIA_API=1). */
+const landViaApi = () => process.env.CHOOMFIE_LAND_VIA_API === "1";
 
 /** Commit what a task handed back to its plan's branch, and say how it went in the thread. */
 async function landTask(
@@ -453,7 +459,7 @@ async function landTask(
   }
   try {
     const landed =
-      landing.kind === "patch" ? await landPatch(pb, landing.files[0].data, title, runCommand, ghApi(runCommand)) : await landFiles(pb, landing.files, landing.folder, title);
+      landing.kind === "patch" ? await landPatch(pb, landing.files[0].data, title, runCommand, landViaApi() ? ghApi(runCommand) : undefined) : await landFiles(pb, landing.files, landing.folder, title);
     saveTaskBoards(); // prUrl
     await say(
       `🌿 Committed to \`${pb.branch}\`${landing.kind === "files" ? ` (${landing.folder}/)` : ""}: <${landed.commitUrl}>` +
@@ -507,7 +513,7 @@ async function runTaskInThread(
 
   let pb: PlanBranch;
   try {
-    pb = await planBranchFor(ctx, board, repo);
+    pb = await planBranchFor(ctx, board, repo, planTaskBranch(task.spec));
   } catch (e) {
     await say(`❌ Couldn't set up a branch on **${repo}**: ${errorText(e).slice(0, 1500)}`);
     return false;
@@ -585,7 +591,7 @@ async function handleLandTask(interaction: ButtonInteraction, ctx: Ctx): Promise
   const say = (content: string) => interaction.followUp({ content, allowedMentions: { parse: [] } }).catch(() => {});
   let ok = false;
   try {
-    ok = await landTask(board, pending.index, await planBranchFor(ctx, board, repo), pending, say);
+    ok = await landTask(board, pending.index, await planBranchFor(ctx, board, repo, planTaskBranch(board.tasks[pending.index]?.spec ?? "")), pending, say);
   } catch (e) {
     await say(`❌ Couldn't set up a branch on **${repo}**: ${errorText(e).slice(0, 1500)}`);
   }

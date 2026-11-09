@@ -62,9 +62,15 @@ const tryRun = (run: Runner, cmd: string[], cwd?: string) => run(cmd, cwd).then(
  * its default branch, pushed. Refuses a repo you can't push to before any
  * work is done.
  */
-export async function openPlanBranch(repo: string, root: string, run: Runner = runCommand, now = Date.now()): Promise<PlanBranch> {
+export async function openPlanBranch(
+  repo: string,
+  root: string,
+  run: Runner = runCommand,
+  now = Date.now(),
+  named?: string
+): Promise<PlanBranch> {
   if (!SAFE_REPO.test(repo) || repo.includes("..")) throw new Error(`not a GitHub repo name: ${repo}`);
-  const branch = planBranchName(repo, now);
+  let branch = named ?? planBranchName(repo, now);
   mkdirSync(root, { recursive: true });
   const dir = join(root, `${repo.replace("/", "__")}-${now.toString(36)}`);
   const view = await tryRun(run, ["gh", "repo", "view", repo, "--json", "viewerPermission", "-q", ".viewerPermission"]);
@@ -85,6 +91,13 @@ export async function openPlanBranch(repo: string, root: string, run: Runner = r
     await run(["git", "remote", "add", "origin", `https://github.com/${repo}.git`], dir);
     await run(["git", ...NO_HOOKS, "commit", "-q", "--allow-empty", "-m", "Start"], dir);
     await run(["git", ...NO_HOOKS, "push", "-q", "-u", "origin", "main"], dir);
+  }
+  // A task's own branch never lands on the default branch: fall back to a plan branch.
+  if (named && named === (await baseBranch({ repo, branch, dir, created: !exists }, run))) branch = planBranchName(repo, now);
+  // A named branch that's already on GitHub is picked up where it is.
+  if (named && branch === named && (await tryRun(run, ["git", "fetch", "-q", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`], dir)) !== null) {
+    await run(["git", "checkout", "-q", "-B", branch, `origin/${branch}`], dir);
+    return { repo, branch, dir, created: !exists };
   }
   await run(["git", "checkout", "-q", "-b", branch], dir);
   await run(["git", ...NO_HOOKS, "push", "-q", "-u", "origin", branch], dir);
