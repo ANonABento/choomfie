@@ -384,6 +384,34 @@ export function planTaskRepo(board: Pick<TaskBoard, "tasks">, index: number): st
   return task.repo ?? (repos.length === 1 ? repos[0] : undefined);
 }
 
+/** A research task's outcome: done when its report is saved, else failed. Research never commits. */
+export type ResearchOutcome = { ok: boolean; path?: string; reason?: string };
+
+/** The report path a research task's line names (research/<name>/report.md, or any research/….md). */
+export function researchReportPath(spec: string): string | undefined {
+  return spec.match(/(?:^|[\s`'"(])(research\/[\w.\/-]*?\.md)\b/)?.[1];
+}
+
+/**
+ * Judge a research task. With `readWorkspace` (Choomfie can read the
+ * workspace), the report must exist there and be non-empty. Without it, the
+ * reply must end with `Report saved: <path>` naming the task line's path.
+ */
+export function researchOutcome(
+  spec: string,
+  text: string,
+  readWorkspace?: (path: string) => string | undefined
+): ResearchOutcome {
+  const path = researchReportPath(spec);
+  if (!path) return { ok: false, reason: "no report saved (the task line names no research/….md path)" };
+  if (readWorkspace) {
+    return readWorkspace(path)?.trim() ? { ok: true, path } : { ok: false, reason: `no report saved at ${path}` };
+  }
+  const said = [...text.matchAll(/^\s*Report saved:\s*`?([^\s`]+?)`?\s*$/gim)].map((m) => m[1].replace(/^\/?workspace\//, ""));
+  if (said.includes(path)) return { ok: true, path };
+  return { ok: false, reason: said.length ? `no report saved at ${path} (it said ${said[0]})` : "no report saved" };
+}
+
 export type Landing = { kind: "patch"; files: [BrainFile] } | { kind: "files"; files: BrainFile[]; folder: string };
 
 /**
@@ -393,7 +421,7 @@ export type Landing = { kind: "patch"; files: [BrainFile] } | { kind: "files"; f
  */
 export function landingFor(board: Pick<TaskBoard, "brainId" | "tasks">, index: number, files: BrainFile[] | undefined, text?: string): Landing | undefined {
   const task = board.tasks[index];
-  if (!task || !planTaskRepo(board, index)) return undefined;
+  if (!task || task.mode === "research" || !planTaskRepo(board, index)) return undefined; // research never commits
   const mode = getBrain(board.brainId)?.modes?.find((m) => m.id === task.mode);
   if (mode?.repo) {
     const patch = pickPatch(files, text);

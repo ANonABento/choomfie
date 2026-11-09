@@ -45,6 +45,7 @@ import {
   taskBoardRows,
   taskPrompt,
   type Landing,
+  researchOutcome,
   type TaskBoard,
   parentChannelId,
   resolveBrainId,
@@ -446,6 +447,10 @@ async function landTask(
 ): Promise<boolean> {
   const task = board.tasks[index];
   const title = `Task ${task.n}: ${task.title}`;
+  if (task.mode === "research") {
+    await say(`-# Research tasks never commit — the ${landing.files.length} file(s) it sent back were ignored.`);
+    return false;
+  }
   try {
     const landed =
       landing.kind === "patch" ? await landPatch(pb, landing.files[0].data, title, runCommand, ghApi(runCommand)) : await landFiles(pb, landing.files, landing.folder, title);
@@ -485,6 +490,15 @@ async function runTaskInThread(
     filePaths: [] as string[],
   };
   const mode = brain.modes?.find((m) => m.id === task.mode);
+  if (task.mode === "research") {
+    // Research lands in the workspace, never on a branch: judge it by its report.
+    const reply = await dispatchToBrain(ctx, brain, thread, message, { noPatchOffer: true });
+    if (!reply || reply.stopped) return false;
+    const out = researchOutcome(task.spec, reply.text);
+    const ignored = reply.files?.length ? ` The ${reply.files.length} file(s) it sent back were ignored — research never commits.` : "";
+    await say(out.ok ? `📄 Report saved: \`${out.path}\`.${ignored}` : `❌ Failed: ${out.reason}.${ignored}`);
+    return out.ok;
+  }
   const repo = planTaskRepo(board, index);
   if (!repo || !(mode?.repo || mode?.files)) {
     const reply = await dispatchToBrain(ctx, brain, thread, message);

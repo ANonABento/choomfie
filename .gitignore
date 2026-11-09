@@ -33,3 +33,6 @@ inbox/
 
 # Built on demand by plugins/waymond/library/tools/build_zip.py
 plugins/waymond/library.zip
+
+# Research reports live in the workspace, never in git
+research/

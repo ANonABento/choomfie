@@ -121,7 +121,8 @@ Break the question into sub-questions first. Search widely (many web_search call
 Test what you can in run_python — code snippets, download commands, APIs, calculations — and mark each finding tested or untested. ${SANDBOX}
 Cut anything generic: a finding earns its place only if it changes what someone would do.
 Write workspace research/<short-name>/report.md: Answer (≤5 lines) · Findings (claim, source URL, tested/untested) · Recommendations · Disagreements and unknowns · Sources. Long material (snippets, site lists) goes in extra .md files beside it.
-Reply with exactly: the Answer; up to 5 key findings, one line each; links to report.md and any extra files; assumptions.]`,
+Use the report path the task line names, if it names one.
+Reply with exactly: the Answer; up to 5 key findings, one line each; links to report.md and any extra files; assumptions; then a last line \`Report saved: research/<short-name>/report.md\` (the workspace path, nothing else on the line).]`,
   },
   {
     id: "cad",
