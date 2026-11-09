@@ -145,11 +145,14 @@ export const pipelineTools: ToolDef[] = [
 /**
  * The tools as this config needs them: none when no pipeline is configured
  * (their schemas are resident in every session), else with the configured
- * names listed, so the brain knows what it can run.
+ * names listed, and what each is for, so the brain knows what it can run
+ * and reaches for it when asked.
  */
 export function pipelineToolsFor(ctx: AppContext): ToolDef[] {
-  const names = [...(ctx.config?.getPipelines().keys() ?? [])];
+  const pipelines = [...(ctx.config?.getPipelines().values() ?? [])];
+  const names = pipelines.map((p) => p.name);
   if (!names.length) return [];
+  const abouts = pipelines.filter((p) => p.about).map((p) => `\n- ${p.name}: ${p.about}`).join("");
   return pipelineTools.map((t) => {
     if (t.definition.name !== "pipeline_run") return t;
     const schema = t.definition.inputSchema as { properties: Record<string, object> };
@@ -157,7 +160,9 @@ export function pipelineToolsFor(ctx: AppContext): ToolDef[] {
       ...t,
       definition: {
         ...t.definition,
-        description: t.definition.description.replace("a configured local pipeline", `a configured local pipeline (${names.join(", ")})`),
+        description:
+          t.definition.description.replace("a configured local pipeline", `a configured local pipeline (${names.join(", ")})`) +
+          (abouts ? `\nPipelines:${abouts}` : ""),
         inputSchema: { ...schema, properties: { ...schema.properties, pipeline: { type: "string", enum: names } } },
       },
     };

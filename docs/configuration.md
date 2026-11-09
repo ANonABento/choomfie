@@ -66,7 +66,8 @@ Local command-line tools a brain may run through `pipeline_run` (see `docs/tools
     "dir": "~/lochara",
     "command": ["./lochara"],
     "allow": ["next", "requests", "concept", "part", "deliver", "build", "check", "render", "export"],
-    "json": "--json"
+    "json": "--json",
+    "about": "Makes anime 3D characters (VRM/GLB) for VRChat, VTubing and games. Start with [\"next\"]: it says what to run, pick or show."
   }
 }
 ```
@@ -75,6 +76,7 @@ Local command-line tools a brain may run through `pipeline_run` (see `docs/tools
 - **`command`**: the program and fixed leading arguments, run without a shell.
 - **`allow`**: subcommands a caller may give as the first argument. Keep it to what you'd let a remote caller run with your authority; leave out anything that writes where you don't want.
 - **`json`** (optional): the flag that makes the tool print one JSON result on stdout; then its `show` pictures are posted and its `next` step is noted.
+- **`about`** (optional, up to 300 characters): what the tool is for and how to start. It's added to `pipeline_run`'s description, so a brain asked to "make a character" knows this pipeline does that; without it the brain sees only the name.
 - An entry that doesn't validate is left out and logged.
 
 ## Remote MCP endpoint (`remoteMcp`)
