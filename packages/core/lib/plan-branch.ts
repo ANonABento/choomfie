@@ -18,6 +18,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { applyPatchStrict, commitStagedViaApi, type GitApi } from "./git-data.ts";
 import type { BrainFile } from "@choomfie/shared";
 import { runCommand, type Runner } from "./patch-pr.ts";
 
@@ -203,7 +204,8 @@ async function landChange(
   title: string,
   run: Runner,
   stage: (tmp: string) => Promise<void>,
-  nothing: string
+  nothing: string,
+  api?: GitApi
 ): Promise<Landed> {
   return locked(pb.dir, async () => {
     await syncClone(pb, run);
@@ -211,15 +213,23 @@ async function landChange(
     try {
       await stage(tmp);
       if (!(await run(["git", "diff", "--cached", "--name-only"], pb.dir)).trim()) throw new Error(nothing);
-      await run(["git", ...NO_HOOKS, "commit", "-q", "-m", title.slice(0, 72), "-m", "Written by Waymond, committed from Discord."], pb.dir);
-      const push = () => run(["git", ...NO_HOOKS, "push", "-q", "origin", `HEAD:refs/heads/${pb.branch}`], pb.dir);
-      try {
-        await push();
-      } catch {
-        await push(); // one retry: a dropped connection
+      let sha: string;
+      if (api) {
+        // One commit through the Git Data API; the clone then catches up with GitHub.
+        sha = await commitStagedViaApi(pb.dir, pb.repo, pb.branch, `${title.slice(0, 72)}\n\nWritten by Waymond, committed from Discord.`, api, run);
+        await run(["git", "fetch", "-q", "origin", `+refs/heads/${pb.branch}:refs/remotes/origin/${pb.branch}`], pb.dir);
+        await run(["git", "reset", "-q", "--hard", `origin/${pb.branch}`], pb.dir);
+      } else {
+        await run(["git", ...NO_HOOKS, "commit", "-q", "-m", title.slice(0, 72), "-m", "Written by Waymond, committed from Discord."], pb.dir);
+        const push = () => run(["git", ...NO_HOOKS, "push", "-q", "origin", `HEAD:refs/heads/${pb.branch}`], pb.dir);
+        try {
+          await push();
+        } catch {
+          await push(); // one retry: a dropped connection
+        }
+        await run(["git", "fetch", "-q", "origin", `+refs/heads/${pb.branch}:refs/remotes/origin/${pb.branch}`], pb.dir);
+        sha = (await run(["git", "rev-parse", "HEAD"], pb.dir)).trim();
       }
-      await run(["git", "fetch", "-q", "origin", `+refs/heads/${pb.branch}:refs/remotes/origin/${pb.branch}`], pb.dir);
-      const sha = (await run(["git", "rev-parse", "HEAD"], pb.dir)).trim();
       const landed: Landed = { commitUrl: `https://github.com/${pb.repo}/commit/${sha}` };
       // The plan's PR was merged or closed (work went on after it): this commit needs a new one.
       if (pb.prUrl) {
@@ -245,8 +255,12 @@ async function landChange(
   });
 }
 
-/** Commit a task's patch on the plan branch and push. Throws when it doesn't apply, changes nothing, or won't push. */
-export function landPatch(pb: PlanBranch, patch: Uint8Array, title: string, run: Runner = runCommand): Promise<Landed> {
+/**
+ * Commit a task's patch on the plan branch as one commit. With `api` it goes
+ * blob → tree → commit → update-ref; without, plain git push. Throws when it
+ * doesn't apply cleanly, changes nothing, or won't land.
+ */
+export function landPatch(pb: PlanBranch, patch: Uint8Array, title: string, run: Runner = runCommand, api?: GitApi): Promise<Landed> {
   return landChange(
     pb,
     title,
@@ -256,12 +270,13 @@ export function landPatch(pb: PlanBranch, patch: Uint8Array, title: string, run:
       const file = join(tmp, "task.patch");
       writeFileSync(file, patch);
       try {
-        await run(["git", "apply", "--index", "--binary", "--whitespace=nowarn", file], pb.dir);
+        await applyPatchStrict(pb.dir, file, run);
       } catch (e) {
         throw new Error(`the patch doesn't apply to ${pb.branch} — it wasn't built on the branch it was given: ${e instanceof Error ? e.message : e}`);
       }
     },
-    "the patch changes nothing"
+    "the patch changes nothing",
+    api
   );
 }
 
@@ -344,10 +359,16 @@ async function openPlanPr(pb: PlanBranch, run: Runner): Promise<string> {
 
 /**
  * The patch a reply hands back: a `.patch`/`.diff`, preferring the final one
- * over a saved work-in-progress (`wip.patch`), and the last one named.
+ * over a saved work-in-progress (`wip.patch`), and the last one named. Given
+ * the reply's `text`, only a patch the text names counts — a leftover file in
+ * the same folder is never picked up.
  */
-export function pickPatch(files: BrainFile[] | undefined): BrainFile | undefined {
-  const patches = (files ?? []).filter((f) => /\.(patch|diff)$/i.test(f.name));
+export function pickPatch(files: BrainFile[] | undefined, text?: string): BrainFile | undefined {
+  let patches = (files ?? []).filter((f) => /\.(patch|diff)$/i.test(f.name));
+  if (text !== undefined) {
+    const at = (f: BrainFile) => text.lastIndexOf(f.name.split(/[\\/]/).pop()!);
+    patches = patches.filter((f) => at(f) >= 0).sort((a, b) => at(a) - at(b));
+  }
   const final = patches.filter((f) => !/(^|[^a-z])wip([^a-z]|$)/i.test(f.name));
   return (final.length ? final : patches).at(-1);
 }

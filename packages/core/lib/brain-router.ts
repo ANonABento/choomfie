@@ -391,12 +391,12 @@ export type Landing = { kind: "patch"; files: [BrainFile] } | { kind: "files"; f
  * mode), or its files (a files mode, like cad → cad/). Undefined when the
  * task has no repo, or the reply has nothing for it.
  */
-export function landingFor(board: Pick<TaskBoard, "brainId" | "tasks">, index: number, files: BrainFile[] | undefined): Landing | undefined {
+export function landingFor(board: Pick<TaskBoard, "brainId" | "tasks">, index: number, files: BrainFile[] | undefined, text?: string): Landing | undefined {
   const task = board.tasks[index];
   if (!task || !planTaskRepo(board, index)) return undefined;
   const mode = getBrain(board.brainId)?.modes?.find((m) => m.id === task.mode);
   if (mode?.repo) {
-    const patch = pickPatch(files);
+    const patch = pickPatch(files, text);
     return patch ? { kind: "patch", files: [patch] } : undefined;
   }
   if (mode?.files) {
@@ -477,7 +477,7 @@ export async function postBrainReply(
   // A patch made in the brain's sandbox: the owner can turn it into a draft PR.
   // A follow-up in a plan task's thread ("continue"): what it hands back goes on the plan's branch.
   const planTask = opts.noPatchOffer ? undefined : taskForThread(chatKey);
-  const land = planTask ? landingFor(planTask.board, planTask.index, reply.files) : undefined;
+  const land = planTask ? landingFor(planTask.board, planTask.index, reply.files, reply.text) : undefined;
   if (planTask && land) {
     const what = land.kind === "patch" ? `Patch (\`${land.files[0].name}\`)` : `${land.files.length} file${land.files.length === 1 ? "" : "s"} for ${land.folder}/`;
     const sent = await channel.send({

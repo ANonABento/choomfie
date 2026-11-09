@@ -54,7 +54,8 @@ import {
 import { isAllowed, isOwner } from "../access.ts";
 import { onMessageReceived, onReplySent } from "../typing.ts";
 import { isDaemonMode, requestDaemonControl, waitForClaudeIdle } from "../daemon-status.ts";
-import { openDraftPr, takePatch } from "../patch-pr.ts";
+import { openDraftPr, runCommand, takePatch } from "../patch-pr.ts";
+import { ghApi } from "../git-data.ts";
 import { bundlePlanBranch, landFiles, landPatch, openPlanBranch, planBranchNote, planFilesNote, type PlanBranch } from "../plan-branch.ts";
 import { requireOwner } from "./shared.ts";
 
@@ -447,7 +448,7 @@ async function landTask(
   const title = `Task ${task.n}: ${task.title}`;
   try {
     const landed =
-      landing.kind === "patch" ? await landPatch(pb, landing.files[0].data, title) : await landFiles(pb, landing.files, landing.folder, title);
+      landing.kind === "patch" ? await landPatch(pb, landing.files[0].data, title, runCommand, ghApi(runCommand)) : await landFiles(pb, landing.files, landing.folder, title);
     saveTaskBoards(); // prUrl
     await say(
       `🌿 Committed to \`${pb.branch}\`${landing.kind === "files" ? ` (${landing.folder}/)` : ""}: <${landed.commitUrl}>` +
@@ -531,7 +532,7 @@ async function runTaskInThread(
       await say(`⏹ Stopped — nothing was committed to \`${pb.branch}\`.`);
       return false;
     }
-    const landing = landingFor(board, index, reply.files);
+    const landing = landingFor(board, index, reply.files, reply.text);
     if (!landing && reply.background) {
       await say(
         `⏳ ${brain.label} is still on it. When it finishes, its answer is posted here with a **Commit to the plan's branch** button; ` +

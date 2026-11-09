@@ -326,7 +326,7 @@ describe("task boards survive a restart", () => {
       await postBrainReply(channel, "codebrain", "chan", { text: "Plan.", tasks: [{ n: 1, mode: "code", title: "A", spec: "A — in me/r: x", repo: "me/r" }] });
       getTaskBoard("m2")!.threads = { th: 0 };
       const patch = { name: "a.patch", data: new TextEncoder().encode("diff") };
-      await postBrainReply(channel, "codebrain", "th", { text: "Done.\nrepo: me/r", files: [{ name: "wip.patch", data: new Uint8Array() }, patch] });
+      await postBrainReply(channel, "codebrain", "th", { text: "Done: a.patch\nrepo: me/r", files: [{ name: "wip.patch", data: new Uint8Array() }, patch] });
       const offer = sent.at(-1)!;
       expect(offer.content).toContain("task 1");
       expect(takeLand(`m${id}`)).toMatchObject({ boardId: "m2", index: 0, kind: "patch", files: [{ name: "a.patch" }] });

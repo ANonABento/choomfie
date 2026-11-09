@@ -148,6 +148,18 @@ plugins/                    # voice/, browser/, tutor/, socials/
 docs/
 ```
 
+## Letting agents push
+
+Waymond's code tasks can land their own work with `bash swe-push.sh <branch> "<msg>"` (in `plugins/waymond/tools/`): it commits, pushes the branch over HTTPS and opens (or updates) a PR with `gh`. It never pushes to `main` or the default branch, and never prints the token. It needs a token in `GH_TOKEN`:
+
+1. GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate new token.
+2. Expiration: **90 days or less**.
+3. Repository access: **Only select repositories** → `choomfie` only.
+4. Permissions: **Contents: Read and write**, **Pull requests: Read and write** (Metadata: read is added automatically). Nothing else.
+5. Set it where the task runs, never in a file in the repo: `export GH_TOKEN=github_pat_...`. `swe-push.sh` runs `gh auth setup-git` so git uses it.
+
+Without a token, Choomfie lands the work itself: it takes **only the patch the task's result names** (other patches in the folder are ignored), rejects it if it doesn't apply cleanly, and commits it as one commit through the Git Data API (blob → tree → commit → update-ref, never forced).
+
 ## Troubleshooting
 
 | Symptom | Fix |
