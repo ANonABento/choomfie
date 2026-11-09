@@ -4,8 +4,8 @@
  *
  * Only a plain fast-forward of a clean checkout on the default branch; anything
  * else (another branch checked out, local edits to tracked files) is left
- * alone and reported. The restart waits until no task, review or brain turn
- * is running here, then the daemon waits for its own sessions' turns.
+ * alone and reported. The restart is the owner's call (a button), since only
+ * they know what's going on; the daemon still waits for its sessions' turns.
  */
 
 import { join } from "node:path";
@@ -43,21 +43,12 @@ export async function pullRunningCheckout(repo: string, run: Runner = runCommand
 }
 
 /**
- * Restart the daemon once `idle()` holds (checked every `everyMs`, given up
- * after `maxMs`). Foreground mode can't restart itself: false.
+ * Ask the daemon to restart on the code now on disk. It still lets every
+ * Claude session finish its turn first. Foreground mode can't restart itself:
+ * false.
  */
-export async function restartWhenIdle(
-  dataDir: string,
-  location: string,
-  idle: () => boolean,
-  { everyMs = 30_000, maxMs = 6 * 3600_000, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)) } = {}
-): Promise<boolean> {
+export async function requestRestart(dataDir: string, location: string, by: string): Promise<boolean> {
   if (!isDaemonOwnedProcess()) return false;
-  const started = Date.now();
-  while (!idle()) {
-    if (Date.now() - started > maxMs) return false;
-    await sleep(everyMs);
-  }
-  await requestDaemonControl(dataDir, "restart", { location, requestedBy: "plan merge" });
+  await requestDaemonControl(dataDir, "restart", { location, requestedBy: by });
   return true;
 }

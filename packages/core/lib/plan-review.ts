@@ -7,13 +7,14 @@
  *   tasks done → review ─ findings → fix task → review … (MAX_FIX_ROUNDS)
  *                       └ clean → CI → Merge button
  *
- * The reviewer only reads: Claude with Read/Grep/Glob in the plan's clone, no
- * shell, no settings or hooks from the repo (a patch could add some), so
- * nothing from a patch runs on this Mac. The rules come from the default
+ * The reviewer is the brain itself, in its `review` mode (Waymond: a fresh
+ * chat in the review thread, so it judges the plan rather than defending its
+ * own task, and the same chat checks the fixes on later rounds). It runs in
+ * the brain's sandbox, not on this Mac and not on Claude's quota. A brain with
+ * no review mode skips straight to CI. The rules come from the default
  * branch, so a patch can't rewrite the rules it's held to.
  */
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { BrainTask } from "@choomfie/shared";
 import { prepareReview, waitForChecks, type ChecksResult, type PlanBranch } from "./plan-branch.ts";
 import { runCommand, type Runner } from "./patch-pr.ts";
@@ -33,6 +34,8 @@ export interface Review {
 }
 
 export interface ReviewInput {
+  /** 0 on the first review, then one more per fix round (the reviewer checks its earlier findings). */
+  round: number;
   repo: string;
   branch: string;
   base: string;
@@ -41,15 +44,12 @@ export interface ReviewInput {
   rules: string;
   stat: string;
   diff: string;
-  /** The plan's clone at the reviewed head, for reading around the diff. */
-  cwd: string;
 }
 
 export type Reviewer = (input: ReviewInput) => Promise<Review>;
 
 /** Fix rounds before the loop hands over to the owner. */
 export const MAX_FIX_ROUNDS = 2;
-const MAX_DIFF_CHARS = 150_000;
 
 export interface ReviewState {
   status: "reviewing" | "fixing" | "checks" | "ready" | "merged" | "stuck";
@@ -86,20 +86,15 @@ export function ciFixTask(repo: string, round: number, failed: string[], prUrl: 
   return { n: 0, mode, title: `CI fixes (round ${round})`, spec, repo };
 }
 
+/** One line under the reviewer's own reply (which is already in the thread). */
 export function formatReview(review: Review, round: number): string {
-  const must = blocking(review);
-  const nits = review.findings.filter((f) => f.severity !== "must");
-  const item = (f: Finding) => `- **${f.title}**${f.file ? ` \`${f.file}\`` : ""} — ${f.fix}`;
-  return [
-    `🔎 **Review, round ${round + 1}:** ${must.length ? `${must.length} to fix` : "clean"}`,
-    review.summary,
-    ...(must.length ? ["", "**To fix:**", ...must.map(item)] : []),
-    ...(nits.length ? ["", "**Notes (not blocking):**", ...nits.map(item)] : []),
-  ].join("\n");
+  const must = blocking(review).length;
+  return `-# 🔎 Review ${round + 1}: ${must ? `${must} to fix` : "clean"}`;
 }
 
 export interface LoopDeps {
-  reviewer: Reviewer;
+  /** Undefined: the brain has no review mode, so only CI gates the merge. */
+  reviewer?: Reviewer;
   /** Messages in the review's thread. */
   say: (content: string) => Promise<unknown>;
   /** Add a task to the board and run it on the plan's branch; true when it landed. */
@@ -148,22 +143,24 @@ export async function reviewLoop(pb: PlanBranch, tasks: BrainTask[], state: Revi
     if (!prep.diff.trim()) return stuck(`\`${pb.branch}\` has no changes against \`${prep.base}\`.`);
     if (!pb.prUrl) return stuck(`\`${pb.branch}\` has no PR (opening it failed when the first task landed).`);
 
-    let review: Review;
-    try {
-      review = await deps.reviewer({
-        repo: pb.repo,
-        branch: pb.branch,
-        base: prep.base,
-        tasks: tasks.map((t) => `${t.n}. [${t.mode}] ${t.spec}`),
-        rules: prep.rules,
-        stat: prep.stat,
-        diff: prep.diff,
-        cwd: pb.dir,
-      });
-    } catch (e) {
-      return stuck(`The review itself failed: ${e instanceof Error ? e.message : String(e)}`.slice(0, 1500));
+    let review: Review = { summary: "", findings: [] };
+    if (deps.reviewer) {
+      try {
+        review = await deps.reviewer({
+          round: state.round,
+          repo: pb.repo,
+          branch: pb.branch,
+          base: prep.base,
+          tasks: tasks.map((t) => `${t.n}. [${t.mode}] ${t.spec}`),
+          rules: prep.rules,
+          stat: prep.stat,
+          diff: prep.diff,
+        });
+      } catch (e) {
+        return stuck(`The review itself failed: ${e instanceof Error ? e.message : String(e)}`.slice(0, 1500));
+      }
+      await deps.say(formatReview(review, state.round));
     }
-    await deps.say(formatReview(review, state.round).slice(0, 1990));
     const must = blocking(review);
     if (must.length) {
       const sent = await fix(fixTask(pb.repo, state.round + 1, must, deps.fixMode));
@@ -189,92 +186,46 @@ export async function reviewLoop(pb: PlanBranch, tasks: BrainTask[], state: Revi
   }
 }
 
-const REVIEW_SCHEMA = {
-  type: "object",
-  properties: {
-    summary: { type: "string", description: "Two or three sentences: what the change does and whether it's ready." },
-    findings: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          severity: { type: "string", enum: ["must", "nit"] },
-          title: { type: "string" },
-          file: { type: "string" },
-          fix: { type: "string" },
-        },
-        required: ["severity", "title", "fix"],
-      },
-    },
-  },
-  required: ["summary", "findings"],
-} as const;
-
-export function reviewPrompt(input: ReviewInput): string {
-  const diff =
-    input.diff.length > MAX_DIFF_CHARS
-      ? `${input.diff.slice(0, MAX_DIFF_CHARS)}\n… (diff cut at ${MAX_DIFF_CHARS} characters: Read the changed files in the stat for the rest)`
-      : input.diff;
+/** The message that asks the brain for a review (the bundle, plan.diff and rules.md go along as files). */
+export function reviewMessage(input: ReviewInput): string {
+  if (input.round > 0) {
+    return (
+      `Fixes for your findings have landed on ${input.branch}. Check again: the attached bundle, plan.diff (the whole change against ${input.base}) and rules.md are current. ` +
+      "Say which of your earlier findings are fixed, review anything new, and end with the Verdict lines as before."
+    );
+  }
   return [
-    `Review this pull request before it merges. An AI coding agent wrote it, task by task, on branch ${input.branch} of ${input.repo}; it merges into ${input.base}.`,
-    "Your working directory is the branch, checked out: Read, Grep and Glob it for context around the diff.",
-    "",
-    "What makes a finding `must` (the change can't merge with it):",
-    "- a bug: wrong behaviour, a crash, a broken edge case, a security hole",
-    "- it breaks one of the repo's rules below",
-    "- it doesn't do what its task asked, or one task's change undoes or contradicts another's",
-    "- code added that nothing calls, config nothing reads, or a test that doesn't test the behaviour",
-    "- secrets, personal IDs or private details in a file that will be public",
-    "Everything else worth saying (style, naming, small simplifications) is a `nit`. Don't invent findings: a clean change has none.",
-    "Each finding: one title, the file, and a `fix` concrete enough that another agent with only the branch can do it.",
+    `Review this plan before it merges: branch ${input.branch} of ${input.repo}, into ${input.base}. An agent wrote it task by task; every task's own checks passed.`,
+    "Attached: the branch as a bundle, plan.diff (the whole change), rules.md (the repo's rules, from the default branch).",
     "",
     "The plan's tasks:",
     ...input.tasks,
     "",
-    input.rules ? `The repo's rules (from ${input.base}):\n${input.rules}` : "The repo has no CLAUDE.md, AGENTS.md or CONTRIBUTING.md.",
-    "",
     `Changed files:\n${input.stat}`,
-    "",
-    `The diff (${input.base}...${input.branch}):`,
-    diff,
   ].join("\n");
 }
 
-/** Parse the reviewer's answer; throws on anything that isn't a review. */
-export function parseReview(raw: unknown): Review {
-  const v = (typeof raw === "string" ? JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, "")) : raw) as Partial<Review>;
-  if (!v || typeof v.summary !== "string" || !Array.isArray(v.findings)) throw new Error("the reviewer didn't return a review");
-  const findings = v.findings
-    .filter((f): f is Finding => !!f && typeof f.title === "string" && typeof f.fix === "string")
-    .map((f) => ({ severity: f.severity === "must" ? ("must" as const) : ("nit" as const), title: f.title, fix: f.fix, ...(f.file ? { file: f.file } : {}) }));
-  return { summary: v.summary, findings };
-}
+const FINDING = /^\s*[-*•]\s*\[(must|nit)\]\s*(.+?)(?:\s*\(`?([^()`]+?)`?\))?\s*:\s*(.+)$/i;
 
-/** Claude as the reviewer: read-only tools, nothing from the repo's settings, a structured answer. */
-export function claudeReviewer(model?: string): Reviewer {
-  return async (input) => {
-    const q = query({
-      prompt: reviewPrompt(input),
-      options: {
-        cwd: input.cwd,
-        ...(model ? { model } : {}),
-        tools: ["Read", "Grep", "Glob"],
-        allowedTools: ["Read", "Grep", "Glob"],
-        permissionMode: "dontAsk",
-        settingSources: [],
-        mcpServers: {},
-        strictMcpConfig: true,
-        persistSession: false,
-        maxTurns: 60,
-        outputFormat: { type: "json_schema", schema: REVIEW_SCHEMA as unknown as Record<string, unknown> },
-        env: { ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: "false" },
-      },
-    });
-    for await (const m of q) {
-      if (m.type !== "result") continue;
-      if (m.subtype !== "success") throw new Error(`review ended with ${m.subtype}`);
-      return parseReview(m.structured_output ?? m.result);
-    }
-    throw new Error("the review ended without a result");
-  };
+/**
+ * Read a review out of the brain's reply: a `Verdict: clean|changes` line and
+ * `- [must|nit] title (file): fix` lines. Throws when there's no verdict, or
+ * the verdict says changes but no [must] line says which.
+ */
+export function parseReviewText(text: string): Review {
+  const lines = text.replace(/\*\*/g, "").split("\n");
+  const at = lines.findLastIndex((l) => /^\s*verdict\s*:/i.test(l));
+  if (at < 0) throw new Error("the review didn't end with a Verdict line");
+  const verdict = /clean/i.test(lines[at]) ? "clean" : "changes";
+  const findings: Finding[] = [];
+  for (const l of lines.slice(at + 1)) {
+    const m = FINDING.exec(l);
+    if (m) findings.push({ severity: m[1].toLowerCase() === "must" ? "must" : "nit", title: m[2].trim(), fix: m[4].trim(), ...(m[3] ? { file: m[3].trim() } : {}) });
+  }
+  if (verdict === "changes" && !findings.some((f) => f.severity === "must")) {
+    throw new Error("the review said changes but listed no [must] finding");
+  }
+  // A clean verdict wins over a stray [must] line: nothing blocks.
+  const kept = verdict === "clean" ? findings.map((f) => ({ ...f, severity: "nit" as const })) : findings;
+  return { summary: lines.slice(0, at).join("\n").trim(), findings: kept };
 }

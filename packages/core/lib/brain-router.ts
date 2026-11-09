@@ -582,13 +582,19 @@ export function installBrainPoster(ctx: AppContext): void {
 /** One in-flight request per backend conversation; later ones queue behind it. */
 const queues = new Map<string, Promise<void>>();
 
-/** No brain turn, plan task or review is running: safe to restart. */
-export function brainWorkIdle(): boolean {
-  if (queues.size) return false;
+/** What a restart would cut off here: brain replies in progress, plan tasks running, reviews going. Empty when idle. */
+export function runningWork(): string[] {
+  const out: string[] = [];
+  if (queues.size) out.push(`${queues.size} brain repl${queues.size === 1 ? "y" : "ies"} in progress`);
+  let tasks = 0;
+  let reviews = 0;
   for (const b of taskBoards.values()) {
-    if (b.busy || b.states.some((s) => s.kind === "running") || Object.values(b.reviews ?? {}).some(reviewActive)) return false;
+    tasks += b.states.filter((s) => s.kind === "running").length;
+    reviews += Object.values(b.reviews ?? {}).filter(reviewActive).length;
   }
-  return true;
+  if (tasks) out.push(`${tasks} plan task${tasks === 1 ? "" : "s"} running`);
+  if (reviews) out.push(`${reviews} plan review${reviews === 1 ? "" : "s"} going`);
+  return out;
 }
 
 /**

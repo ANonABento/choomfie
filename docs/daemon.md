@@ -80,7 +80,7 @@ The worker is a child of the daemon, but control goes through files so the worke
 - Every request names the `location` whose session it is about. `compact` compacts it, `stop` calls `interrupt()` on its turn in flight and keeps the session, `clear` / `resume` close it (the worker already bound the new chat). The daemon polls every 2s (`CONTROL_POLL_INTERVAL_MS`)
 - **Consume-once**: `consumeControlRequest` deletes the file *before* acting, so a crash mid-compact can't replay the request. Malformed and stale files are deleted too — left in place, an unparseable one would be re-read every poll forever
 - Requests older than `CONTROL_REQUEST_STALE_MS` (2 min) are discarded; `stop` goes stale after 20s (`STOP_REQUEST_STALE_MS`) so a leftover one never cuts off a later turn
-- `restart` restarts the whole daemon on the code now on disk: the worker sends it after a plan merged into Choomfie's own repo and the running checkout was fast-forwarded (`lib/self-update.ts`), once no brain turn, plan task or review is running there. The daemon then waits until no session is mid-turn and exits with `RESTART_EXIT_CODE` (75); launchd's `KeepAlive` (`SuccessfulExit: false`) starts it again
+- `restart` restarts the whole daemon on the code now on disk: the worker sends it when the owner presses **Restart** after a plan merged into Choomfie's own repo and the running checkout was fast-forwarded (`lib/self-update.ts`). The daemon then waits until no session is mid-turn and exits with `RESTART_EXIT_CODE` (75); launchd's `KeepAlive` (`SuccessfulExit: false`) starts it again
 - A compact's confirmation comes from the *new* session (`chatId` to announce in), not a reply — the session that would have replied is the one being replaced
 
 ### Inbound Message Delivery
