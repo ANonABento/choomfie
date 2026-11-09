@@ -61,7 +61,7 @@ import { onMessageReceived, onReplySent } from "../typing.ts";
 import { isDaemonMode, requestDaemonControl, waitForClaudeIdle } from "../daemon-status.ts";
 import { openDraftPr, takePatch } from "../patch-pr.ts";
 import { bundlePlanBranch, landFiles, landPatch, openPlanBranch, planBranchNote, planFilesNote, planReadNote, type PlanBranch } from "../plan-branch.ts";
-import { mergePlanPr } from "../plan-branch.ts";
+import { mergePlanPr, prepareReview } from "../plan-branch.ts";
 import { claudeReviewer, reviewLoop, type ReviewState } from "../plan-review.ts";
 import { pullRunningCheckout, restartWhenIdle } from "../self-update.ts";
 import { requireOwner } from "./shared.ts";
@@ -469,6 +469,9 @@ async function startReview(
   const fixMode = brain?.modes?.find((m) => m.repo)?.id;
   if (!brain || !fixMode || !reviewable(board)) return;
   for (const pb of Object.values(board.plans ?? {})) {
+    // A branch with nothing on it (only research read it, or it's merged already): nothing to review, no thread.
+    const prep = await prepareReview(pb).catch(() => null);
+    if (prep && !("conflict" in prep) && !prep.diff.trim()) continue;
     const state: ReviewState = { status: "reviewing", round: 0 };
     board.reviews = { ...board.reviews, [pb.repo]: state };
     saveTaskBoards();
