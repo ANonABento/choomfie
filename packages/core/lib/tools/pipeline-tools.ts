@@ -8,13 +8,12 @@
  * Owner only, checked in code (`callerIsOwner`).
  */
 
-import { join } from "node:path";
 import { callerIsOwner } from "../caller.ts";
 import { buildArgv, PipelineError } from "../pipelines/args.ts";
 import { jobLine } from "../pipelines/announce.ts";
-import { pipelineRunner } from "../pipelines/index.ts";
+import { filesFor, pipelineRunner } from "../pipelines/index.ts";
 import type { Job } from "../pipelines/runner.ts";
-import { pruneByAge, resolveThreadFiles, type FileSpec } from "../pipelines/thread-files.ts";
+import type { FileSpec } from "../pipelines/thread-files.ts";
 import type { ToolCaller } from "../ipc-types.ts";
 import type { AppContext, ToolDef } from "../types.ts";
 import { err, text } from "../types.ts";
@@ -50,13 +49,7 @@ async function run(args: Record<string, unknown>, ctx: AppContext, chatId: strin
   const p = pipelineFor(ctx, args.pipeline);
   const runner = pipelineRunner(ctx);
   const id = runner.newId(p.name);
-  let filesDir: string | undefined;
-  if (args.files !== undefined) {
-    const base = join(ctx.DATA_DIR, "pipeline-files");
-    pruneByAge(base);
-    filesDir = join(base, id);
-    resolveThreadFiles(ctx.DATA_DIR, chatId, args.files as FileSpec, filesDir);
-  }
+  const filesDir = args.files !== undefined ? filesFor(ctx, chatId, args.files as FileSpec, id) : undefined;
   const argv = buildArgv(p, args.args, filesDir);
   // A remote brain (Waymond) can't relay the result: its turn ends at the approval. Choomfie posts it.
   const job = runner.start(p, argv, (args.args as string[]).slice(), chatId, id, { postResult: caller.via === "remote" });

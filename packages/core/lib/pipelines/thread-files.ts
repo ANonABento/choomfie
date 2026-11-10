@@ -80,6 +80,12 @@ function entries(dataDir: string, chatKey: string): Entry[] {
   return out.sort((a, b) => b.at - a.at);
 }
 
+/** Whether this chat has kept images from the brain ("last_reply") or the user ("last_mine"). */
+export function hasThreadFiles(dataDir: string, chatKey: string, spec: "last_reply" | "last_mine"): boolean {
+  const source: FileSource = spec === "last_reply" ? "brain" : "user";
+  return entries(dataDir, chatKey).some((e) => e.source === source);
+}
+
 /** Copy the images `spec` names into `dest`; returns their paths there. Throws PipelineError if there are none. */
 export function resolveThreadFiles(dataDir: string, chatKey: string, spec: FileSpec, dest: string): string[] {
   const all = entries(dataDir, chatKey);

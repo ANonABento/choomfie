@@ -327,10 +327,10 @@ export function latestBoardIn(chatKey: string): { boardId: string; board: TaskBo
   return best;
 }
 
-/** The thread's pipeline note for this brain's chat here (binding the chat the brain is about to use). */
+/** The thread's pipeline note for this brain's chat here (binding the chat the brain is about to use); these brains don't run on this machine. */
 function threadPipelineNote(ctx: AppContext, brainId: string, message: { chatKey: string; content: string }): string | undefined {
   if (!ctx.chats.pipelineAt(message.chatKey)) return undefined;
-  return pipelineNote(ctx, message.chatKey, ctx.chats.current(message.chatKey, brainId, message.content).id);
+  return pipelineNote(ctx, message.chatKey, ctx.chats.current(message.chatKey, brainId, message.content).id, true);
 }
 
 /**

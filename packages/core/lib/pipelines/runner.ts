@@ -35,7 +35,18 @@ export interface Job {
   background?: boolean;
   /** The caller can't relay the result to the chat (a remote brain whose turn ends at an approval): post it. */
   postResult?: boolean;
+  /** Started from a step card's button: its end posts the next card. */
+  via?: "card";
+  /** The card message the button was on, and its text, edited to how the job ended. */
+  cardMsg?: CardMessage;
 }
+
+export interface CardMessage {
+  messageId: string;
+  text: string;
+}
+
+export type StartOptions = Pick<Job, "postResult" | "via" | "cardMsg">;
 
 const MAX_JOBS = 100;
 const MAX_LOGS = 50;
@@ -54,7 +65,7 @@ export class PipelineRunner {
   constructor(private readonly logDir: string, private readonly onFinish: Finished = () => {}) {}
 
   /** Queue a job; it starts when its pipeline is free. */
-  start(p: PipelineConfig, argv: string[], args: string[], chatId: string, id = this.newId(p.name), opts: { postResult?: boolean } = {}): Job {
+  start(p: PipelineConfig, argv: string[], args: string[], chatId: string, id = this.newId(p.name), opts: StartOptions = {}): Job {
     const dir = join(this.logDir, p.name);
     mkdirSync(dir, { recursive: true });
     const job: Job = { id, pipeline: p.name, args, argv, chatId, state: "queued", queuedAt: Date.now(), logPath: join(dir, `${id}.log`), ...opts };
