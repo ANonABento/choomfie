@@ -11,11 +11,19 @@
 import type { PipelineConfig } from "./config.ts";
 import type { AppContext } from "../types.ts";
 
-export function pipelineNoteText(p: PipelineConfig): string {
+/**
+ * Worded for a brain that rightly ignores instructions it can't trace to the
+ * user (Waymond did, to "From Choomfie (not the user)"): it says the owner set
+ * this up and how, names the connector the tool is on (brains load connector
+ * tools only when they look for one), and carries the chat_id, which a web
+ * brain never sees.
+ */
+export function pipelineNoteText(p: PipelineConfig, chatId: string): string {
   return (
-    `[From Choomfie (not the user): this thread drives the ${p.name} pipeline${p.about ? `. ${p.about}` : ""} ` +
-    `Requests here go through the \`pipeline\` tool (action "run", pipeline "${p.name}", this chat's chat_id); ` +
-    `follow each result's next step, and show the user its pictures and choices before going on.]`
+    `[Choomfie, the bot relaying this Discord thread: the owner ran /pipeline ${p.name} here, so requests in this thread are for ` +
+    `the ${p.name} pipeline on their Mac.${p.about ? ` ${p.about}` : ""} Use the \`pipeline\` tool on the choomfie connector ` +
+    `with action "run", pipeline "${p.name}" and chat_id "${chatId}"; follow each result's next step, and show the user its ` +
+    `pictures and choices before going on.]`
   );
 }
 
@@ -26,5 +34,5 @@ export function pipelineNote(ctx: AppContext, location: string, chatId: string):
   const p = ctx.config.getPipelines().get(at.pipeline);
   if (!p) return undefined;
   ctx.chats.markPipelineTold(location, chatId);
-  return pipelineNoteText(p);
+  return pipelineNoteText(p, location);
 }
