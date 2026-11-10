@@ -253,6 +253,28 @@ describe("modes", () => {
     }
   });
 
+  test("a thread on a pipeline gets no default frame, but an explicit mode still applies", async () => {
+    const seen: TurnInput[] = [];
+    const { brain, chats, destroy } = await setup(
+      async (input, t) => (seen.push(input), { text: "ok", ref: t.ref ?? "r" }),
+      { modes, defaultMode: "code" }
+    );
+    try {
+      await brain.send(msg("off", "plain"), {} as never);
+      chats.setPipeline("lochara-thread", "lochara");
+      await brain.send(msg("lochara-thread", "make a character"), {} as never);
+      chats.setMode(chats.bound("lochara-thread", "fakesite")!.id, "code");
+      await brain.send(msg("lochara-thread", "fix it"), {} as never);
+      expect(seen.map((i) => [i.text, i.mode])).toEqual([
+        ["[code mode — test it]\n\nplain", "code"],
+        ["make a character", undefined],
+        ["[code mode — test it]\n\nfix it", "code"],
+      ]);
+    } finally {
+      await destroy();
+    }
+  });
+
   test("a tasks mode's reply carries its task list and the adapter's task context", async () => {
     const { brain, chats, destroy } = await setup(
       async (_i, t) => ({ text: "Plan.\nTasks\n1. [code] Fix it — in repo x. Done when: tests pass", ref: t.ref ?? "r" }),

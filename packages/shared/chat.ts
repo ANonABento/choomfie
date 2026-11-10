@@ -50,6 +50,8 @@ export interface ChatsApi {
   touch(chatId: string): void;
   /** Start a fresh chat here and bind it; the previous one stays listable. */
   start(locationId: string, brain: string, title?: string): ChatRecord;
+  /** The pipeline this location is on (`/pipeline`), if any. */
+  pipelineAt?(locationId: string): { pipeline: string } | null;
 }
 
 /** Title of a chat nobody has named and nobody has spoken in yet. */
