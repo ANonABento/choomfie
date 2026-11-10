@@ -2,6 +2,7 @@
  * Status tool — full Choomfie config/status overview.
  */
 
+import { READ_ONLY } from "../ipc-types.ts";
 import type { ToolDef } from "../types.ts";
 import { text } from "../types.ts";
 import { formatUptime } from "../conversation.ts";
@@ -12,6 +13,7 @@ export const statusTools: ToolDef[] = [
   {
     definition: {
       name: "choomfie_status",
+      annotations: READ_ONLY,
       description:
         "Show config, memory stats, reminders, and features. Use when user asks about settings, config, status, or 'what can you do'.",
       inputSchema: {

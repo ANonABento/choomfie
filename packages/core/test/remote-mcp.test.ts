@@ -4,7 +4,7 @@ import {
   handleRemoteMcpRequest,
   parseRemoteMcpConfig,
 } from "../lib/remote-mcp.ts";
-import type { IpcToolDef } from "../lib/ipc-types.ts";
+import { READ_ONLY, type IpcToolDef } from "../lib/ipc-types.ts";
 
 const TOKEN = "t".repeat(43);
 const tool = (name: string): IpcToolDef => ({
@@ -19,7 +19,7 @@ function setup() {
   const deps = {
     name: "choomfie",
     version: "test",
-    listTools: () => [tool("restart"), tool("reply"), tool("list_memories"), tool("choomfie_status")],
+    listTools: () => [tool("restart"), tool("reply"), { ...tool("list_memories"), annotations: READ_ONLY }, tool("choomfie_status")],
     callTool: async (name: string) => {
       calls.push(name);
       return { content: [{ type: "text", text: `ran ${name}` }] };
@@ -60,6 +60,13 @@ describe("remote MCP endpoint", () => {
     expect(res.status).toBe(200);
     const names = (await res.json()).result.tools.map((t: { name: string }) => t.name);
     expect(names.sort()).toEqual(["choomfie_status", "list_memories"]);
+  });
+
+  test("passes each tool's hints on (a client asks less for a read-only tool)", async () => {
+    const { rpc } = setup();
+    const tools = (await (await rpc(msg(1, "tools/list"))).json()).result.tools as { name: string; annotations?: object }[];
+    expect(tools.find((t) => t.name === "list_memories")?.annotations).toEqual(READ_ONLY);
+    expect(tools.find((t) => t.name === "choomfie_status")?.annotations).toBeUndefined();
   });
 
   test("refuses non-allowlisted tools without calling them", async () => {

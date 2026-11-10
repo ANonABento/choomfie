@@ -25,6 +25,7 @@ export interface ToolDef {
     name: string;
     description: string;
     inputSchema: object;
+    annotations?: import("./ipc-types.ts").ToolHints;
   };
   handler: (
     args: Record<string, unknown>,
