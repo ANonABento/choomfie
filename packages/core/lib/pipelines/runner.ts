@@ -33,6 +33,8 @@ export interface Job {
   logPath: string;
   /** Set once the caller stopped waiting: the job's end is announced. */
   background?: boolean;
+  /** The caller can't relay the result to the chat (a remote brain whose turn ends at an approval): post it. */
+  postResult?: boolean;
 }
 
 const MAX_JOBS = 100;
@@ -52,10 +54,10 @@ export class PipelineRunner {
   constructor(private readonly logDir: string, private readonly onFinish: Finished = () => {}) {}
 
   /** Queue a job; it starts when its pipeline is free. */
-  start(p: PipelineConfig, argv: string[], args: string[], chatId: string, id = this.newId(p.name)): Job {
+  start(p: PipelineConfig, argv: string[], args: string[], chatId: string, id = this.newId(p.name), opts: { postResult?: boolean } = {}): Job {
     const dir = join(this.logDir, p.name);
     mkdirSync(dir, { recursive: true });
-    const job: Job = { id, pipeline: p.name, args, argv, chatId, state: "queued", queuedAt: Date.now(), logPath: join(dir, `${id}.log`) };
+    const job: Job = { id, pipeline: p.name, args, argv, chatId, state: "queued", queuedAt: Date.now(), logPath: join(dir, `${id}.log`), ...opts };
     this.jobs.set(id, job);
     this.configs.set(p.name, p);
     this.queues.set(p.name, [...(this.queues.get(p.name) ?? []), job]);

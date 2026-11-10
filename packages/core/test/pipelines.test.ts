@@ -233,6 +233,14 @@ describe("pipeline tools", () => {
     expect((await call("run", { pipeline: "tool", args: ["rm"] })).isError).toBe(true);
   });
 
+  test("a remote caller's result is posted even inline and without pictures; a local one's isn't", async () => {
+    await call("run", { pipeline: "tool", args: ["echo"] });
+    expect(sent).toHaveLength(0); // Claude relays it itself
+    await pipelineTools[0].handler({ action: "run", chat_id: "c1", pipeline: "tool", args: ["echo"] }, ctx, { via: "remote" });
+    expect(sent).toHaveLength(1); // Waymond's turn ended at the approval: Choomfie posts it
+    expect(sent[0].content).toContain("✅ tool `echo` finished");
+  });
+
   test("status lists the configured pipelines and recent jobs", async () => {
     await call("run", { pipeline: "tool", args: ["echo"] });
     const t = textOf(await call("status", {}));
