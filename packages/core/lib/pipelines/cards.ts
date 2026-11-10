@@ -1,17 +1,27 @@
 /**
  * Step cards: a pipeline's next step as a Discord message with a button per
- * choice. A pipeline whose `--json` result carries `next` (lochara's state
- * machine: `waiting`, `options`, `run` templates) says every choice with its
- * exact command, so moving on needs no brain: a click runs the filled-in
- * command (lib/handlers/pipeline-cards.ts) and the job's end posts the next
- * card (lib/pipelines/index.ts).
+ * choice. Any pipeline whose `--json` result carries `next` in this shape gets
+ * them; nothing here knows a particular pipeline:
  *
- * Templates are argument lists. `<option>` is one of `options`, `<folder>` is
- * the folder of pictures handed over (the job's `{files}`), `<name>` is typed
- * in a pop-up. A template with any other `<…>` can't be filled and gets no button.
+ *   waiting   pick | approve | pictures | run | input | done
+ *   say       what the step is about, for a person
+ *   options   for `pick` (and, on `approve`, which `run` keys approve)
+ *   run       {key: command template}: every key is a button. The step's main
+ *             one by `waiting` (pick → `pick`, run → `next`, pictures →
+ *             `deliver`) comes first.
+ *   labels    {key: button label} (default: the key; `▶ <command>` for `next`)
+ *   title, progress [{label, state: done|now|todo}]   the card's heading
+ *   request.prompt   shown quoted (a picture request)
  *
- * Cards live in memory: a click on one forgotten by a restart shows where
- * things stand instead (the pipeline's folders are the state, not the card).
+ * Templates are argument lists. `<option>` is one of `options`; `<folder>` is
+ * a folder of pictures the owner chooses in a pop-up (posts in the thread or
+ * files from their computer: the job's `{files}`); `<name>` is typed in a
+ * pop-up. A template with any other `<…>` can't be filled and gets no button.
+ *
+ * A click runs the filled-in command (lib/handlers/pipeline-cards.ts) and the
+ * job's end posts the next card (lib/pipelines/index.ts). Cards live in memory:
+ * a click on one forgotten by a restart shows where things stand instead (the
+ * pipeline's own files are the state, not the card).
  */
 
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
@@ -19,30 +29,28 @@ import { FILES_PLACEHOLDER } from "./args.ts";
 
 export interface Step {
   character?: string | null;
+  title?: string;
   stage?: string;
   waiting?: string;
   say?: string;
   show?: string[];
   options?: string[];
   run?: Record<string, string[]>;
+  labels?: Record<string, string>;
+  progress?: { label: string; state: "done" | "now" | "todo" }[];
   request?: { prompt?: string };
 }
-
-export type PictureSource = "last_mine" | "last_reply";
 
 export interface CardAction {
   label: string;
   style: "primary" | "secondary" | "success";
-  /** The command, filled in except for `<name>` when `modal` is set. */
+  /** The command, filled in except for `<name>` (when `modal` is set) and `{files}` (when `pictures` is). */
   args: string[];
-  /** Pictures from the chat for `{files}`. */
-  files?: PictureSource;
   /** Ask for a name first, then run `args` with it in place of `<name>`. */
   modal?: "name";
+  /** Ask which pictures first: they go in a folder for `{files}`. */
+  pictures?: true;
 }
-
-/** Which kinds of pictures this chat has kept, so a button is offered only for those. */
-export type Sources = Partial<Record<PictureSource, boolean>>;
 
 const MAX_OPTIONS = 20;
 const MAX_BUTTONS = 25;
@@ -50,12 +58,10 @@ const MAX_LABEL = 80;
 const PER_ROW = 5;
 export const MAX_CONTENT = 1900;
 
-const SOURCE_LABEL: Record<PictureSource, string> = { last_mine: "📎 My pictures", last_reply: "🎨 Bot's pictures" };
-/** Keys a step's main action uses, by what it's waiting for; every other key is a secondary button. */
+/** The key of a step's main action, by what it's waiting for. */
 const MAIN: Record<string, string> = { pick: "pick", run: "next", pictures: "deliver" };
-const KEY_LABEL: Record<string, string> = { new: "➕ New", export: "📦 Export", redraw: "🔁 Redraw", refresh: "🔄 Check again" };
 
-const label = (s: string) => (s.length > MAX_LABEL ? `${s.slice(0, MAX_LABEL - 1)}…` : s);
+const clip = (s: string) => (s.length > MAX_LABEL ? `${s.slice(0, MAX_LABEL - 1)}…` : s);
 
 /** The template with `<option>` and `<folder>` filled; undefined if it has a placeholder nobody can fill. */
 function fill(template: string[], option?: string): string[] | undefined {
@@ -63,64 +69,56 @@ function fill(template: string[], option?: string): string[] | undefined {
   return out.some((a) => /^<[^>]+>$/.test(a) && a !== "<name>") ? undefined : out;
 }
 
-function actionFor(lbl: string, style: CardAction["style"], args: string[]): CardAction {
-  return { label: label(lbl), style, args, ...(args.includes("<name>") ? { modal: "name" as const } : {}) };
+function action(label: string, style: CardAction["style"], args: string[]): CardAction {
+  return {
+    label: clip(label),
+    style,
+    args,
+    ...(args.includes("<name>") ? { modal: "name" as const } : {}),
+    ...(args.includes(FILES_PLACEHOLDER) ? { pictures: true as const } : {}),
+  };
 }
 
-/** The same command once per kind of picture the chat has. */
-function withPictures(lbl: (source: PictureSource) => string, style: CardAction["style"], args: string[], sources: Sources): CardAction[] {
-  return (["last_mine", "last_reply"] as const).filter((s) => sources[s]).map((s) => ({ label: label(lbl(s)), style, args, files: s }));
-}
-
-/** The buttons for a step, main choices first. */
-export function actionsFor(step: Step, sources: Sources = {}): CardAction[] {
+/** The buttons for a step: the main choices, then every other `run` key. */
+export function actionsFor(step: Step): CardAction[] {
   const run = step.run ?? {};
+  const labels = step.labels ?? {};
   const waiting = step.waiting ?? "";
-  const out: CardAction[] = [];
   const main = MAIN[waiting];
-  if (waiting === "pick" && run.pick) {
+  const out: CardAction[] = [];
+  if (main === "pick" && run.pick) {
     for (const o of (step.options ?? []).slice(0, MAX_OPTIONS)) {
       const args = fill(run.pick, o);
-      if (args) out.push(actionFor(o, "primary", args));
+      if (args) out.push(action(o, "primary", args));
     }
-  } else if (waiting === "run" && run.next) {
-    const args = fill(run.next);
-    if (args) out.push(actionFor(`▶ ${args.join(" ")}`, "primary", args));
-  } else if (waiting === "pictures" && run.deliver) {
-    const args = fill(run.deliver);
-    if (args) out.push(...withPictures((s) => `${SOURCE_LABEL[s]} → deliver`, "primary", args, sources));
+  } else if (main && run[main]) {
+    const args = fill(run[main]);
+    if (args) out.push(action(labels[main] ?? (main === "next" ? `▶ ${args.join(" ")}` : main), "primary", args));
   }
   for (const [key, template] of Object.entries(run)) {
-    if (key === main || key === "refresh") continue;
+    if (key === main) continue;
     const args = fill(template);
-    if (args) out.push(actionFor(KEY_LABEL[key] ?? key, waiting === "approve" ? "success" : "secondary", args));
+    const approves = waiting === "approve" && step.options?.includes(key);
+    if (args) out.push(action(labels[key] ?? key, approves ? "success" : "secondary", args));
   }
-  const c = step.character;
-  if (c && waiting !== "pictures") {
-    out.push(...withPictures((s) => `🖼 Add designs: ${SOURCE_LABEL[s].slice(3).toLowerCase()}`, "secondary", ["concept", c, "--from", FILES_PLACEHOLDER], sources));
-  }
-  out.push(actionFor(KEY_LABEL.refresh, "secondary", run.refresh ?? (c ? ["next", c] : ["next"])));
   return out.slice(0, MAX_BUTTONS);
 }
 
-/** After a name is typed for `new <name>`: start it from the chat's pictures, or without designs. */
-export function newCharacterActions(template: string[], name: string, sources: Sources): CardAction[] {
-  const args = template.map((a) => (a === "<name>" ? name : a));
-  return [
-    ...withPictures((s) => `${SOURCE_LABEL[s]} as designs`, "primary", [...args, "--from", FILES_PLACEHOLDER], sources),
-    { label: "⏭ No designs", style: "secondary", args },
-  ];
+/** `✓ Art › **Body** › Build`. */
+function progressLine(step: Step): string {
+  return (step.progress ?? []).map((p) => (p.state === "done" ? `✓ ${p.label}` : p.state === "now" ? `**${p.label}**` : p.label)).join(" › ");
 }
 
-/** The card's text: what the step says, what it's waiting for, and how many options didn't fit. */
+/** The card's text: its heading (title, progress), what the step says, and how many options didn't fit. */
 export function cardText(step: Step, header?: string): string {
   const shown = Math.min(step.options?.length ?? 0, MAX_OPTIONS);
   const more = (step.options?.length ?? 0) - shown;
+  const heading = [step.title ? `**${step.title}**` : "", progressLine(step)].filter(Boolean).join(" · ");
   const lines = [
     header ?? "",
+    heading,
     step.say ?? "",
     step.request?.prompt ? `> ${step.request.prompt.slice(0, 500)}` : "",
-    step.waiting === "pictures" ? "Draw them here (or ask the bot to), then press a button to hand them over." : "",
     more > 0 ? `+${more} more not shown: type the one you want.` : "",
   ];
   return lines.filter(Boolean).join("\n").slice(0, MAX_CONTENT);

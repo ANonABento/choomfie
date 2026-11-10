@@ -1,7 +1,5 @@
 {
  "start": {
-  "ok": true,
-  "command": "next",
   "next": {
    "character": null,
    "stage": "start",
@@ -11,8 +9,7 @@
     "aiko",
     "mika",
     "mika2",
-    "basic",
-    "robot-maid"
+    "mika3"
    ],
    "run": {
     "pick": [
@@ -24,100 +21,13 @@
      "<name>"
     ]
    },
-   "say": "Characters: aiko, mika, mika2, basic, robot-maid. Continue one, or start a new one with `new <name>`."
-  }
- },
- "base-pick": {
-  "ok": true,
-  "command": "next",
-  "next": {
-   "character": "mika2",
-   "stage": "base",
-   "waiting": "pick",
-   "say": "Pick a base body to start from: sample-d, sample-d-dark, sample-e, sample-f, sample-g.",
-   "show": [
-    "/Users/bentomac/lochara/vendor/vroid/avatarsample_d_0_full.png",
-    "/Users/bentomac/lochara/vendor/vroid/avatarsample_d_darkness_full.png",
-    "/Users/bentomac/lochara/vendor/vroid/avatarsample_e_full.png",
-    "/Users/bentomac/lochara/vendor/vroid/avatarsample_f_full.png",
-    "/Users/bentomac/lochara/vendor/vroid/avatarsample_g_full.png"
-   ],
-   "options": [
-    "sample-d",
-    "sample-d-dark",
-    "sample-e",
-    "sample-f",
-    "sample-g"
-   ],
-   "run": {
-    "pick": [
-     "base",
-     "mika2",
-     "<option>"
-    ]
-   }
-  }
- },
- "render-run": {
-  "ok": true,
-  "command": "next",
-  "next": {
-   "character": "basic",
-   "stage": "review",
-   "waiting": "run",
-   "say": "Render the build from the front, three-quarter and back.",
-   "show": [],
-   "options": [],
-   "run": {
-    "next": [
-     "render",
-     "basic"
-    ]
-   }
-  }
- },
- "approve-no-export": {
-  "ok": true,
-  "command": "next",
-  "next": {
-   "character": "aiko",
-   "stage": "review",
-   "waiting": "approve",
-   "say": "Check the render. Add export targets to character.json to ship it.",
-   "show": [
-    "/Users/bentomac/lochara/characters/aiko/renders/latest.png"
-   ],
-   "options": [],
-   "run": {
-    "refresh": [
-     "next",
-     "aiko"
-    ]
-   }
-  }
- },
- "missing": {
-  "ok": false,
-  "command": "next",
-  "problem": "no character 'zz-nobody' (looked for character.json at that path, in characters/ and in examples/). `lochara new <name>` makes one.",
-  "next": {
-   "character": null,
-   "stage": "start",
-   "waiting": "run",
-   "show": [],
-   "options": [],
-   "run": {
-    "next": [
-     "new",
-     "zz-nobody"
-    ]
+   "labels": {
+    "new": "➕ New character"
    },
-   "say": "There's no character zz-nobody yet. Make it first: `new zz-nobody` (add `--from <folder>` to keep design pictures you already have)."
+   "say": "Pick a character to keep working on, or make a new one."
   }
  },
  "start-empty": {
-  "ok": true,
-  "command": "x",
   "next": {
    "character": null,
    "stage": "start",
@@ -130,37 +40,278 @@
      "<name>"
     ]
    },
-   "say": "No characters yet. Start one: choose a short name for it and run `new <name>`."
+   "labels": {
+    "new": "➕ New character"
+   },
+   "say": "No characters yet: make a new one."
+  }
+ },
+ "art": {
+  "next": {
+   "character": "mika3",
+   "title": "mika3",
+   "stage": "art",
+   "waiting": "pictures",
+   "say": "Add art to design it from: pictures from this chat or your computer. Or skip and start from a sample body.",
+   "show": [],
+   "options": [],
+   "run": {
+    "deliver": [
+     "concept",
+     "mika3",
+     "--from",
+     "<folder>"
+    ],
+    "skip": [
+     "next",
+     "mika3",
+     "--at",
+     "base"
+    ]
+   },
+   "labels": {
+    "deliver": "🖼 Choose pictures",
+    "skip": "⏭ Skip: pick a sample body"
+   },
+   "progress": [
+    {
+     "label": "Art",
+     "state": "now"
+    },
+    {
+     "label": "Body",
+     "state": "todo"
+    },
+    {
+     "label": "Build",
+     "state": "todo"
+    },
+    {
+     "label": "Review",
+     "state": "todo"
+    }
+   ]
+  }
+ },
+ "base-pick": {
+  "next": {
+   "character": "mika3",
+   "title": "mika3",
+   "stage": "base",
+   "waiting": "pick",
+   "say": "Pick a body to start from: sample-d, sample-d-dark, sample-e, sample-f, sample-g.",
+   "show": [
+    "avatarsample_d_0_full.png",
+    "avatarsample_d_darkness_full.png",
+    "avatarsample_e_full.png",
+    "avatarsample_f_full.png",
+    "avatarsample_g_full.png"
+   ],
+   "options": [
+    "sample-d",
+    "sample-d-dark",
+    "sample-e",
+    "sample-f",
+    "sample-g"
+   ],
+   "run": {
+    "pick": [
+     "base",
+     "mika3",
+     "<option>"
+    ],
+    "art": [
+     "next",
+     "mika3",
+     "--at",
+     "art"
+    ]
+   },
+   "labels": {
+    "art": "← Art"
+   },
+   "progress": [
+    {
+     "label": "Art",
+     "state": "done"
+    },
+    {
+     "label": "Body",
+     "state": "now"
+    },
+    {
+     "label": "Build",
+     "state": "todo"
+    },
+    {
+     "label": "Review",
+     "state": "todo"
+    }
+   ]
   }
  },
  "build-run": {
-  "ok": true,
-  "command": "x",
   "next": {
    "character": "aiko",
+   "title": "Aiko",
    "stage": "build",
    "waiting": "run",
-   "say": "Build the character (style, parts, optimise, check).",
+   "say": "Ready to build the 3D model (style, parts, optimise, check: a few minutes).",
    "show": [],
    "options": [],
    "run": {
     "next": [
      "build",
      "aiko"
+    ],
+    "art": [
+     "next",
+     "aiko",
+     "--at",
+     "art"
+    ],
+    "body": [
+     "next",
+     "aiko",
+     "--at",
+     "base"
     ]
-   }
+   },
+   "labels": {
+    "art": "← Art",
+    "body": "← Body",
+    "next": "▶ Build the 3D model"
+   },
+   "progress": [
+    {
+     "label": "Art",
+     "state": "done"
+    },
+    {
+     "label": "Body",
+     "state": "done"
+    },
+    {
+     "label": "Build",
+     "state": "now"
+    },
+    {
+     "label": "Review",
+     "state": "todo"
+    }
+   ]
+  }
+ },
+ "render-run": {
+  "next": {
+   "character": "aiko",
+   "title": "Aiko",
+   "stage": "review",
+   "waiting": "run",
+   "say": "Built. Next, preview pictures from the front, side and back.",
+   "show": [],
+   "options": [],
+   "run": {
+    "next": [
+     "render",
+     "aiko"
+    ],
+    "art": [
+     "next",
+     "aiko",
+     "--at",
+     "art"
+    ],
+    "body": [
+     "next",
+     "aiko",
+     "--at",
+     "base"
+    ]
+   },
+   "labels": {
+    "art": "← Art",
+    "body": "← Body",
+    "next": "▶ Make preview pictures"
+   },
+   "progress": [
+    {
+     "label": "Art",
+     "state": "done"
+    },
+    {
+     "label": "Body",
+     "state": "done"
+    },
+    {
+     "label": "Build",
+     "state": "done"
+    },
+    {
+     "label": "Review",
+     "state": "now"
+    }
+   ]
+  }
+ },
+ "approve-no-export": {
+  "next": {
+   "character": "aiko",
+   "title": "Aiko",
+   "stage": "review",
+   "waiting": "approve",
+   "say": "Here's how it looks. To export it, add export targets to character.json.",
+   "show": [
+    "latest.png"
+   ],
+   "options": [],
+   "run": {
+    "art": [
+     "next",
+     "aiko",
+     "--at",
+     "art"
+    ],
+    "body": [
+     "next",
+     "aiko",
+     "--at",
+     "base"
+    ]
+   },
+   "labels": {
+    "art": "← Art",
+    "body": "← Body"
+   },
+   "progress": [
+    {
+     "label": "Art",
+     "state": "done"
+    },
+    {
+     "label": "Body",
+     "state": "done"
+    },
+    {
+     "label": "Build",
+     "state": "done"
+    },
+    {
+     "label": "Review",
+     "state": "now"
+    }
+   ]
   }
  },
  "approve-export": {
-  "ok": true,
-  "command": "x",
   "next": {
    "character": "aiko",
+   "title": "Aiko",
    "stage": "review",
    "waiting": "approve",
-   "say": "Check the render; export it if it looks right.",
+   "say": "Here's how it looks. Export it if you're happy.",
    "show": [
-    "/Users/bentomac/lochara/characters/aiko/renders/latest.png"
+    "latest.png"
    ],
    "options": [
     "export"
@@ -170,23 +321,103 @@
      "export",
      "aiko"
     ],
-    "refresh": [
+    "art": [
      "next",
-     "aiko"
+     "aiko",
+     "--at",
+     "art"
+    ],
+    "body": [
+     "next",
+     "aiko",
+     "--at",
+     "base"
     ]
-   }
+   },
+   "labels": {
+    "export": "📦 Export",
+    "art": "← Art",
+    "body": "← Body"
+   },
+   "progress": [
+    {
+     "label": "Art",
+     "state": "done"
+    },
+    {
+     "label": "Body",
+     "state": "done"
+    },
+    {
+     "label": "Build",
+     "state": "done"
+    },
+    {
+     "label": "Review",
+     "state": "now"
+    }
+   ]
+  }
+ },
+ "done": {
+  "next": {
+   "character": "aiko",
+   "title": "Aiko",
+   "stage": "done",
+   "waiting": "done",
+   "say": "Built and exported. Go back to the art or body, or change a part, to go again.",
+   "show": [
+    "latest.png"
+   ],
+   "options": [],
+   "run": {
+    "art": [
+     "next",
+     "aiko",
+     "--at",
+     "art"
+    ],
+    "body": [
+     "next",
+     "aiko",
+     "--at",
+     "base"
+    ]
+   },
+   "labels": {
+    "art": "← Art",
+    "body": "← Body"
+   },
+   "progress": [
+    {
+     "label": "Art",
+     "state": "done"
+    },
+    {
+     "label": "Body",
+     "state": "done"
+    },
+    {
+     "label": "Build",
+     "state": "done"
+    },
+    {
+     "label": "Review",
+     "state": "done"
+    }
+   ]
   }
  },
  "part-pick": {
-  "ok": true,
-  "command": "x",
   "next": {
    "character": "aiko",
+   "title": "Aiko",
    "stage": "parts",
    "waiting": "pick",
    "say": "Pick a picture for visor: h1, s12.",
    "show": [
-    "/Users/bentomac/lochara/characters/aiko/parts/visor/candidates/sheet.png"
+    "h1.png",
+    "s12.png"
    ],
    "options": [
     "h1",
@@ -205,45 +436,88 @@
      "draw",
      "aiko",
      "visor"
+    ],
+    "art": [
+     "next",
+     "aiko",
+     "--at",
+     "art"
+    ],
+    "body": [
+     "next",
+     "aiko",
+     "--at",
+     "base"
     ]
-   }
+   },
+   "labels": {
+    "redraw": "🔁 Draw new options",
+    "art": "← Art",
+    "body": "← Body"
+   },
+   "progress": [
+    {
+     "label": "Art",
+     "state": "done"
+    },
+    {
+     "label": "Body",
+     "state": "done"
+    },
+    {
+     "label": "Parts",
+     "state": "now"
+    },
+    {
+     "label": "Build",
+     "state": "todo"
+    },
+    {
+     "label": "Review",
+     "state": "todo"
+    }
+   ]
   }
  },
  "pictures": {
-  "ok": true,
-  "command": "x",
   "next": {
    "character": "aiko",
+   "title": "Aiko",
    "stage": "pictures",
    "waiting": "pictures",
-   "say": "Picture request part-visor-1 is open: draw 2 picture(s) as it describes, then deliver them.",
+   "say": "Picture request 20261110-142741-part-visor: draw 2 picture(s) as described, then hand them over.",
    "show": [],
    "options": [],
    "run": {
     "deliver": [
      "deliver",
      "aiko",
-     "part-visor-1",
+     "20261110-142741-part-visor",
      "--from",
      "<folder>"
     ]
    },
+   "labels": {
+    "deliver": "🖼 Choose pictures"
+   },
    "request": {
-    "id": "part-visor-1",
+    "id": "20261110-142741-part-visor",
     "kind": "part-visor",
     "prompt": "a sci-fi visor, front view",
     "count": 2,
-    "size": "1024x1024",
+    "size": [
+     1024,
+     1024
+    ],
     "references": [],
     "notes": ""
    }
   }
  },
  "part-input": {
-  "ok": true,
-  "command": "x",
   "next": {
    "character": "aiko",
+   "title": "Aiko",
    "stage": "parts",
    "waiting": "input",
    "say": "Place visor: set its bone, offset and size in character.json and set \"enabled\": true.",
@@ -253,28 +527,66 @@
     "refresh": [
      "next",
      "aiko"
+    ],
+    "art": [
+     "next",
+     "aiko",
+     "--at",
+     "art"
+    ],
+    "body": [
+     "next",
+     "aiko",
+     "--at",
+     "base"
     ]
-   }
+   },
+   "labels": {
+    "refresh": "✅ Placed it, continue",
+    "art": "← Art",
+    "body": "← Body"
+   },
+   "progress": [
+    {
+     "label": "Art",
+     "state": "done"
+    },
+    {
+     "label": "Body",
+     "state": "done"
+    },
+    {
+     "label": "Parts",
+     "state": "now"
+    },
+    {
+     "label": "Build",
+     "state": "todo"
+    },
+    {
+     "label": "Review",
+     "state": "todo"
+    }
+   ]
   }
  },
- "done": {
-  "ok": true,
-  "command": "x",
+ "missing": {
   "next": {
-   "character": "aiko",
-   "stage": "done",
-   "waiting": "done",
-   "say": "Built, checked and exported. Change the recipe or a part to go again.",
-   "show": [
-    "/Users/bentomac/lochara/characters/aiko/renders/latest.png"
-   ],
+   "character": null,
+   "stage": "start",
+   "waiting": "run",
+   "show": [],
    "options": [],
    "run": {
-    "refresh": [
-     "next",
-     "aiko"
+    "next": [
+     "new",
+     "zz-nobody"
     ]
-   }
+   },
+   "labels": {
+    "next": "➕ Make zz-nobody"
+   },
+   "say": "There's no character zz-nobody yet. Make it first: `new zz-nobody` (add `--from <folder>` to keep design pictures you already have)."
   }
  }
 }

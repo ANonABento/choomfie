@@ -1,7 +1,7 @@
 /**
  * The whole lochara flow by clicking, against a real lochara checkout: start →
- * ➕ New (a name) → a base → Build → Render → review. Each card's buttons must
- * be exactly what `lochara next` offers at that point. Slow (it builds), so
+ * ➕ New (a name) → art (skipped) → a body → Build → Render → review. Each
+ * card's buttons must be exactly what `lochara next` offers at that point. Slow (it builds), so
  * opt-in:
  *
  *   LOCHARA_E2E=~/lochara bun test packages/core/test/lochara-e2e.test.ts
@@ -91,14 +91,14 @@ async function press(label: string) {
 }
 
 /** What `lochara next` says now, straight from the tool. */
-function next(name?: string): Step {
-  const r = Bun.spawnSync(["./lochara", "next", ...(name ? [name] : []), "--json"], { cwd: DIR });
+function next(name?: string, ...more: string[]): Step {
+  const r = Bun.spawnSync(["./lochara", "next", ...(name ? [name] : []), ...more, "--json"], { cwd: DIR });
   return JSON.parse(r.stdout.toString()).next;
 }
 
-/** The newest card offers exactly what lochara does (no thread pictures here, so no picture buttons). */
-function matchesNext(name?: string) {
-  expect(buttons(card()).map(([, l]) => l)).toEqual(actionsFor(next(name)).map((a) => a.label));
+/** The newest card offers exactly what lochara does. */
+function matchesNext(name?: string, ...more: string[]) {
+  expect(buttons(card()).map(([, l]) => l)).toEqual(actionsFor(next(name, ...more)).map((a) => a.label));
 }
 
 beforeAll(async () => {
@@ -113,27 +113,30 @@ test.skipIf(!DIR)(
   "lochara by clicking: new character → base → build → render → review",
   async () => {
     rmSync(join(DIR!, "characters", NAME), { recursive: true, force: true });
-    startCardJob(ctx, "lochara", "c", ["next"]);
+    await startCardJob(ctx, "lochara", "c", ["next"]);
     await settle();
     matchesNext();
 
     const start = card();
-    const newId = idFor(start, "➕ New");
+    const newId = idFor(start, "➕ New character");
     const [, cardId, index] = newId.split(":");
     await modalHandlers.get("lcname")!(interaction(`lcname:${cardId}:${index}`, start, NAME) as never, ["lcname", cardId, index], ctx as never);
     await settle();
-    expect(next(NAME).stage).toBe("base");
+    expect(next(NAME).stage).toBe("art");
     matchesNext(NAME);
+
+    await press("⏭ Skip: pick a sample body");
+    matchesNext(NAME, "--at", "base");
 
     await press("sample-e");
     expect(next(NAME).run?.next).toEqual(["build", NAME]);
     matchesNext(NAME);
 
-    await press(`▶ build ${NAME}`);
+    await press("▶ Build the 3D model");
     expect(next(NAME).run?.next).toEqual(["render", NAME]);
     matchesNext(NAME);
 
-    await press(`▶ render ${NAME}`);
+    await press("▶ Make preview pictures");
     expect(next(NAME).waiting).toBe("approve");
     matchesNext(NAME);
     console.log(sent.map((m) => m.content).filter(Boolean).join("\n---\n"));
