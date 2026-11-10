@@ -2,7 +2,8 @@
  * `/pipeline [name]`: put this thread on a configured pipeline (lochara, …),
  * or take it off (`off`), or see which it's on (no name). On, whichever brain
  * answers here is told once what the thread is for (lib/pipelines/thread-mode.ts),
- * and `next` runs straight away so the thread opens on where things stand.
+ * and `next` runs straight away: the thread opens on a step card (where things
+ * stand, a button per choice).
  * Owner only.
  */
 
@@ -10,28 +11,23 @@ import { MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction } f
 import { AUTOCOMPLETE_LIMIT } from "@choomfie/shared";
 import { registerCommand } from "../register.ts";
 import { requireOwner } from "./shared.ts";
-import { buildArgv } from "../pipelines/args.ts";
-import { nextStep } from "../pipelines/announce.ts";
-import { pipelineRunner } from "../pipelines/index.ts";
-import { INLINE_MS } from "../tools/pipeline-tools.ts";
+import { startCardJob } from "../pipelines/index.ts";
 import type { AppContext } from "../types.ts";
 
-/** The first command a thread runs when it's put on a pipeline. */
+/** The first command a thread runs when it's put on a pipeline: its end posts the first step card. */
 const START = ["next"];
 
 async function ephemeral(interaction: ChatInputCommandInteraction, content: string): Promise<void> {
   await interaction.reply({ content, flags: MessageFlags.Ephemeral });
 }
 
-/** Run the pipeline's first step for this thread; its pictures are posted by the runner. One line on where it stands. */
-async function start(ctx: AppContext, name: string, chatId: string): Promise<string> {
+/** Run the pipeline's first step for this thread. A line on why it couldn't, or nothing. */
+function start(ctx: AppContext, name: string, chatId: string): string {
   const p = ctx.config.getPipelines().get(name)!;
   if (!p.allow.includes(START[0])) return "";
   try {
-    const runner = pipelineRunner(ctx);
-    const job = runner.start(p, buildArgv(p, START), START, chatId);
-    if (!(await runner.wait(job, INLINE_MS))) return "";
-    return nextStep(job)?.say ?? (job.error ? `\`${START.join(" ")}\` failed: ${job.error}` : "");
+    startCardJob(ctx, name, chatId, START);
+    return "";
   } catch (e) {
     return `\`${START.join(" ")}\` failed: ${e instanceof Error ? e.message : String(e)}`;
   }
@@ -75,11 +71,11 @@ registerCommand("pipeline", {
       return ephemeral(interaction, `No pipeline \`${requested}\`. Configured: ${names.map((n) => `\`${n}\``).join(", ") || "none"}.`);
     }
     ctx.chats.setPipeline(location, requested);
-    await interaction.deferReply();
-    const where = await start(ctx, requested, location);
-    await interaction.editReply({
-      content: [`This thread is on **${requested}**: just say what you want. \`/pipeline off\` to leave it.`, where].filter(Boolean).join("\n").slice(0, 2000),
+    await interaction.reply({
+      content: `This thread is on **${requested}**: press the buttons on each step, or say what you want. \`/pipeline off\` to leave it.`,
       allowedMentions: { parse: [] },
     });
+    const problem = start(ctx, requested, location);
+    if (problem) await interaction.followUp({ content: problem.slice(0, 2000), allowedMentions: { parse: [] } });
   },
 });
