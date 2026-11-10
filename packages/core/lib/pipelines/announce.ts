@@ -69,13 +69,16 @@ export function newPictures(job: Job): string[] {
 
 /**
  * Post the job's end to its chat: always when it ran in the background (the
- * caller has moved on), otherwise only when it has new pictures to show.
+ * caller has moved on) or its caller can't relay it (`postResult`: Waymond's
+ * turn ends at the approval, so its result would reach nobody), otherwise only
+ * when it has new pictures to show.
  */
 export async function announceJob(channel: SendableChannel, job: Job): Promise<void> {
   const pictures = newPictures(job);
-  if (!job.background && !pictures.length) return;
+  const always = job.background || job.postResult;
+  if (!always && !pictures.length) return;
   const say = nextStep(job)?.say;
-  const content = [job.background ? jobLine(job) : "", say ?? ""].filter(Boolean).join("\n").slice(0, 1900);
+  const content = [always ? jobLine(job) : "", say ?? ""].filter(Boolean).join("\n").slice(0, 1900);
   const files = pictures.map((p) => ({ name: basename(p), data: new Uint8Array(readFileSync(p)) }));
   const [first, ...more] = fileBatches(files);
   const attach = (batch: typeof files) => batch.map((f) => ({ attachment: Buffer.from(f.data), name: f.name }));

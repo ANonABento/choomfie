@@ -15,6 +15,7 @@ import { jobLine } from "../pipelines/announce.ts";
 import { pipelineRunner } from "../pipelines/index.ts";
 import type { Job } from "../pipelines/runner.ts";
 import { pruneByAge, resolveThreadFiles, type FileSpec } from "../pipelines/thread-files.ts";
+import type { ToolCaller } from "../ipc-types.ts";
 import type { AppContext, ToolDef } from "../types.ts";
 import { err, text } from "../types.ts";
 
@@ -45,7 +46,7 @@ function pipelineFor(ctx: AppContext, name: unknown) {
 
 const ACTIONS = ["run", "status", "stop"] as const;
 
-async function run(args: Record<string, unknown>, ctx: AppContext, chatId: string) {
+async function run(args: Record<string, unknown>, ctx: AppContext, chatId: string, caller: ToolCaller) {
   const p = pipelineFor(ctx, args.pipeline);
   const runner = pipelineRunner(ctx);
   const id = runner.newId(p.name);
@@ -57,7 +58,8 @@ async function run(args: Record<string, unknown>, ctx: AppContext, chatId: strin
     resolveThreadFiles(ctx.DATA_DIR, chatId, args.files as FileSpec, filesDir);
   }
   const argv = buildArgv(p, args.args, filesDir);
-  const job = runner.start(p, argv, (args.args as string[]).slice(), chatId, id);
+  // A remote brain (Waymond) can't relay the result: its turn ends at the approval. Choomfie posts it.
+  const job = runner.start(p, argv, (args.args as string[]).slice(), chatId, id, { postResult: caller.via === "remote" });
   if (await runner.wait(job, INLINE_MS)) return text(details(job, runner));
   const ahead = runner.list().filter((j) => j.pipeline === p.name && j.state === "running" && j !== job);
   return text(
@@ -117,7 +119,7 @@ export const pipelineTools: ToolDef[] = [
       const chatId = String(args.chat_id ?? "");
       if (!chatId) return err("chat_id is required");
       try {
-        if (args.action === "run") return await run(args, ctx, chatId);
+        if (args.action === "run") return await run(args, ctx, chatId, caller);
         if (args.action === "status") return status(args, ctx);
         if (args.action === "stop") {
           const id = String(args.job_id ?? "");
