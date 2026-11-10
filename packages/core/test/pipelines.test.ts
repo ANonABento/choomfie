@@ -271,8 +271,11 @@ describe("thread pipeline note", () => {
     expect(pipelineNote(ctx, "thread", "chat-a")).toBeUndefined();
     chats.setPipeline("thread", "tool");
     const note = pipelineNote(ctx, "thread", "chat-a")!;
-    expect(note).toContain("drives the tool pipeline. Makes things.");
-    expect(note).toContain("`pipeline` tool");
+    expect(note).toContain("the owner ran /pipeline tool here");
+    expect(note).toContain("Makes things.");
+    expect(note).toContain("`pipeline` tool on the choomfie connector");
+    expect(note).toContain('chat_id "thread"'); // a web brain never sees the Discord id otherwise
+    expect(note).not.toContain("not the user"); // read as an injection and ignored
     expect(pipelineNote(ctx, "thread", "chat-a")).toBeUndefined();
     expect(pipelineNote(ctx, "thread", "chat-b")).toBeDefined();
     chats.setPipeline("thread", "tool"); // put on again: told again
