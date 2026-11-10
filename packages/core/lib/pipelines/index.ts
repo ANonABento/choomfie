@@ -14,17 +14,17 @@
  * (handlers/pipeline-cards.ts) and `/pipeline` (handlers/pipeline-command.ts).
  */
 
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileBatches } from "@choomfie/shared";
 import { addChatNote } from "../chat-notes.ts";
 import type { SendableChannel } from "../brain-router.ts";
 import type { AppContext } from "../types.ts";
 import { announceJob, jobLine, newPictures, nextStep } from "./announce.ts";
-import { buildArgv, PipelineError } from "./args.ts";
-import { actionsFor, buttonRows, cardText, newCardId, saveCard, type Card, type CardAction, type PictureSource, type Sources, type Step } from "./cards.ts";
+import { buildArgv, FILES_PLACEHOLDER, PipelineError } from "./args.ts";
+import { actionsFor, buttonRows, cardText, newCardId, saveCard, type Card, type CardAction, type Step } from "./cards.ts";
 import { PipelineRunner, type CardMessage, type Job } from "./runner.ts";
-import { hasThreadFiles, pruneByAge, resolveThreadFiles, type FileSpec } from "./thread-files.ts";
+import { pruneByAge, resolveThreadFiles, type FileSpec } from "./thread-files.ts";
 
 let runner: PipelineRunner | null = null;
 
@@ -50,19 +50,29 @@ export function filesFor(ctx: AppContext, chatId: string, spec: FileSpec, jobId:
   return dir;
 }
 
-/** Which kinds of pictures the chat has kept, for the buttons that hand them over. */
-export function sourcesIn(ctx: AppContext, chatId: string): Sources {
-  return { last_mine: hasThreadFiles(ctx.DATA_DIR, chatId, "last_mine"), last_reply: hasThreadFiles(ctx.DATA_DIR, chatId, "last_reply") };
+export interface CardJobOptions {
+  /** Fill the job's `{files}` folder (it's made empty first). */
+  pictures?: (dir: string) => Promise<void>;
+  /** The card whose click started it: its end is shown there. */
+  cardMsg?: CardMessage;
 }
 
 /** Run a command for a card (a button, `/pipeline`); its end posts the next card. Throws PipelineError when it can't run. */
-export function startCardJob(ctx: AppContext, pipeline: string, chatId: string, args: string[], files?: PictureSource, cardMsg?: CardMessage): Job {
+export async function startCardJob(ctx: AppContext, pipeline: string, chatId: string, args: string[], opts: CardJobOptions = {}): Promise<Job> {
   const p = ctx.config.getPipelines().get(pipeline);
   if (!p) throw new PipelineError(`no pipeline "${pipeline}" (it was removed from the config)`);
   const r = pipelineRunner(ctx);
   const id = r.newId(p.name);
-  const argv = buildArgv(p, args, files ? filesFor(ctx, chatId, files, id) : undefined);
-  return r.start(p, argv, args.slice(), chatId, id, { via: "card", ...(cardMsg ? { cardMsg } : {}) });
+  let dir: string | undefined;
+  if (opts.pictures) {
+    const base = join(ctx.DATA_DIR, "pipeline-files");
+    pruneByAge(base);
+    dir = join(base, id);
+    mkdirSync(dir, { recursive: true });
+    await opts.pictures(dir);
+  }
+  const argv = buildArgv(p, args, dir);
+  return r.start(p, argv, args.slice(), chatId, id, { via: "card", ...(opts.cardMsg ? { cardMsg: opts.cardMsg } : {}) });
 }
 
 /**
@@ -98,7 +108,7 @@ export async function postCard(
 
 /** Post a pipeline step as a card. */
 export async function postStep(ctx: AppContext, channel: SendableChannel, pipeline: string, chatId: string, step: Step, header?: string, pictures: string[] = []): Promise<Card> {
-  return postCard(ctx, channel, pipeline, chatId, cardText(step, header), actionsFor(step, sourcesIn(ctx, chatId)), pictures);
+  return postCard(ctx, channel, pipeline, chatId, cardText(step, header), actionsFor(step), pictures);
 }
 
 /** A job that ends in a card: the card it came from shows how it ended, then the next step. */
@@ -108,7 +118,12 @@ async function finishCard(ctx: AppContext, channel: SendableChannel, job: Job): 
   const step: Step = (nextStep(job) as Step | undefined) ?? { waiting: "input" };
   // The card it came from already says how it went; a plain `next` (a look, not a change) needs no line.
   const quiet = job.state === "done" && (job.cardMsg || job.args[0] === "next");
-  await postStep(ctx, channel, job.pipeline, job.chatId, step, quiet ? undefined : line, newPictures(job));
+  const actions = actionsFor(step);
+  // A failure that leaves nothing to press can be tried again (a run with chosen pictures needs them chosen again).
+  if (job.state === "failed" && !actions.length && !job.args.includes(FILES_PLACEHOLDER)) {
+    actions.push({ label: "↻ Try again", style: "primary", args: job.args });
+  }
+  await postCard(ctx, channel, job.pipeline, job.chatId, cardText(step, quiet ? undefined : line), actions, newPictures(job));
 }
 
 /** The job's step goes to a card: started from one, or a step (with `next`) in a thread on its pipeline. */

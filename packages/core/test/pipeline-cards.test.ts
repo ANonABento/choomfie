@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buttonHandlers, modalHandlers } from "@choomfie/shared";
 import { _resetPosted } from "../lib/pipelines/announce.ts";
-import { _resetCards, actionsFor, buttonRows, cardText, newCharacterActions, type CardAction, type Step } from "../lib/pipelines/cards.ts";
+import { _resetCards, actionsFor, buttonRows, cardText, type CardAction, type Step } from "../lib/pipelines/cards.ts";
 import type { PipelineConfig } from "../lib/pipelines/config.ts";
 import { _setRunner, pipelineRunner, startCardJob } from "../lib/pipelines/index.ts";
 import { recordThreadFiles } from "../lib/pipelines/thread-files.ts";
@@ -14,73 +14,68 @@ import type { AppContext } from "../lib/types.ts";
 /** Real `lochara next --json` results (and hand-made ones in its format for stages no character is at). */
 const FIXTURES = JSON.parse(readFileSync(join(import.meta.dir, "fixtures", "lochara-steps.json"), "utf-8")) as Record<string, { next: Step }>;
 const step = (name: string) => FIXTURES[name].next;
-const summary = (actions: CardAction[]) => actions.map((a) => [a.label, a.args.join(" "), a.files ?? a.modal ?? ""]);
-const BOTH = { last_mine: true, last_reply: true };
+const summary = (actions: CardAction[]) => actions.map((a) => [a.label, a.args.join(" "), a.pictures ? "pictures" : (a.modal ?? "")]);
 
 describe("actionsFor (lochara steps)", () => {
-  test("start: a button per character, New asks for a name", () => {
-    expect(summary(actionsFor(step("start")))).toEqual([
-      ["aiko", "next aiko", ""],
-      ["mika", "next mika", ""],
-      ["mika2", "next mika2", ""],
-      ["basic", "next basic", ""],
-      ["robot-maid", "next robot-maid", ""],
-      ["➕ New", "new <name>", "name"],
-      ["🔄 Check again", "next", ""],
+  test("start: a button per character, then New (asks for a name)", () => {
+    const a = summary(actionsFor(step("start")));
+    expect(a.at(-1)).toEqual(["➕ New character", "new <name>", "name"]);
+    expect(a.slice(0, -1).every(([l, args]) => args === `next ${l}`)).toBe(true);
+    expect(summary(actionsFor(step("start-empty")))).toEqual([["➕ New character", "new <name>", "name"]]);
+  });
+
+  test("art: choose pictures (a pop-up), or skip to the body", () => {
+    expect(summary(actionsFor(step("art")))).toEqual([
+      ["🖼 Choose pictures", "concept mika3 --from {files}", "pictures"],
+      ["⏭ Skip: pick a sample body", "next mika3 --at base", ""],
     ]);
-    expect(summary(actionsFor(step("start-empty")))).toEqual([["➕ New", "new <name>", "name"], ["🔄 Check again", "next", ""]]);
+    expect(cardText(step("art"))).toStartWith("**mika3** · **Art** › Body › Build › Review\n");
   });
 
-  test("base pick: the options filled in; designs from the thread when it has pictures", () => {
-    const a = actionsFor(step("base-pick"), { last_reply: true });
-    expect(summary(a)).toEqual([
-      ["sample-d", "base mika2 sample-d", ""],
-      ["sample-d-dark", "base mika2 sample-d-dark", ""],
-      ["sample-e", "base mika2 sample-e", ""],
-      ["sample-f", "base mika2 sample-f", ""],
-      ["sample-g", "base mika2 sample-g", ""],
-      ["🖼 Add designs: bot's pictures", "concept mika2 --from {files}", "last_reply"],
-      ["🔄 Check again", "next mika2", ""],
+  test("base pick: the options filled in, then back to the art", () => {
+    const a = summary(actionsFor(step("base-pick")));
+    expect(a[0]).toEqual(["sample-d", "base mika3 sample-d", ""]);
+    expect(a.at(-1)).toEqual(["← Art", "next mika3 --at art", ""]);
+  });
+
+  test("run steps: the pipeline's label, then the way back", () => {
+    expect(summary(actionsFor(step("build-run")))).toEqual([
+      ["▶ Build the 3D model", "build aiko", ""],
+      ["← Art", "next aiko --at art", ""],
+      ["← Body", "next aiko --at base", ""],
     ]);
+    expect(summary(actionsFor(step("render-run")))[0]).toEqual(["▶ Make preview pictures", "render aiko", ""]);
+    expect(summary(actionsFor(step("missing")))).toEqual([["➕ Make zz-nobody", "new zz-nobody", ""]]);
+    expect(actionsFor({ waiting: "run", run: { next: ["x", "y"] } })[0].label).toBe("▶ x y"); // no label given
   });
 
-  test("run steps: one button with the command", () => {
-    expect(summary(actionsFor(step("render-run")))[0]).toEqual(["▶ render basic", "render basic", ""]);
-    expect(summary(actionsFor(step("build-run")))[0]).toEqual(["▶ build aiko", "build aiko", ""]);
-    expect(summary(actionsFor(step("missing")))[0]).toEqual(["▶ new zz-nobody", "new zz-nobody", ""]);
+  test("approve: what approves is green; without targets only the way back", () => {
+    const a = actionsFor(step("approve-export"));
+    expect(a.map((x) => [x.label, x.style])).toEqual([["📦 Export", "success"], ["← Art", "secondary"], ["← Body", "secondary"]]);
+    expect(summary(actionsFor(step("approve-no-export"))).map(([l]) => l)).toEqual(["← Art", "← Body"]);
+    expect(cardText(step("done"))).toContain("✓ Art › ✓ Body › ✓ Build › ✓ Review");
   });
 
-  test("approve: export when there are targets, always check again", () => {
-    expect(summary(actionsFor(step("approve-export")))).toEqual([["📦 Export", "export aiko", ""], ["🔄 Check again", "next aiko", ""]]);
-    expect(summary(actionsFor(step("approve-no-export")))).toEqual([["🔄 Check again", "next aiko", ""]]);
-  });
-
-  test("part pick: options, then Redraw", () => {
+  test("part pick: options, then draw new ones", () => {
     expect(summary(actionsFor(step("part-pick"))).slice(0, 3)).toEqual([
       ["h1", "part pick aiko visor h1", ""],
       ["s12", "part pick aiko visor s12", ""],
-      ["🔁 Redraw", "part draw aiko visor", ""],
+      ["🔁 Draw new options", "part draw aiko visor", ""],
     ]);
   });
 
-  test("pictures: deliver from each kind of picture the thread has, <folder> as {files}", () => {
-    expect(summary(actionsFor(step("pictures")))).toEqual([["🔄 Check again", "next aiko", ""]]);
-    expect(summary(actionsFor(step("pictures"), BOTH))).toEqual([
-      ["📎 My pictures → deliver", "deliver aiko part-visor-1 --from {files}", "last_mine"],
-      ["🎨 Bot's pictures → deliver", "deliver aiko part-visor-1 --from {files}", "last_reply"],
-      ["🔄 Check again", "next aiko", ""],
-    ]);
+  test("a picture request: choose pictures for it; its prompt is quoted", () => {
+    expect(summary(actionsFor(step("pictures")))).toEqual([["🖼 Choose pictures", `deliver aiko ${(step("pictures").request as { id: string }).id} --from {files}`, "pictures"]]);
     expect(cardText(step("pictures"))).toContain("> a sci-fi visor, front view");
   });
 
-  test("input and done: check again only", () => {
-    expect(summary(actionsFor(step("part-input")))).toEqual([["🔄 Check again", "next aiko", ""]]);
-    expect(summary(actionsFor(step("done")))).toEqual([["🔄 Check again", "next aiko", ""]]);
+  test("input: done, continue (and the way back)", () => {
+    expect(summary(actionsFor(step("part-input")))[0]).toEqual(["✅ Placed it, continue", "next aiko", ""]);
   });
 
   test("every fixture: no placeholder left but a <name> behind a pop-up", () => {
     for (const [name, f] of Object.entries(FIXTURES)) {
-      for (const a of actionsFor(f.next, BOTH)) {
+      for (const a of actionsFor(f.next)) {
         for (const arg of a.args) {
           if (/^<[^>]+>$/.test(arg)) expect([name, arg, a.modal]).toEqual([name, "<name>", "name"]);
         }
@@ -89,12 +84,12 @@ describe("actionsFor (lochara steps)", () => {
   });
 
   test("a template nobody can fill gets no button", () => {
-    expect(summary(actionsFor({ waiting: "run", run: { next: ["x", "<who>"] } }))).toEqual([["🔄 Check again", "next", ""]]);
+    expect(actionsFor({ waiting: "run", run: { next: ["x", "<who>"] } })).toEqual([]);
   });
 
   test("Discord limits: 20 options, 25 buttons, 80-char labels, 1900-char text", () => {
     const many: Step = { character: "a", waiting: "pick", say: "x".repeat(3000), options: Array.from({ length: 30 }, (_, i) => `o${i}`), run: { pick: ["p", "<option>"] } };
-    const a = actionsFor(many, BOTH);
+    const a = actionsFor(many);
     expect(a.filter((x) => x.style === "primary")).toHaveLength(20);
     expect(a.length).toBeLessThanOrEqual(25);
     const text = cardText({ ...many, say: "Pick." });
@@ -104,16 +99,10 @@ describe("actionsFor (lochara steps)", () => {
   });
 
   test("buttons: lc:<card>:<i>, five a row", () => {
-    const rows = buttonRows("k1", actionsFor(step("start"))).map((r) => r.toJSON());
-    expect(rows.map((r) => r.components.length)).toEqual([5, 2]);
+    const acts = actionsFor(step("part-pick")).concat(actionsFor(step("build-run")));
+    const rows = buttonRows("k1", acts).map((r) => r.toJSON());
+    expect(rows.map((r) => r.components.length)).toEqual([5, 3]);
     expect((rows[1].components[0] as { custom_id: string }).custom_id).toBe("lc:k1:5");
-  });
-
-  test("a new character: from the thread's pictures, or without designs", () => {
-    expect(summary(newCharacterActions(["new", "<name>"], "mika3", { last_reply: true }))).toEqual([
-      ["🎨 Bot's pictures as designs", "new mika3 --from {files}", "last_reply"],
-      ["⏭ No designs", "new mika3", ""],
-    ]);
   });
 });
 
@@ -126,7 +115,8 @@ writeFileSync(
   join(toolDir, "tool.ts"),
   `const [cmd, ...rest] = process.argv.slice(2).filter((a) => a !== "--json");
 const out = (o) => console.log(JSON.stringify({ ok: true, cmd, rest, ...o }));
-if (cmd === "next") out({ next: { character: "a", waiting: "pick", say: "Pick one.", options: ["x", "y"], run: { pick: ["pick", "<option>"], new: ["new", "<name>"] } } });
+if (cmd === "next") out({ next: { character: "a", waiting: "pick", say: "Pick one.", options: ["x", "y"], run: { pick: ["pick", "<option>"], new: ["new", "<name>"], art: ["concept", "a", "--from", "<folder>"] }, labels: { new: "➕ New", art: "🖼 Art" } } });
+else if (cmd === "concept") { const { readdirSync } = await import("node:fs"); out({ next: { character: "a", waiting: "done", say: "Got " + readdirSync(rest[2]).sort().join(", ") + "." } }); }
 else if (cmd === "pick") out({ next: { character: "a", waiting: "run", say: "Build it.", run: { next: ["sleep", "3000"] } } });
 else if (cmd === "sleep") { await Bun.sleep(Number(rest[0])); out({}); }
 else if (cmd === "new") out({ next: { character: rest[0], waiting: "done", say: "Made " + rest.join(" ") + "." } });
@@ -148,7 +138,7 @@ const ctx = {
   DATA_DIR: data,
   ownerUserId: "owner",
   config: { getPipelines: () => new Map([["tool", tool]]) },
-  discord: { channels: { fetch: async () => channel } },
+  discord: { channels: { fetch: async () => channel }, user: { displayName: "Mahiro" } },
   chats: { pipelineAt: () => ({ pipeline: "tool" }) },
 } as unknown as AppContext;
 
@@ -174,7 +164,11 @@ function interaction(customId: string, message: Msg & { id: string }, user = "ow
     showModal: async (o: unknown) => calls.showModal.push(o),
     deferUpdate: async () => (calls.deferUpdate.push(1), (i.deferred = true)),
     isFromMessage: () => true,
-    fields: { getTextInputValue: () => "" },
+    fields: {
+      getTextInputValue: () => "",
+      getStringSelectValues: (): readonly string[] => [],
+      getUploadedFiles: (): Map<string, { name: string; url: string }> | null => null,
+    },
   };
   return i;
 }
@@ -214,11 +208,11 @@ describe("step card clicks", () => {
   afterEach(() => _setRunner(null));
 
   test("start → pick → run, each click edits its card and posts the next", async () => {
-    startCardJob(ctx, "tool", "c", ["next"]);
+    await startCardJob(ctx, "tool", "c", ["next"]);
     await settle();
     const first = { ...sent[0], id: "m1" };
     expect(first.content).toBe("Pick one.");
-    expect(buttons(first).map(([, l]) => l)).toEqual(["x", "y", "➕ New", "🔄 Check again"]);
+    expect(buttons(first).map(([, l]) => l)).toEqual(["x", "y", "➕ New", "🖼 Art"]);
 
     const i = await click(idFor(first, "y"), first);
     const update = i.calls.update[0] as Msg;
@@ -230,13 +224,14 @@ describe("step card clicks", () => {
     expect(edits[0].edit.components).toEqual([]);
     expect(lastCard().content).toBe("Build it.");
     expect(buttons(lastCard())[0][1]).toBe("▶ sleep 3000");
+    expect(lastCard().components).toHaveLength(1);
 
     const again = await click(idFor(first, "x"), first); // the old card
     expect(ephemeralText(again)).toContain("older card");
   });
 
   test("Stop stops the job a click started; the card says so", async () => {
-    startCardJob(ctx, "tool", "c", ["pick", "x"]);
+    await startCardJob(ctx, "tool", "c", ["pick", "x"]);
     await settle();
     const card = { ...lastCard(), id: `m${sent.length}` };
     const run = await click(idFor(card, "▶ sleep 3000"), card);
@@ -249,7 +244,7 @@ describe("step card clicks", () => {
   });
 
   test("only the owner", async () => {
-    startCardJob(ctx, "tool", "c", ["next"]);
+    await startCardJob(ctx, "tool", "c", ["next"]);
     await settle();
     const i = await click(idFor(sent[0], "x"), { ...sent[0], id: "m1" }, "someone");
     expect(ephemeralText(i)).toContain("Only the owner");
@@ -265,7 +260,7 @@ describe("step card clicks", () => {
   });
 
   test("a command that can't run gives the buttons back, with why", async () => {
-    startCardJob(ctx, "tool", "c", ["next"]);
+    await startCardJob(ctx, "tool", "c", ["next"]);
     await settle();
     const first = { ...sent[0], id: "m1" };
     const { getCard } = await import("../lib/pipelines/cards.ts");
@@ -278,8 +273,8 @@ describe("step card clicks", () => {
     await settle();
   });
 
-  test("New: a name, then straight on when the thread has no pictures", async () => {
-    startCardJob(ctx, "tool", "c", ["next"]);
+  test("New: a name, then its command runs", async () => {
+    await startCardJob(ctx, "tool", "c", ["next"]);
     await settle();
     const first = { ...sent[0], id: "m1" };
     const newId = idFor(first, "➕ New");
@@ -290,22 +285,36 @@ describe("step card clicks", () => {
     const ok = await submitName(`lcname:${card}:${index}`, "Mika3", first);
     expect((ok.calls.update[0] as Msg).content).toContain("⏳ `new mika3`");
     await settle();
-    expect(lastCard().content).toBe("Made mika3.");
+    expect(sent.at(-1)!.content).toBe("Made mika3.");
   });
 
-  test("New with pictures in the thread: start from them, or without designs", async () => {
-    recordThreadFiles(data, "c", "m9", "brain", [{ name: "d1.png", data: new Uint8Array([1]) }]);
-    startCardJob(ctx, "tool", "c", ["next"]);
+  test("pictures: the pop-up lists the thread's posts (newest picked); posts and uploads both go", async () => {
+    recordThreadFiles(data, "c", "m8", "user", [{ name: "mine.png", data: new Uint8Array([1]) }], Date.now() - 3 * 60_000);
+    recordThreadFiles(data, "c", "m9", "brain", [{ name: "a.png", data: new Uint8Array([1]) }, { name: "b.png", data: new Uint8Array([2]) }]);
+    await startCardJob(ctx, "tool", "c", ["next"]);
     await settle();
     const first = { ...lastCard(), id: `m${sent.length}` };
-    const [, card, index] = idFor(first, "➕ New").split(":");
-    await submitName(`lcname:${card}:${index}`, "mika4", first);
-    const design = { ...lastCard(), id: `m${sent.length}` };
-    expect(design.content).toContain("New character **mika4**");
-    expect(buttons(design).map(([, l]) => l)).toEqual(["🎨 Bot's pictures as designs", "⏭ No designs"]);
-    await click(idFor(design, "🎨 Bot's pictures as designs"), design);
+    const artId = idFor(first, "🖼 Art");
+    const opened = await click(artId, first);
+    const modal = (opened.calls.showModal[0] as { toJSON(): { components: { component: { options?: { label: string; default?: boolean }[] } }[] } }).toJSON();
+    expect(modal.components).toHaveLength(2);
+    expect(modal.components[0].component.options!.map((o) => [o.label, !!o.default])).toEqual([
+      ["Mahiro · 2 pictures · just now", true],
+      ["You · 1 picture · 3 min ago", false],
+    ]);
+
+    const [, card, index] = artId.split(":");
+    const none = interaction(`lcpics:${card}:${index}`, first);
+    await modalHandlers.get("lcpics")!(none as never, ["lcpics", card, index], ctx as never);
+    expect(ephemeralText(none)).toContain("Nothing chosen");
+
+    const i = interaction(`lcpics:${card}:${index}`, first);
+    i.fields.getStringSelectValues = () => ["m8", "m9"];
+    i.fields.getUploadedFiles = () => new Map([["u1", { name: "ref photo.png", url: "data:image/png;base64,AA==" }]]);
+    await modalHandlers.get("lcpics")!(i as never, ["lcpics", card, index], ctx as never);
+    expect((i.calls.update[0] as Msg).content).toContain("⏳ `concept a --from {files}`");
     await settle();
-    expect(lastCard().content).toMatch(/^Made mika4 --from .*pipeline-files.*\.$/);
+    expect(sent.at(-1)!.content).toBe("Got a.png, b.png, mine.png, upload-1-ref_photo.png.");
   });
 
   test("a step run by a brain's tool call in the thread ends in a card too", async () => {

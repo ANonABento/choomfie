@@ -22,11 +22,11 @@ async function ephemeral(interaction: ChatInputCommandInteraction, content: stri
 }
 
 /** Run the pipeline's first step for this thread. A line on why it couldn't, or nothing. */
-function start(ctx: AppContext, name: string, chatId: string): string {
+async function start(ctx: AppContext, name: string, chatId: string): Promise<string> {
   const p = ctx.config.getPipelines().get(name)!;
   if (!p.allow.includes(START[0])) return "";
   try {
-    startCardJob(ctx, name, chatId, START);
+    await startCardJob(ctx, name, chatId, START);
     return "";
   } catch (e) {
     return `\`${START.join(" ")}\` failed: ${e instanceof Error ? e.message : String(e)}`;
@@ -75,7 +75,7 @@ registerCommand("pipeline", {
       content: `This thread is on **${requested}**: press the buttons on each step, or say what you want. \`/pipeline off\` to leave it.`,
       allowedMentions: { parse: [] },
     });
-    const problem = start(ctx, requested, location);
+    const problem = await start(ctx, requested, location);
     if (problem) await interaction.followUp({ content: problem.slice(0, 2000), allowedMentions: { parse: [] } });
   },
 });
