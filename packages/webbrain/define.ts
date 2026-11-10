@@ -228,9 +228,13 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
 
         const turn: ActiveTurn = { ref: chat.backendRef ?? undefined, stop: false };
         try {
+          // A thread on a pipeline (`/pipeline`) gets no default frame: its
+          // note says how to work there, and a default like "do it in your
+          // sandbox" pulls the brain away from the pipeline tool. `/mode` still wins.
+          const onPipeline = !!chats.pipelineAt?.(message.chatKey);
           const { text, mode } = modePrompt(
             adapter,
-            chat.mode ?? adapter.defaultMode ?? null,
+            chat.mode ?? (onPipeline ? null : adapter.defaultMode) ?? null,
             (adapter.framePrompt ?? framePrompt)(message.content, message.meta)
           );
           const runTurn = (prompt: string, attach: string[]) =>

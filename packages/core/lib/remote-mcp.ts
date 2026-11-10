@@ -111,7 +111,12 @@ export interface RemoteMcpDeps {
   callTool: (name: string, args: Record<string, unknown>, caller: ToolCaller) => Promise<unknown>;
 }
 
-const REMOTE_INSTRUCTIONS = "Choomfie remote tools: read the owner's Choomfie memories, reminders and bot status.";
+const REMOTE_INSTRUCTIONS = "Choomfie remote tools: the owner's Choomfie memories, reminders and bot status, plus any tool the owner allowed (e.g. `pipeline`, local tools on their Mac).";
+
+/** One line per call from outside (not the daemon's own sessions), so a missing or failing call shows in the log. No arguments: they can hold anything. */
+function logRemote(caller: ToolCaller, name: string, outcome: string): void {
+  if (caller.via === "remote") console.error(`[remote-mcp] ${new Date().toISOString()} ${name}: ${outcome}`);
+}
 
 /** `allowed` null = every tool (the daemon hub's own sessions). */
 function buildServer(allowed: Set<string> | null, instructions: string, deps: RemoteMcpDeps, caller: ToolCaller): Server {
@@ -125,18 +130,22 @@ function buildServer(allowed: Set<string> | null, instructions: string, deps: Re
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const name = req.params.name;
     if (allowed && !allowed.has(name)) {
+      logRemote(caller, name, "refused (not on remoteMcp.tools)");
       return {
         content: [{ type: "text", text: `Tool not available remotely: ${name}` }],
         isError: true,
       };
     }
     try {
-      return (await deps.callTool(
+      const result = (await deps.callTool(
         name,
         (req.params.arguments ?? {}) as Record<string, unknown>,
         caller
-      )) as { content: unknown[] };
+      )) as { content: unknown[]; isError?: boolean };
+      logRemote(caller, name, result?.isError ? "error" : "ok");
+      return result;
     } catch (e) {
+      logRemote(caller, name, `threw: ${e instanceof Error ? e.message : String(e)}`);
       return {
         content: [{ type: "text", text: `Tool error: ${e instanceof Error ? e.message : String(e)}` }],
         isError: true,
