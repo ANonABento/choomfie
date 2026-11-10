@@ -45,6 +45,7 @@ Run a local command-line tool on this machine for a chat, from any brain: Claude
 - **Result contract** (a pipeline with `json`): one JSON object on stdout, `{ok, show?: [paths], next?: {say, show, waiting}, problem?}`; progress on stderr, which goes to `<data dir>/pipeline-logs/<pipeline>/<job>.log`.
 - **`status`** lists the pipelines and recent jobs, or one job (`job_id`) with its result and log end; **`stop`** stops a queued or running job. Jobs are kept in memory: a restart forgets them and stops running ones.
 - **Owner only, in code** (`callerIsOwner`), like `ask_brain`.
+- **Hints:** marked as changing things but not destructive (MCP `annotations`), so a client like Ambition asks once per call, not twice. The read tools on the remote allowlist are marked read-only (`READ_ONLY` in `lib/ipc-types.ts`).
 
 ### Rich Embeds
 

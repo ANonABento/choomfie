@@ -87,6 +87,8 @@ export const pipelineTools: ToolDef[] = [
   {
     definition: {
       name: "pipeline",
+      // Changes files in the pipeline's folder (new characters, builds), deletes nothing outside it: one approval, not two.
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       description:
         "Owner only. Run a configured local pipeline on this machine (action run), check jobs (status) or stop one (stop). " +
         "run: args is the argument list, never a shell string, starting with an allowed subcommand, e.g. [\"next\"]. " +

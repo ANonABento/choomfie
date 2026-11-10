@@ -90,8 +90,24 @@ export type SupervisorMessage =
 
 // --- Shared ---
 
+/**
+ * MCP tool annotations: hints a client uses to decide how to ask (Ambition asks
+ * twice for a tool it takes as destructive). Unset, MCP says to assume the
+ * worst: not read-only, destructive.
+ */
+export interface ToolHints {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
+/** Only reads. */
+export const READ_ONLY: ToolHints = { readOnlyHint: true, openWorldHint: false };
+
 export interface IpcToolDef {
   name: string;
   description: string;
   inputSchema: object;
+  annotations?: ToolHints;
 }

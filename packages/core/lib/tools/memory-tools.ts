@@ -2,6 +2,7 @@
  * Memory tools — save, search, list, delete, conversation summary, stats.
  */
 
+import { READ_ONLY } from "../ipc-types.ts";
 import type { ToolDef } from "../types.ts";
 import { text, err } from "../types.ts";
 
@@ -53,6 +54,7 @@ export const memoryTools: ToolDef[] = [
   {
     definition: {
       name: "search_memory",
+      annotations: READ_ONLY,
       description:
         "Search archival memory for past context, facts, or conversation history.",
       inputSchema: {
@@ -79,6 +81,7 @@ export const memoryTools: ToolDef[] = [
   {
     definition: {
       name: "list_memories",
+      annotations: READ_ONLY,
       description:
         "List all core memories (always-loaded context about the user).",
       inputSchema: {
@@ -155,6 +158,7 @@ export const memoryTools: ToolDef[] = [
   {
     definition: {
       name: "memory_stats",
+      annotations: READ_ONLY,
       description:
         "Get statistics about Choomfie's memory (counts, oldest/newest entries).",
       inputSchema: {

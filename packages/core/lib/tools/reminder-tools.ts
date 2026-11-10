@@ -2,6 +2,7 @@
  * Reminder tools — set, list, cancel, snooze, acknowledge reminders.
  */
 
+import { READ_ONLY } from "../ipc-types.ts";
 import { isAskChatId } from "../ask-relay.ts";
 import type { ToolDef } from "../types.ts";
 import { text, err } from "../types.ts";
@@ -159,6 +160,7 @@ export const reminderTools: ToolDef[] = [
   {
     definition: {
       name: "list_reminders",
+      annotations: READ_ONLY,
       description: "List active (pending) reminders with relative times. Optionally filter by user.",
       inputSchema: {
         type: "object" as const,

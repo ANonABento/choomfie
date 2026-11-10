@@ -252,6 +252,7 @@ describe("pipelineToolsFor", () => {
   test("configured: one tool, the pipelines as its choices", () => {
     const tools = pipelineToolsFor(ctxWith(["lochara", "render"]));
     expect(tools.map((t) => t.definition.name)).toEqual(["pipeline"]);
+    expect(tools[0].definition.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false }); // changes things, asks once
     expect((tools[0].definition.inputSchema as { properties: { pipeline: { enum: string[] } } }).properties.pipeline.enum).toEqual(["lochara", "render"]);
   });
 
