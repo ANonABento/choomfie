@@ -276,6 +276,44 @@ export function landPatch(pb: PlanBranch, patch: Uint8Array, title: string, run:
   );
 }
 
+/**
+ * Land a task's commits from the git bundle it handed back (`git bundle create
+ * task.bundle BASE..HEAD`). Unlike a patch, a bundle carries new, binary,
+ * renamed and mode-changed files exactly, and git checks it isn't damaged.
+ * The task's commits are squashed into one `Task N` commit; if the branch moved
+ * since its bundle, git merges it 3-way and only real overlaps fail.
+ */
+export function landBundle(pb: PlanBranch, bundle: Uint8Array, title: string, run: Runner = runCommand): Promise<Landed> {
+  return landChange(
+    pb,
+    title,
+    run,
+    async (tmp) => {
+      if (!bundle.length) throw new Error("the bundle is empty");
+      const file = join(tmp, "task.bundle");
+      writeFileSync(file, bundle);
+      try {
+        await run(["git", "bundle", "verify", "-q", file], pb.dir);
+      } catch (e) {
+        throw new Error(`the bundle isn't built on ${pb.branch}, or is damaged: ${e instanceof Error ? e.message : e}`);
+      }
+      const ref = "refs/choomfie/task";
+      await run(["git", "fetch", "-q", file, `+HEAD:${ref}`], pb.dir);
+      try {
+        await run(["git", ...NO_HOOKS, "merge", "--squash", "-q", ref], pb.dir);
+      } catch (e) {
+        throw new Error(
+          `the task's commits clash with what landed on ${pb.branch} since its bundle was made. ` +
+            `Retry the task to get the current branch. ${e instanceof Error ? e.message : e}`
+        );
+      } finally {
+        await tryRun(run, ["git", "update-ref", "-d", ref], pb.dir);
+      }
+    },
+    "the bundle changes nothing"
+  );
+}
+
 /** A task that only reads the repo: where it is, and that nothing it makes is committed. */
 export function planReadNote(pb: PlanBranch, bundleName: string): string {
   return (
@@ -388,7 +426,11 @@ export function planBranchNote(pb: PlanBranch, bundleName: string, snapshot = fa
     `is attached as ${bundleName} (it's in run_python's working folder). ` +
     `Run setup on that file instead of the GitHub name: \`bash /tmp/swe.sh setup ${bundleName}\` — the repo is private, so cloning it from GitHub fails. ` +
     `Start with \`git log --oneline\` and plan.md in the repo to see what earlier tasks did; add a short handoff to plan.md (done, left, surprises) in your patch. ` +
-    `Finish as usual (diff → patch link, \`repo: ${pb.repo}\`); Choomfie commits your patch to the branch, so it must be built on exactly this bundle.`
+    (snapshot
+      ? `Finish as usual (diff → patch link, \`repo: ${pb.repo}\`); Choomfie commits your patch to the branch, so it must be built on exactly this bundle.`
+      : `Right after setup, save \`git rev-parse HEAD\` as BASE. When done, in the repo: \`git add -A && git commit -qm "<task title>"\`, ` +
+        `then \`git bundle create task.bundle BASE..HEAD\` and link task.bundle in your reply (it carries new, binary and renamed files exactly). ` +
+        `Also finish as usual (diff → patch link, \`repo: ${pb.repo}\`) as a fallback. Choomfie lands your commits on the branch, so build on exactly this bundle.`)
   );
 }
 

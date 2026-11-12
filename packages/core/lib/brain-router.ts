@@ -457,7 +457,10 @@ export function planTaskRepo(board: Pick<TaskBoard, "tasks">, index: number): st
   return task.repo ?? (repos.length === 1 ? repos[0] : undefined);
 }
 
-export type Landing = { kind: "patch"; files: [BrainFile] } | { kind: "files"; files: BrainFile[]; folder: string };
+export type Landing =
+  | { kind: "bundle"; files: [BrainFile]; patch?: BrainFile }
+  | { kind: "patch"; files: [BrainFile] }
+  | { kind: "files"; files: BrainFile[]; folder: string };
 
 /**
  * What a plan task's reply would put on the plan's branch: its patch (a repo
@@ -470,6 +473,8 @@ export function landingFor(board: Pick<TaskBoard, "brainId" | "tasks">, index: n
   const mode = getBrain(board.brainId)?.modes?.find((m) => m.id === task.mode);
   if (mode?.repo) {
     const patch = pickPatch(files);
+    const bundle = (files ?? []).filter((f) => /(^|[\\/])task\.bundle$/i.test(f.name)).at(-1);
+    if (bundle) return { kind: "bundle", files: [bundle], patch };
     return patch ? { kind: "patch", files: [patch] } : undefined;
   }
   if (mode?.files) {
