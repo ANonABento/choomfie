@@ -387,6 +387,7 @@ export function planBranchNote(pb: PlanBranch, bundleName: string, snapshot = fa
     `Your repo: ${pb.repo}, branch ${pb.branch}, with every earlier task's work${snapshot ? " (current files only, no history: the repo is large)" : ""}, ` +
     `is attached as ${bundleName} (it's in run_python's working folder). ` +
     `Run setup on that file instead of the GitHub name: \`bash /tmp/swe.sh setup ${bundleName}\` — the repo is private, so cloning it from GitHub fails. ` +
+    `Start with \`git log --oneline\` and plan.md in the repo to see what earlier tasks did; add a short handoff to plan.md (done, left, surprises) in your patch. ` +
     `Finish as usual (diff → patch link, \`repo: ${pb.repo}\`); Choomfie commits your patch to the branch, so it must be built on exactly this bundle.`
   );
 }

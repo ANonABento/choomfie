@@ -216,7 +216,7 @@ export interface PlanChat {
 }
 
 /** A chat that has run this many tasks hands over to a fresh one (long chats cost more per message). */
-export const PLAN_CHAT_TASKS = 6;
+export const PLAN_CHAT_TASKS = 1;
 
 /** A task on the board is running, or Run all is: tasks share one chat, so one at a time. */
 export function boardBusy(board: Pick<TaskBoard, "states" | "busy">): boolean {
