@@ -417,7 +417,7 @@ export function taskBoardRows(board: Pick<TaskBoard, "tasks" | "states" | "busy"
         tasks.slice(r * 5, r * 5 + 5).map((t, j) => {
           const i = offset + r * 5 + j;
           const state = board.states[i] ?? { kind: "idle" };
-          const label = `${t.n} · ${t.mode} · ${t.title}`;
+          const label = `${t.id ?? t.n} · ${t.mode} · ${t.title}`;
           const b = new ButtonBuilder();
           if (state.kind === "idle") {
             return b.setCustomId(`brain:task:${i}`).setLabel(`▶ ${label}`.slice(0, 80)).setStyle(ButtonStyle.Secondary);

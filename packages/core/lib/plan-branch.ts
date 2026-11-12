@@ -428,9 +428,9 @@ export function planBranchNote(pb: PlanBranch, bundleName: string, snapshot = fa
     `Start with \`git log --oneline\` and plan.md in the repo to see what earlier tasks did; add a short handoff to plan.md (done, left, surprises) in your patch. ` +
     (snapshot
       ? `Finish as usual (diff → patch link, \`repo: ${pb.repo}\`); Choomfie commits your patch to the branch, so it must be built on exactly this bundle.`
-      : `Right after setup, save \`git rev-parse HEAD\` as BASE. When done, in the repo: \`git add -A && git commit -qm "<task title>"\`, ` +
+      : `Right after setup, set BASE to the commit the bundle holds, NOT any commit setup made: \`BASE=$(git bundle list-heads ${bundleName} | head -1 | cut -d' ' -f1)\`. When done, in the repo: \`git add -A && git commit -qm "<task title>"\`, ` +
         `then \`git bundle create task.bundle BASE..HEAD\` and link task.bundle in your reply (it carries new, binary and renamed files exactly). ` +
-        `Also finish as usual (diff → patch link, \`repo: ${pb.repo}\`) as a fallback. Choomfie lands your commits on the branch, so build on exactly this bundle.`)
+        `Also make a fallback patch from BASE, so it isn't empty after committing: \`git diff --binary BASE HEAD > task.patch\`, and link it with \`repo: ${pb.repo}\`. Choomfie lands your commits on the branch, so build on exactly this bundle.`)
   );
 }
 
