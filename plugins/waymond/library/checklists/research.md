@@ -1,6 +1,5 @@
 # Checklist — research
-- [ ] Every non-obvious claim has a primary source URL (no SEO listicles).
-- [ ] Each claim backed by a quote; unsupported ones retracted or marked unverified.
-- [ ] Unknowns stated as unknown.
-- [ ] Version and access date recorded per source; conflicts resolved with a reason.
-- [ ] Every snippet/command tagged `tested` or `untested`.
+- [ ] Answer is in the first lines.
+- [ ] Every non-obvious claim linked, or marked unverified/unknown.
+- [ ] Version/date stated where it matters; conflicts resolved with a reason.
+- [ ] Hand-off values/commands (if any) tagged tested/untested.

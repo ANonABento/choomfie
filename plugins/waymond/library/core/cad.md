@@ -1,10 +1,17 @@
-# Core — cad (FDM, Bambu P1S, 0.4 mm nozzle)
-- Give moving parts ≥ 0.3 mm clearance per side; printer accuracy is ~0.2 mm, so press/slip fits need a test coupon. (https://help.prusa3d.com/article/modeling-with-3d-printing-in-mind_164135)
-- Keep unsupported overhangs ≤ 45° from vertical (45–60° possible with tuning on a 0.4 nozzle). (https://help.prusa3d.com/article/modeling-with-3d-printing-in-mind_164135)
-- Make walls a multiple of extrusion width: 0.45 mm single, 0.9 mm double for a 0.4 nozzle; design ≥ 0.9 mm (≥ 1.2 mm for structure). (https://help.prusa3d.com/article/modeling-with-3d-printing-in-mind_164135)
-- Use teardrop or flat-top horizontal holes so they print without support. (45° rule applied) (https://help.prusa3d.com/article/modeling-with-3d-printing-in-mind_164135)
-- Keep bridges short and straight; long bridges need support. (https://help.prusa3d.com/article/modeling-with-3d-printing-in-mind_164135)
-- For heat-set inserts: straight hole (no taper), depth = insert length + ~1 mm for blind holes, wall around hole ≥ datasheet min. (https://www.cnckitchen.com/blog/tipps-amp-tricks-fr-gewindeeinstze-im-3d-druck-3awey); hole Ø/min wall unverified (https://supra.silviaai.dev/reference/heat-set-insert-hole-sizes, https://www.bu.edu/epic/files/2026/08/Heat-Set-Insert-Guide-pg2.pdf)
-- Orient so loads run along layers, never pulling layers apart (Z is the weak axis). (https://help.prusa3d.com/article/modeling-with-3d-printing-in-mind_164135) — magnitude untested here
-- Thread ≥ M6 can be printed; smaller → heat-set insert or self-tap. (https://github.com/BelfrySCAD/BOSL2/wiki/threading.scad) untested judgment
-- Export at fine tessellation and run the trimesh checks below before delivery. (https://trimesh.org/trimesh.base.html)
+# Core — cad (Bambu P1S, 0.4 mm nozzle, PLA)
+- Put every fit value in one variable at the top (`clr = 0.3;`) so a fit can be fixed without editing the whole model.
+- Sliding/moving fit: 0.3 mm per side. Loose drop-in: 0.4. Press fit: 0.1 (test coupon first).
+- Holes print undersized: model round holes +0.2 mm on diameter.
+- Screws (no inserts), self-tapping into PLA. Starting values, confirm via lessons:
+  | Screw | Pilot Ø (threads bite) | Clearance Ø (passes through) | Min wall around pilot |
+  |---|---|---|---|
+  | M2 | 1.8 | 2.4 | 1.2 |
+  | M3 | 2.7 | 3.4 | 1.6 |
+  | M4 | 3.6 | 4.5 | 2.0 |
+  Pilot depth = engaged length + 1 mm. Print pilot holes vertical (along Z) when possible; keep them round.
+- Horizontal holes (axis parallel to the bed): teardrop or flat-top so they print without support. Exception: a horizontal pilot hole stays round.
+- Overhangs ≤ 45° from vertical; otherwise chamfer, re-orient, or add support.
+- Walls ≥ 1.2 mm (3 lines); thinner than 0.8 won't print right.
+- Orient so the main load does not pull layers apart; put the largest flat face on the bed.
+- 0.4 mm chamfer on bottom edges (elephant's foot).
+- Before delivering: run `cad_check.py --expect X,Y,Z --hole D` and get PASS.

@@ -1,6 +1,5 @@
 # Checklist — debug
-- [ ] Bug reproduced before any change.
-- [ ] Minimal failing test committed with the fix.
-- [ ] `git bisect run` used when it used to work.
-- [ ] One variable changed per experiment; results recorded.
-- [ ] Full stack trace read before the first hypothesis.
+- [ ] Repro test fails before the fix, passes after (or: stated why no repro was possible).
+- [ ] Root cause stated in one line in the reply.
+- [ ] `swe.sh check` ALL PASS; patch link from `swe.sh diff`.
+- [ ] Same pattern elsewhere: checked, hits listed or "none".

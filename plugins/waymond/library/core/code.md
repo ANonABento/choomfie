@@ -1,13 +1,22 @@
 # Core — code
-- **Define each fact once; import it everywhere.** Reason: copies drift, and then a fix only lands in one place. https://wiki.c2.com/?DontRepeatYourself
-- **Delete unused config, flags, and code; don't comment them out.** Reason: dead options mislead readers, and git already keeps the history. https://google.github.io/eng-practices/review/reviewer/looking-for.html (see "Functionality", "Complexity")
-- **Let errors propagate in core code; catch, translate, and report them at the boundary (CLI, HTTP handler, main).** Reason: catching in the middle hides failures. https://docs.python.org/3/tutorial/errors.html , https://peps.python.org/pep-0008/#programming-recommendations (bare except)
-- **Before you change behaviour, add a test that fails, then make it pass.** Reason: the test pins the behaviour so it can't come back. https://google.github.io/eng-practices/review/developer/small-cls.html (tests in same CL), https://testing.googleblog.com/2015/04/just-say-no-to-more-end-to-end-tests.html
-- **Keep each diff to one self-contained change.** Reason: small diffs get reviewed faster and are easier to bisect and revert. https://google.github.io/eng-practices/review/developer/small-cls.html
-- **Don't add an abstraction, parameter, or layer until a second real caller needs it.** Reason: guessed generality adds complexity that nobody uses. https://martinfowler.com/bliki/Yagni.html , https://google.github.io/eng-practices/review/reviewer/looking-for.html ("over-engineering")
-- **Python: use `None` as the default for mutable arguments.** Reason: a default value is evaluated once and then shared across calls. https://docs.python.org/3/tutorial/controlflow.html#default-argument-values
-- **Python: catch the narrowest exception type you can; never write a bare `except:`.** Reason: a bare except also catches KeyboardInterrupt and SystemExit, and it hides bugs. https://peps.python.org/pep-0008/#programming-recommendations
-- **TS: turn on `strict` and end each discriminated-union switch with a `never` check.** Reason: when someone adds a new variant, the compiler flags every place that doesn't handle it. https://www.typescriptlang.org/tsconfig#strict , https://www.typescriptlang.org/docs/handbook/2/narrowing.html#exhaustiveness-checking
-- **TS: type caught errors as `unknown` and narrow them before use.** Reason: `throw` can throw anything, not only Error objects. https://www.typescriptlang.org/tsconfig#useUnknownInCatchVariables
-- **Bun: read and validate env/config in one module at startup.** Reason: you get one source of truth and bad config fails fast. https://bun.sh/docs/runtime/env
-- **Bun: write tests with `bun:test` and run them with `bun test`; don't add Jest.** Reason: the runner is built in, and an extra dependency is dead config. https://bun.sh/docs/cli/test
+Only rules I'd otherwise get wrong. Textbook practice is assumed, not listed.
+
+## Habits I skip under pressure
+- Read before writing: find the existing helper/type/const and reuse it. Never add a second copy of a value, type or rule — one source of truth; derive the rest.
+- Match the repo's existing patterns (naming, error style, folder layout) over my preferences.
+- Smallest diff that solves it. No drive-by refactors, renames or new deps without saying why.
+- New module only when it has one clear job; no grab-bag `utils`. Keep functions short and side effects at the edges.
+- Don't invent APIs: check the installed version's docs/types before calling a library.
+- No silent fallbacks or swallowed errors; fail loudly with context.
+- Leave no dead code, stray logs or TODOs in the patch.
+
+## Workflow (sandbox)
+- `swe.sh setup` first; never hand-install. Each run is a fresh container (~150s cap): save `wip.patch` before any long step so the next run can resume.
+- Done = `swe.sh check` shows ALL PASS (tests, type-check, lint). Never report done on a partial run.
+- Deliver with `swe.sh diff` → patch link. One change per patch; refactor and fix separate.
+- Behaviour change → add a test that fails first, then make it pass.
+
+## Stack: use the repo's own tools
+Detect from lockfile/config; use its test runner, type-checker and linter — never swap in another.
+- Bun/TS: `bun test`, `tsc --noEmit`, `strict` on, caught errors are `unknown`, env validated in one module.
+- Python: no mutable defaults, no bare `except:`.

@@ -167,8 +167,7 @@ Verdict: clean (or: Verdict: changes)
 ${LIBRARY("cad")}
 Each run_python is a fresh container killed after ~150 s. Start every run with:
 ${fetchTool("cad_check.py")}
-Design: simple is better — fewest parts and screws, features integrated; lean on filament. Named parameters at the top of the .scad. A flat face on the bed at Z=0, overhangs ≤45° (chamfer instead), walls ≥1.2 mm.
-P1S fits: holes print ~0.2 mm small, so model them +0.2 (M3 clearance 3.4); sliding fit 0.2 mm per side; snug push fit over a shaft or tube 0.1–0.15 mm per side; snap fits 0.3.
+Design: simple is better — fewest parts and screws. Fits, holes, screws, walls and orientation: follow core/cad.md (the library is the one source for P1S values).
 Check every version: sh("python /tmp/cad_check.py /tmp/part.scad --expect X,Y,Z --hole D") — expect = the overall size the request implies, one --hole per functional round hole. It builds the STL with iso/front/top PNG renders and prints PASS/WARN/FAIL. Fix every FAIL, then look at the PNGs and confirm the shape is what was asked.
 Save to workspace cad/<name>/ (.scad, .stl, PNGs). Reply with: one line on the design; the check output in a code block; printability notes; links to the STL, PNGs and .scad.]`,
   },
@@ -180,7 +179,7 @@ Save to workspace cad/<name>/ (.scad, .stl, PNGs). Reply with: one line on the d
     frame: `[3d mode — model in Blender, headless. Plain tone, no questions mid-task; state assumptions at the end.
 ${LIBRARY("3d")}
 ${SANDBOX}
-Tools: apt-get install -y -qq --no-install-recommends blender (≈20 s); write a bpy script to a workspace file and run blender -b --python <script> so the next run can rebuild from it. Give objects material colours (Workbench: shading.color_type = 'MATERIAL'). Render with the Workbench or Cycles CPU engine at low samples (≤32) and ≤1000 px so a run fits in time; Eevee needs a GPU and won't work.
+Tools: apt-get install -y -qq --no-install-recommends blender (≈20 s); write a bpy script to a workspace file and run blender -b --python <script> so the next run can rebuild from it. Give objects material colours (Workbench: shading.color_type = 'MATERIAL'). Render settings and engine limits: follow core/3d.md.
 Export .glb (for viewing) and .stl (for printing, if it's a printable object; then also check watertight with trimesh). Keep the .blend.
 Save to workspace models/<name>/. Reply with: one line on what you made, dimensions, links to the preview PNGs, .glb, .stl and .blend.]`,
   },

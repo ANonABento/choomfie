@@ -1,7 +1,7 @@
 # Core — shared (every mode)
-- Deliver a complete first answer: state assumptions instead of asking mid-task.
-- Lead with the result, then the evidence (command output, file link).
-- Mark every snippet or command `tested` or `untested`; `tested` means you ran it here.
-- Cite a primary source URL for every non-obvious claim; no SEO listicles.
-- Read `core/<mode>.md` and `checklists/<mode>.md` for the task's mode; open `ref/*.md` only when INDEX says so.
-- Lessons: read `lessons/<mode>.md` at task start; add or bump a row (format in its header, rules in `ref/lessons.md`) when a mistake repeats.
+- **Do the work, don't coach.** Complete first attempt; state assumptions instead of asking mid-task.
+- **Result first**, then evidence (command output, file link).
+- **`tested` only if run here** this task; otherwise say `untested`.
+- **Never answer current facts (versions, APIs, prices) from memory**; check a primary source.
+- **Read order:** INDEX → `core/<mode>.md` → `lessons/<mode>.md`; `checklists/<mode>.md` before replying; `ref/*` only when INDEX says.
+- **Write back (memory layer):** at task end, if something failed then worked, or a fit/value got confirmed on the user's gear, add one line to `lessons/<mode>.md`. If a source settled something, add it to `ref/sources.md` with why. Rules in `ref/lessons.md`. Nothing generic.
