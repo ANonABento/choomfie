@@ -564,7 +564,7 @@ export async function postBrainReply(
   const planTask = opts.noPatchOffer ? undefined : taskForThread(chatKey);
   const land = planTask ? landingFor(planTask.board, planTask.index, reply.files) : undefined;
   if (planTask && land) {
-    const what = land.kind === "patch" ? `Patch (\`${land.files[0].name}\`)` : `${land.files.length} file${land.files.length === 1 ? "" : "s"} for ${land.folder}/`;
+    const what = landLabel(land);
     const sent = await channel.send({
       allowedMentions: NO_MENTIONS,
       content: `📦 ${what} — task ${planTask.board.tasks[planTask.index].n} of the plan`,
@@ -577,8 +577,9 @@ export async function postBrainReply(
     const id = (sent as { id?: unknown } | undefined)?.id;
     if (typeof id === "string") pendingLands.set(id, { boardId: planTask.boardId, index: planTask.index, ...land });
   }
-  const planPatch = land?.kind === "patch";
-  const patch = opts.noPatchOffer || planPatch ? null : findPatch(reply.text, reply.files);
+  // A plan task's work only ever goes on the plan's branch, never as a PR against main.
+  const planOwned = planTask ? planOwnsPatch(planTask.board, planTask.index, land) : false;
+  const patch = opts.noPatchOffer || planOwned ? null : findPatch(reply.text, reply.files);
   if (patch) {
     const sent = await channel.send({
       allowedMentions: NO_MENTIONS,
@@ -599,6 +600,18 @@ export async function postBrainReply(
     const id = (sent as { id?: unknown } | undefined)?.id;
     if (typeof id === "string") pendingApprovals.set(id, { brainId, chatKey, approval });
   }
+}
+
+/** The "📦 …" line for a plan task's hand-back. */
+export function landLabel(land: Landing): string {
+  if (land.kind === "bundle") return `Bundle (\`${land.files[0].name}\`${land.patch ? `, patch \`${land.patch.name}\` as backup` : ""})`;
+  if (land.kind === "patch") return `Patch (\`${land.files[0].name}\`)`;
+  return `${land.files.length} file${land.files.length === 1 ? "" : "s"} for ${land.folder}/`;
+}
+
+/** In a plan task's thread with a repo, the regular "Open draft PR" offer is never shown. */
+export function planOwnsPatch(board: Pick<TaskBoard, "tasks">, index: number, land: Landing | undefined): boolean {
+  return !!land || !!planTaskRepo(board, index);
 }
 
 /** Where brain replies' images are kept (the data dir); set at boot by installBrainPoster. */
