@@ -1,4 +1,7 @@
 # Core — cad (Bambu P1S, 0.4 mm nozzle, PLA)
+- Setup (fresh container has none of this): `apt-get install -y openscad` and `pip install trimesh`. Sandbox OpenSCAD is 2021.01; if a newer BOSL2 feature errors, that is why.
+- Start from `templates/part.scad` (fit variables, screw table, bottom chamfer already in). Replace only the [Part] section.
+- BOSL2 is the standard library: `include <BOSL2/std.scad>`. Install: download https://github.com/BelfrySCAD/BOSL2/archive/refs/heads/master.zip, unzip as `BOSL2`, set `OPENSCADPATH` (no git in sandbox). For anything standard (chamfer, rounding, teardrop, screw holes, attachments) search the BOSL2 docs (https://github.com/BelfrySCAD/BOSL2/wiki) before hand-writing it; custom code only for what is unique to the part.
 - Put every fit value in one variable at the top (`clr = 0.3;`) so a fit can be fixed without editing the whole model.
 - Sliding/moving fit: 0.3 mm per side. Loose drop-in: 0.4. Press fit: 0.1 (test coupon first).
 - Holes print undersized: model round holes +0.2 mm on diameter.
