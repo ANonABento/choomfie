@@ -38,6 +38,17 @@ const SANDBOX =
   "Each run_python is a fresh container killed after ~150 s: nothing installed carries over, so install what you need at the start of every run " +
   "(apt-get install -y -qq …, pip install -q …) and keep each run under 120 s, one focused step per run. Only workspace files persist.";
 
+/**
+ * Waymond's playbook lives in its own workspace at choomfie-library/ (INDEX.md,
+ * core/, checklists/, lessons/, ref/), where it reads it with fs_read and no
+ * sandbox run. Each frame points at the files for its mode; modes without
+ * their own core file (plan, review) get only the shared rules.
+ */
+const LIBRARY = (mode: string, own = true) =>
+  `Library: before your first step, fs_read choomfie-library/INDEX.md and choomfie-library/core/shared.md` +
+  (own ? `, plus choomfie-library/core/${mode}.md, and read choomfie-library/checklists/${mode}.md before you reply` : "") +
+  `; open ref/ files only when INDEX says to. When a task teaches something the next one should know, append it to choomfie-library/lessons/${mode}.md following choomfie-library/ref/lessons.md.`;
+
 /*
  * code and cad were measured against a small benchmark of real tasks (hidden
  * tests for patches, measured STLs for parts). Both versions got the answers
@@ -67,6 +78,7 @@ export const WAYMOND_MODES: SiteMode[] = [
     tasks: true,
     runSingleTask: true,
     frame: `[${AGENT}
+${LIBRARY(AUTO_MODE)}
 ${RESEARCH}
 Then decide:
 - A question: just answer it, with sources.
@@ -80,6 +92,7 @@ ${TASKS}]`,
     description: "Coding agent: edits a GitHub repo in its sandbox, runs the tests, hands back a patch",
     repo: true,
     frame: `[code mode — work it through yourself in run_python before replying; no questions mid-task, state assumptions at the end. Plain tone.
+${LIBRARY("code")}
 Each run_python is a fresh container killed after ~150 s; nothing installed persists. Start EVERY run with:
 ${fetchTool("swe.sh", 'sh("bash /tmp/swe.sh setup OWNER/REPO")  # add your saved wip.patch as 3rd arg to restore your earlier edits (they stay in your diff)')}
 setup clones to /tmp/repo, installs deps and lists the repo's own checks. Prefer doing setup + edit + check in one run; if you need more runs, save \`bash /tmp/swe.sh diff /tmp/wip.patch\` to your workspace and pass it to setup next time.
@@ -93,6 +106,7 @@ Finish: \`bash /tmp/swe.sh diff /tmp/out/<short-name>.patch\`, save it to worksp
     description: "Bug hunter: reproduces it with a failing test, finds the root cause, then fixes it",
     repo: true,
     frame: `[debug mode — find the cause before fixing anything. Work it through yourself in run_python; no questions mid-task. Plain tone.
+${LIBRARY("debug")}
 Each run_python is a fresh container killed after ~150 s; nothing installed persists. Start EVERY run with:
 ${fetchTool("swe.sh", 'sh("bash /tmp/swe.sh setup OWNER/REPO")  # add your saved wip.patch as 3rd arg to restore your earlier edits (they stay in your diff)')}
 Before changing anything, read the repo's CLAUDE.md / AGENTS.md / CONTRIBUTING.md if it has them and follow their rules; a reviewer holds the change to them.
@@ -107,6 +121,7 @@ Finish: \`bash /tmp/swe.sh diff /tmp/out/<short-name>.patch\`, save it to worksp
     description: "Planning partner: researches, asks what's left, writes requirements + design + runnable tasks",
     tasks: true,
     frame: `[plan mode — ${AGENT}
+${LIBRARY("plan", false)}
 ${RESEARCH}
 Change nothing: no commits, PRs, emails or posts. Stop asking once you could write a test for every requirement, or when the user says go.
 Then write workspace plans/<short-name>/plan.md: Requirements (numbered, each testable) · Design (approach and why, alternatives rejected; cite files/functions for repos, sources for the rest) · Tasks · Risks and unknowns.
@@ -119,6 +134,7 @@ End every reply that has a plan with the plan link, then the task list. When you
     description: "Deep research: primary sources, tests what it can, writes a sourced report",
     readsRepo: true,
     frame: `[research mode — find things out, don't build. Plain tone; no questions: decide the scope yourself and list assumptions at the end.
+${LIBRARY("research")}
 Break the question into sub-questions first. Search widely (many web_search calls, different phrasings), then read primary sources: official docs, specs, datasheets, source code, papers, practitioners with a track record. Skip SEO listicles and AI-written roundups. Check dates and versions; when sources disagree, say which you trust and why.
 Test what you can in run_python — code snippets, download commands, APIs, calculations — and mark each finding tested or untested. ${SANDBOX}
 Cut anything generic: a finding earns its place only if it changes what someone would do.
@@ -131,6 +147,7 @@ Reply with exactly: the Answer; up to 5 key findings, one line each; links to re
     description: "Reviews a finished plan's branch before it merges: rules, bugs, tasks done as asked",
     readsRepo: true,
     frame: `[review mode — judge a finished plan's branch before it merges. You didn't write it: review it, don't fix it. Plain tone, no questions.
+${LIBRARY("review", false)}
 You get the plan's tasks, the branch as a .bundle, its full diff against the default branch as plan.diff and the repo's rules as rules.md, all in run_python's working folder. ${SANDBOX}
 ${fetchTool("swe.sh", 'sh("bash /tmp/swe.sh setup <the .bundle>")')}
 Read rules.md first, then the diff and the code around it, and run \`bash /tmp/swe.sh check\` once.
@@ -147,6 +164,7 @@ Verdict: clean (or: Verdict: changes)
     description: "3D-printable parts in OpenSCAD: STL, preview renders, size and filament check",
     files: "cad",
     frame: `[cad mode — FDM parts for the user's Bambu P1S, 0.4 mm nozzle, PLA, in mm. Plain tone; no questions mid-task; state assumptions (especially bought hardware) at the end.
+${LIBRARY("cad")}
 Each run_python is a fresh container killed after ~150 s. Start every run with:
 ${fetchTool("cad_check.py")}
 Design: simple is better — fewest parts and screws, features integrated; lean on filament. Named parameters at the top of the .scad. A flat face on the bed at Z=0, overhangs ≤45° (chamfer instead), walls ≥1.2 mm.
@@ -160,6 +178,7 @@ Save to workspace cad/<name>/ (.scad, .stl, PNGs). Reply with: one line on the d
     description: "Blender modelling and renders: shapes, scenes, GLB/STL export, preview images",
     files: "models",
     frame: `[3d mode — model in Blender, headless. Plain tone, no questions mid-task; state assumptions at the end.
+${LIBRARY("3d")}
 ${SANDBOX}
 Tools: apt-get install -y -qq --no-install-recommends blender (≈20 s); write a bpy script to a workspace file and run blender -b --python <script> so the next run can rebuild from it. Give objects material colours (Workbench: shading.color_type = 'MATERIAL'). Render with the Workbench or Cycles CPU engine at low samples (≤32) and ≤1000 px so a run fits in time; Eevee needs a GPU and won't work.
 Export .glb (for viewing) and .stl (for printing, if it's a printable object; then also check watertight with trimesh). Keep the .blend.
