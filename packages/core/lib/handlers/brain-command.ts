@@ -390,7 +390,7 @@ async function runBoardTask(
   const task = board.tasks[index];
   let thread: SendableChannel & { id: string; url: string; members?: { add(id: string): Promise<unknown> } };
   try {
-    thread = (await parent.threads!.create({ name: `${task.n} · ${task.mode} · ${task.title}`.slice(0, 100) })) as typeof thread;
+    thread = (await parent.threads!.create({ name: `${task.id ?? task.n} · ${task.mode} · ${task.title}`.slice(0, 100) })) as typeof thread;
   } catch (e) {
     console.error(`[tasks] couldn't open a thread: ${errorText(e)}`);
     return null;
@@ -403,7 +403,7 @@ async function runBoardTask(
   board.threads = { ...board.threads, [thread.id]: index };
   saveTaskBoards();
   await redraw();
-  await thread.send({ content: `**Task ${task.n}** · \`${task.mode}\` mode\n${task.spec}`.slice(0, 2000), allowedMentions: { parse: [] } });
+  await thread.send({ content: `**Task ${task.id ?? task.n}** · \`${task.mode}\` mode\n${task.spec}`.slice(0, 2000), allowedMentions: { parse: [] } });
   onMessageReceived(thread.id, thread as never, false);
   let ok = false;
   try {
@@ -715,12 +715,16 @@ async function landTask(
   say: (content: string) => Promise<unknown>
 ): Promise<boolean> {
   const task = board.tasks[index];
-  const title = `Task ${task.n}: ${task.title}`;
+  const title = `Task ${task.id ?? task.n}: ${task.title}`;
   try {
     const landed =
       landing.kind === "bundle"
         ? await landBundle(pb, landing.files[0].data, title).catch((e) =>
-            landing.patch ? landPatch(pb, landing.patch.data, title) : Promise.reject(e)
+            landing.patch
+              ? landPatch(pb, landing.patch.data, title).catch((p) =>
+                  Promise.reject(new Error(`bundle: ${errorText(e)}\nfallback patch: ${errorText(p)}\nAsk the task to rebuild both on the tip of ${pb.branch}.`))
+                )
+              : Promise.reject(e)
           )
         : landing.kind === "patch"
           ? await landPatch(pb, landing.files[0].data, title)

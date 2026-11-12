@@ -82,6 +82,8 @@ export interface BrainReply {
 /** One step of a plan, for the mode that should do it. */
 export interface BrainTask {
   n: number;
+  /** The id as the plan wrote it ("11b"); falls back to n. */
+  id?: string;
   /** A mode of the same brain (`code`, `cad`, …). */
   mode: string;
   /** Short name, for the button. */
@@ -121,7 +123,7 @@ export function parseTaskList(text: string, modes: string[]): BrainTask[] {
     const line = raw.replace(/\*\*/g, "").trim();
     if (!line) continue;
     // "11b." is a task too (a plan inserted later) — it used to end the list.
-    const m = /^(\d+)[a-z]?[.)]\s*\[([a-z0-9]+)\]\s*(.+)$/i.exec(line);
+    const m = /^(\d+)([a-z]?)[.)]\s*\[([a-z0-9]+)\]\s*(.+)$/i.exec(line);
     if (!m) {
       // A task's own sub-lines (indented, or bullets after a line ending in ":")
       // are part of its spec — dropping them sent a task out as just its heading.
@@ -134,16 +136,16 @@ export function parseTaskList(text: string, modes: string[]): BrainTask[] {
       continue;
     }
     current = null;
-    const mode = m[2].toLowerCase();
+    const mode = m[3].toLowerCase();
     if (!modes.includes(mode)) continue;
-    const spec = m[3].trim();
+    const spec = m[4].trim();
     // "owner/repo — Scaffold: …" names the repo first; the title is what follows.
     const parts = spec.split(/\s+[—–-]\s+|:\s/).map((p) => p.trim()).filter(Boolean);
     const named = parts.length > 1 && /^[\w.-]+\/[\w.-]+$/.test(parts[0]) ? parts[1] : parts[0];
     let title = (named ?? spec).split(/[(,;]/)[0].trim();
     if (title.length > 40) title = title.slice(0, 40).replace(/\s+\S*$/, "") + "…";
     const repo = taskRepo(spec);
-    current = { n: Number(m[1]), mode, title, spec, ...(repo ? { repo } : {}) };
+    current = { n: Number(m[1]), ...(m[2] ? { id: m[1] + m[2].toLowerCase() } : {}), mode, title, spec, ...(repo ? { repo } : {}) };
     tasks.push(current);
   }
   return tasks.slice(0, 50);
