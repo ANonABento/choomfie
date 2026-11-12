@@ -120,7 +120,8 @@ export function parseTaskList(text: string, modes: string[]): BrainTask[] {
   for (const raw of lines.slice(start + 1)) {
     const line = raw.replace(/\*\*/g, "").trim();
     if (!line) continue;
-    const m = /^(\d+)[.)]\s*\[([a-z0-9]+)\]\s*(.+)$/i.exec(line);
+    // "11b." is a task too (a plan inserted later) — it used to end the list.
+    const m = /^(\d+)[a-z]?[.)]\s*\[([a-z0-9]+)\]\s*(.+)$/i.exec(line);
     if (!m) {
       // A task's own sub-lines (indented, or bullets after a line ending in ":")
       // are part of its spec — dropping them sent a task out as just its heading.
@@ -145,7 +146,7 @@ export function parseTaskList(text: string, modes: string[]): BrainTask[] {
     current = { n: Number(m[1]), mode, title, spec, ...(repo ? { repo } : {}) };
     tasks.push(current);
   }
-  return tasks.slice(0, 25);
+  return tasks.slice(0, 50);
 }
 
 export interface BrainApproval {

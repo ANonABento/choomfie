@@ -406,12 +406,16 @@ export function taskBoardRows(board: Pick<TaskBoard, "tasks" | "states" | "busy"
   // Failed tasks can run again (their thread is still linked from the retry).
   const idle = board.busy ? 0 : board.states.filter((s) => s.kind === "idle" || s.kind === "failed").length;
   const review = reviewable(board);
-  const tasks = board.tasks.slice(0, idle >= 2 || review ? 20 : 25);
+  const cap = idle >= 2 || review ? 20 : 25;
+  // Long plans: Discord fits 25 buttons, so show a window from the first unfinished task.
+  const firstOpen = Math.max(0, board.states.findIndex((s) => s.kind !== "done"));
+  const offset = Math.min(firstOpen, Math.max(0, board.tasks.length - cap));
+  const tasks = board.tasks.slice(offset, offset + cap);
   for (let r = 0; r * 5 < tasks.length; r++) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         tasks.slice(r * 5, r * 5 + 5).map((t, j) => {
-          const i = r * 5 + j;
+          const i = offset + r * 5 + j;
           const state = board.states[i] ?? { kind: "idle" };
           const label = `${t.n} · ${t.mode} · ${t.title}`;
           const b = new ButtonBuilder();
