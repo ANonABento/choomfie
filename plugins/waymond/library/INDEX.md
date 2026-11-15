@@ -7,4 +7,4 @@ core/<mode>.md — always in that mode (auto, cad, 3d, code, debug, research)
 checklists/<mode>.md — before delivering in that mode
 lessons/<mode>.md — at the start of a task in that mode; append rows per ref/lessons.md
 ref/lessons.md — when editing a lessons file
-Repo-only (read from GitHub plugins/waymond/library/ if needed): ref/assets.md, ref/blender.md, ref/cad.md, ref/code.md, ref/debug.md, ref/one-shot.md, ref/research.md, ref/ui.md, tools/mesh_check.py
+Repo-only (read from GitHub plugins/waymond/library/ if needed): ref/assets.md, ref/blender.md, ref/cad.md, ref/code.md, ref/debug.md, ref/one-shot.md, ref/research.md, ref/sources.md, ref/ui.md, tools/mesh_check.py
