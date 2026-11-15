@@ -1,5 +1,5 @@
 Use this when rendering or modelling in Blender 3.4 from a script.
-Covers: render settings, topology, UVs, PBR, HDRI, camera, toon/outline/Freestyle, known unknowns.
+Covers: render settings, topology, UVs, PBR, HDRI, camera, toon/outline/Freestyle, hard-surface, budget check, GLB/FBX export, known unknowns.
 Sources: front 4 report (Blender 3.4 manual + API), accessed 2026-11-08.
 
 ## Render settings, Cycles CPU, low samples + denoise — tested (exit 0, 128×96, 32 samples in 0.08 s, PNG saved)
@@ -122,6 +122,47 @@ Freestyle is CPU post-processing and works with Cycles headless. https://docs.bl
 
 ## Lighting (no HDRI) — untested
 For a three-point setup, use Area lights with key power ~500–1000 W at 2–3 m, fill at ~⅓ of the key, and a rim light behind. Light power is physical, so wrong scale means wrong exposure. https://docs.blender.org/manual/en/3.4/render/lights/light_object.html
+
+## Hard-surface order: blockout → boolean → bevel → weighted normals — tested (exit 0, bpy 5.0.1 headless, 704 tris)
+Adapted from arjun988/blender-skills `hard-surface` (MIT, see ref/sources.md). Keep the modifier stack in this order; apply scale before bevelling.
+```python
+bpy.ops.mesh.primitive_cube_add(size=1); body=bpy.context.active_object
+body.scale=(0.4,0.3,0.1); bpy.ops.object.transform_apply(scale=True)    # blockout at true size
+bpy.ops.mesh.primitive_cylinder_add(radius=0.05,depth=0.3); cut=bpy.context.active_object
+cut.display_type='WIRE'; cut.hide_render=True                             # cutter stays live, never rendered/exported
+b=body.modifiers.new("Hole","BOOLEAN"); b.operation='DIFFERENCE'; b.solver='EXACT'; b.object=cut
+bv=body.modifiers.new("Bevel","BEVEL"); bv.width=0.005; bv.segments=3; bv.limit_method='ANGLE'; bv.harden_normals=True
+bpy.context.view_layer.objects.active=body; bpy.ops.object.shade_smooth()
+if bpy.app.version < (4,1,0): body.data.use_auto_smooth=True             # removed in 4.1
+wn=body.modifiers.new("WN","WEIGHTED_NORMAL"); wn.keep_sharp=True
+```
+Tested on bpy 5.0.1 (pip wheel), not 3.4; the `use_auto_smooth` branch is the 3.4 path and was not run.
+
+## Tri + texture budget check — tested (exit 0, bpy 5.0.1)
+Adapted from `asset-optimization` / `qa-review`. Counts evaluated (post-modifier) triangles of render-visible meshes.
+```python
+def budget(objs, max_tris, max_tex):
+    dg=bpy.context.evaluated_depsgraph_get(); tris=0
+    for o in objs:
+        if o.type!='MESH' or o.hide_render: continue
+        e=o.evaluated_get(dg); m=e.to_mesh(); m.calc_loop_triangles(); tris+=len(m.loop_triangles); e.to_mesh_clear()
+    big=[(i.name,tuple(i.size)) for i in bpy.data.images if max(i.size)>max_tex]
+    return tris, big
+tris,big=budget(bpy.data.objects,5000,2048); assert tris<=5000 and not big, (tris,big)
+```
+Pick budgets per target; the source's ranges are opinions, not measured limits.
+
+## GLB + FBX export settings — tested (exit 0, bpy 5.0.1; GLB 42 KB reloads in trimesh at 0.4×0.1×0.3 m, Y-up)
+Adapted from `export-pipeline`. Select only what ships (not cutters); modifiers are applied on export.
+```python
+for o in bpy.data.objects: o.select_set(o is body)
+bpy.ops.export_scene.gltf(filepath="/tmp/out.glb", export_format='GLB', use_selection=True,
+    export_apply=True, export_yup=True, export_texcoords=True, export_normals=True)
+bpy.ops.export_scene.fbx(filepath="/tmp/out.fbx", use_selection=True, apply_unit_scale=True,
+    apply_scale_options='FBX_SCALE_UNITS', axis_forward='-Z', axis_up='Y',
+    use_mesh_modifiers=True, mesh_smooth_type='FACE', path_mode='COPY', embed_textures=True)
+```
+FBX file was written (26 KB) but not reimported to check scale/axes; treat the FBX half as untested in an engine.
 
 ## Disagreements and unknowns
 - The harden_normals log line appeared despite auto smooth being enabled. The cause is unclear, and the output was unaffected.
