@@ -76,11 +76,14 @@ describe("a plan's tasks share one chat", () => {
     expect(seen[PLAN_CHAT_TASKS].chat).not.toBe(first); // hands over after the cap
     expect(seen.map((s) => s.mode)).toEqual(tasks(PLAN_CHAT_TASKS + 1).map((t) => t.mode));
 
-    // The plan's context goes to a chat once; a continuing task is told it's the same chat.
-    expect(seen[0].content).toContain("THE PLAN CONTEXT");
-    expect(seen[1].content).not.toContain("THE PLAN CONTEXT");
-    expect(seen[1].content).toContain("same plan, same chat");
-    expect(seen[PLAN_CHAT_TASKS].content).toContain("THE PLAN CONTEXT");
+    // The plan's context goes to each chat once; a continuing task is told it's the same chat.
+    seen.forEach((s, i) => {
+      if (i % PLAN_CHAT_TASKS === 0) expect(s.content).toContain("THE PLAN CONTEXT");
+      else {
+        expect(s.content).not.toContain("THE PLAN CONTEXT");
+        expect(s.content).toContain("same plan, same chat");
+      }
+    });
 
     const board = getTaskBoard("board")!;
     expect(board.states.every((s) => s.kind === "done")).toBe(true);

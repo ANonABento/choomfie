@@ -24,7 +24,7 @@ describe("parseTaskList", () => {
     expect(parseTaskList("1. [cad] x — y", modes)).toEqual([]);
     expect(parseTaskList("Tasks\n1. [paint] x — y\n2. [cad] z — w", modes).map((t) => t.n)).toEqual([2]);
     expect(parseTaskList("## Tasks:\n1. [cad] a — b\nNotes\n3. [cad] c — d", modes).map((t) => t.n)).toEqual([1]);
-    expect(parseTaskList("Tasks\n" + Array.from({ length: 30 }, (_, i) => `${i + 1}. [code] t${i} — s`).join("\n"), modes)).toHaveLength(25);
+    expect(parseTaskList("Tasks\n" + Array.from({ length: 60 }, (_, i) => `${i + 1}. [code] t${i} — s`).join("\n"), modes)).toHaveLength(50);
   });
 
   test("a task's sub-lines stay in its spec (a task once went out as just its heading)", () => {

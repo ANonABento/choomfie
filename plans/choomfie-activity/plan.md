@@ -35,3 +35,8 @@ Full plan lives in the Waymond workspace (plans/choomfie-activity/plan.md).
 - Done: `bun run activity:dev` (`plugins/activity/server/dev.ts`): starts the bus with `/api/token`, serves `web/dist` + `/avatar.vrm` (new bus options `staticDir`, `vrmPath`; GET only, `/bus` excluded, no path escape) and a cloudflared quick tunnel; prints the URL Mapping target. Env: `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `ACTIVITY_ALLOWLIST`, `ACTIVITY_BUS_PORT`, `ACTIVITY_VRM`. `docs/activity.md` (portal fields table), `docs/voice-plugin.md` "Switching voice pipelines", README pointers. Tests: `server/dev.test.ts` (tunnel mocked), `server/docs.test.ts` (every portal field listed).
 - Left: real launch in Discord on the user's machine; portal labels written from Discord docs/memory, check against the live portal. Standalone dev has an idle pipeline and prints room events — wiring the bus into the voice manager/worker is still open.
 - Surprises: quick tunnels change host every start, so the URL Mapping must be updated each run.
+
+### Task 9 handoff — CI fixes, round 1
+- Done: CI (PR #127) failed only in `bun test`, on 3 core tests that also fail on main (bb0ca5d); install, type-check and lint passed. Each test lagged a deliberate main change, so the tests were brought in line: task lists cap at 50 (261eba9), one task per plan chat (`PLAN_CHAT_TASKS = 1`, 0717bcc; assertion now cap-generic), mode frames grew with library pointers (auto 2858 chars; limit 2500 → 3000). No product code touched.
+- Left: nothing for CI. `reset skips pid files…` can fail in sandboxes (passes on CI).
+- Surprise: the PR's own work was green; main was red.
