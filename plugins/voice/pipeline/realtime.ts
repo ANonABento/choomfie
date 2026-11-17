@@ -1,4 +1,5 @@
 import { VoiceEventEmitter } from "./emitter.ts";
+import { classifyEmotion, NoopEmotionClassifier, routeEmotionToolCall, type EmotionClassifier } from "./emotion.ts";
 import type {
   RealtimeProviderEvent,
   RealtimeVoiceProvider,
@@ -13,7 +14,10 @@ export class RealtimePipeline implements VoicePipeline {
   private speaking = false;
   private connected: Promise<void> | null = null;
 
-  constructor(private provider: RealtimeVoiceProvider) {}
+  constructor(
+    private provider: RealtimeVoiceProvider,
+    private classifier: EmotionClassifier = new NoopEmotionClassifier()
+  ) {}
 
   on(listener: VoiceEventListener): () => void {
     return this.events.on(listener);
@@ -29,6 +33,15 @@ export class RealtimePipeline implements VoicePipeline {
     await this.provider.close();
   }
 
+  private async classify(text: string): Promise<void> {
+    try {
+      const emotion = await classifyEmotion(this.classifier, text);
+      if (emotion) this.events.emit(emotion);
+    } catch (err: unknown) {
+      this.events.emit({ type: "error", error: err instanceof Error ? err : new Error(String(err)) });
+    }
+  }
+
   private handle(event: RealtimeProviderEvent): void {
     switch (event.type) {
       case "input_transcript":
@@ -36,6 +49,7 @@ export class RealtimePipeline implements VoicePipeline {
         return;
       case "output_transcript":
         this.events.emit({ type: "assistant_text", text: event.text });
+        void this.classify(event.text);
         return;
       case "audio":
         if (!this.speaking) {
@@ -45,13 +59,8 @@ export class RealtimePipeline implements VoicePipeline {
         this.events.emit({ type: "audio_chunk", pcm: event.pcm });
         return;
       case "tool_call":
-        if (event.call.name === "set_emotion") {
-          this.events.emit({
-            type: "emotion",
-            name: String(event.call.args.name),
-            intensity: Number(event.call.args.intensity ?? 1),
-          });
-        }
+        const emotion = routeEmotionToolCall(event.call);
+        if (emotion) this.events.emit(emotion);
         this.events.emit({ type: "tool_call", call: event.call });
         return;
       case "turn_complete":

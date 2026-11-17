@@ -7,6 +7,7 @@
  */
 
 import type { RealtimeProviderEvent, RealtimeVoiceProvider } from "../../pipeline/types.ts";
+import { SET_EMOTION_DECLARATION } from "../../pipeline/emotion.ts";
 import { discordToGemini, geminiToDiscord } from "./resample.ts";
 
 export const GEMINI_LIVE_URL =
@@ -32,21 +33,7 @@ export interface FunctionDeclaration {
 
 /** Tools the model may call; the pipeline turns set_emotion into an emotion event. */
 export const GEMINI_LIVE_TOOLS: FunctionDeclaration[] = [
-  {
-    name: "set_emotion",
-    description: "Set the avatar's facial expression.",
-    parameters: {
-      type: "object",
-      properties: {
-        name: {
-          type: "string",
-          enum: ["neutral", "happy", "sad", "angry", "surprised", "embarrassed", "thinking"],
-        },
-        intensity: { type: "number", description: "0 to 1" },
-      },
-      required: ["name"],
-    },
-  },
+  SET_EMOTION_DECLARATION,
   {
     name: "room_action",
     description: "Do something in the shared room (react to a poke or headpat, open a watch-together link).",

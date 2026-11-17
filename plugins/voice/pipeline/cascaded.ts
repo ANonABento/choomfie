@@ -1,11 +1,14 @@
 import type { PluginConfig } from "@choomfie/shared";
 import { getSTTProvider, getTTSProvider } from "../providers/index.ts";
 import { VoiceEventEmitter } from "./emitter.ts";
+import { classifyEmotion, emotionEvent, NoopEmotionClassifier, type EmotionClassifier } from "./emotion.ts";
 import type { STTProvider, TTSProvider, VoiceBrain, VoiceEventListener, VoicePipeline } from "./types.ts";
 
 export interface CascadedOptions {
   language?: string;
   speed?: number;
+  /** Optional emotion guess from reply text; default is tool calls only */
+  classifier?: EmotionClassifier;
 }
 
 /** STT → brain → TTS behind the shared event contract. Providers are used as-is. */
@@ -34,6 +37,8 @@ export class CascadedPipeline implements VoicePipeline {
       const reply = (await this.brain(userText)).trim();
       if (!reply) return;
       this.events.emit({ type: "assistant_text", text: reply });
+      const guessed = await classifyEmotion(this.options.classifier ?? new NoopEmotionClassifier(), reply);
+      if (guessed) this.events.emit(guessed);
 
       const pcm = await this.tts.synthesize(reply, language, speed);
       this.events.emit({ type: "speaking_start" });
@@ -43,6 +48,11 @@ export class CascadedPipeline implements VoicePipeline {
       const error = err instanceof Error ? err : new Error(String(err));
       this.events.emit({ type: "error", error });
     }
+  }
+
+  /** Brain's set_emotion tool handler: emits the emotion event; throws on an unknown name */
+  setEmotion(name: string, intensity?: number): void {
+    this.events.emit(emotionEvent(name, intensity));
   }
 
   async close(): Promise<void> {}
