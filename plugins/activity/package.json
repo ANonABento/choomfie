@@ -1,0 +1,10 @@
+{
+  "name": "@choomfie/activity",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "server/index.ts",
+  "license": "MIT",
+  "dependencies": {
+    "@choomfie/voice": "workspace:*"
+  }
+}
