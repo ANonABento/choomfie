@@ -135,7 +135,7 @@ See [docs/supervisor-architecture.md](docs/supervisor-architecture.md) for detai
 | **Tutor** | Language learning: structured lessons, SRS, quizzes, module tools. |
 | **Socials** | YouTube, Reddit, LinkedIn workflows. |
 
-**Voice setup** — `brew install whisper-cpp` (local STT), `pip install kokoro-onnx soundfile` (local TTS). Cloud providers via API keys in the runtime env. See [docs/voice-plugin.md](docs/voice-plugin.md).
+**Voice setup** — `brew install whisper-cpp` (local STT), `pip install kokoro-onnx soundfile` (local TTS). Cloud providers via API keys in the runtime env. See [docs/voice-plugin.md](docs/voice-plugin.md). To switch between local cascaded voice and realtime (Gemini Live), set `voice.pipeline` — see [Switching voice pipelines](docs/voice-plugin.md#switching-voice-pipelines). Avatar Activity in voice calls: [docs/activity.md](docs/activity.md) (`bun run activity:dev`).
 
 ## Project Structure
 

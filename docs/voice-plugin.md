@@ -20,6 +20,25 @@ The voice plugin lets Choomfie join Discord voice channels, listen to users spea
 | **kokoro** | TTS | Free (local) | `pip install kokoro-onnx soundfile` | High quality neural TTS, ~150ms |
 | **edge-tts** | TTS | Free | `pip install edge-tts` | Microsoft voices, 300+ voices, no key |
 
+## Switching voice pipelines
+
+Two pipeline shapes emit the same events (transcripts, audio chunks, speaking, emotion, tool calls), so the avatar and Discord audio don't care which runs. Pick one in `config.json`; no code change:
+
+```json
+{ "voice": { "pipeline": "cascaded", "stt": "auto", "tts": "auto" } }
+```
+
+- **`cascaded`** (default, local-first): STT → brain → TTS, using the providers below.
+- **`realtime`**: one speech-to-speech model (Gemini Live). Needs `GEMINI_API_KEY`:
+
+```json
+{ "voice": { "pipeline": "realtime", "realtime": "gemini", "realtimeModel": "gemini-3.8-live",
+             "stt": "auto", "tts": "auto", "dailyLimits": { "gemini:gemini-3.8-live": 500 },
+             "blockCloudInPrivate": true } }
+```
+
+`dailyLimits` caps requests per `provider:model` (copy the number from AI Studio); when it runs out the pipeline falls back to cascaded and logs it. `blockCloudInPrivate` refuses cloud providers (groq, elevenlabs, edge-tts, gemini) for DMs and private memory. Gemini's free tier may use your audio to improve Google's products. An unknown pipeline or provider name fails at startup with the list of valid ones.
+
 ### Auto-Detection
 
 Set `"stt": "auto"` or `"tts": "auto"` (the default) and the factory picks the best available provider:

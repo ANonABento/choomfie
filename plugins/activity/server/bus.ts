@@ -6,6 +6,7 @@
  * Only allowlisted Discord user IDs may connect (403 otherwise).
  */
 
+import { resolve, sep } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import type { VoiceEvent, VoicePipeline } from "@choomfie/voice/pipeline/index.ts";
 import { MOUTH_HZ, mouthLevels } from "./mouth.ts";
@@ -34,6 +35,10 @@ export interface AvatarBusOptions {
   toBrain: (systemMessage: string) => void;
   /** Serve POST /api/token (Activity sign-in) with these app credentials */
   oauth?: DiscordOAuth;
+  /** Serve the built web client (GET, any path but /bus) from this directory */
+  staticDir?: string;
+  /** Serve this file as /avatar.vrm */
+  vrmPath?: string;
 }
 
 export interface AvatarBus {
@@ -83,6 +88,25 @@ function bearerToken(req: Request): string | null {
   return new URL(req.url).searchParams.get("token");
 }
 
+const BUS_PATH = "/bus";
+
+/** Web client files and the avatar; null when the request is not for one */
+async function staticAsset(req: Request, opts: AvatarBusOptions): Promise<Response | null> {
+  const { pathname } = new URL(req.url);
+  if (req.method !== "GET" || pathname === BUS_PATH) return null;
+  if (pathname === "/avatar.vrm" && opts.vrmPath) return fileResponse(opts.vrmPath);
+  if (!opts.staticDir) return null;
+  const root = resolve(opts.staticDir);
+  const file = resolve(root, `.${pathname === "/" ? "/index.html" : pathname}`);
+  if (!file.startsWith(root + sep)) return new Response("not found", { status: 404 });
+  return fileResponse(file);
+}
+
+async function fileResponse(path: string): Promise<Response> {
+  const file = Bun.file(path);
+  return (await file.exists()) ? new Response(file) : new Response("not found", { status: 404 });
+}
+
 export function startAvatarBus(opts: AvatarBusOptions): AvatarBus {
   const allowed = new Set(opts.allowlist);
   const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -92,6 +116,8 @@ export function startAvatarBus(opts: AvatarBusOptions): AvatarBus {
     port: opts.port ?? 0,
     async fetch(req, srv) {
       if (opts.oauth && new URL(req.url).pathname === "/api/token") return handleTokenRequest(req, opts.oauth);
+      const asset = await staticAsset(req, opts);
+      if (asset) return asset;
       const token = bearerToken(req);
       if (!token) return new Response("missing token", { status: 401 });
       const userId = await opts.verifyToken(token);
