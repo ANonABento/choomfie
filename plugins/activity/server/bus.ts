@@ -9,6 +9,7 @@
 import type { Server, ServerWebSocket } from "bun";
 import type { VoiceEvent, VoicePipeline } from "@choomfie/voice/pipeline/index.ts";
 import { MOUTH_HZ, mouthLevels } from "./mouth.ts";
+import { handleTokenRequest, type DiscordOAuth } from "./token.ts";
 
 export type BusMessage =
   | { type: "mouth"; value: number }
@@ -31,6 +32,8 @@ export interface AvatarBusOptions {
   verifyToken: (token: string) => Promise<string | null>;
   /** Deliver a room event to the brain as a system message */
   toBrain: (systemMessage: string) => void;
+  /** Serve POST /api/token (Activity sign-in) with these app credentials */
+  oauth?: DiscordOAuth;
 }
 
 export interface AvatarBus {
@@ -88,6 +91,7 @@ export function startAvatarBus(opts: AvatarBusOptions): AvatarBus {
   const server: Server<SocketData> = Bun.serve<SocketData, undefined>({
     port: opts.port ?? 0,
     async fetch(req, srv) {
+      if (opts.oauth && new URL(req.url).pathname === "/api/token") return handleTokenRequest(req, opts.oauth);
       const token = bearerToken(req);
       if (!token) return new Response("missing token", { status: 401 });
       const userId = await opts.verifyToken(token);
