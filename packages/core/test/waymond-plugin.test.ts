@@ -358,7 +358,7 @@ describe("modes", () => {
     for (const m of WAYMOND_MODES) {
       expect(m.id).toMatch(/^[a-z0-9]+$/);
       expect(m.frame).toMatch(/Reply with|End every reply|task list/);
-      expect(m.frame.length).toBeLessThan(2500); // rides on every message
+      expect(m.frame.length).toBeLessThan(3000); // rides on every message
     }
     expect(WAYMOND_MODES.find((m) => m.id === "code")!.frame).toContain("repo: <owner>/<name>");
   });

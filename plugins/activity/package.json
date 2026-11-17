@@ -1,0 +1,22 @@
+{
+  "name": "@choomfie/activity",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "server/index.ts",
+  "license": "MIT",
+  "dependencies": {
+    "@choomfie/voice": "workspace:*",
+    "@discord/embedded-app-sdk": "^2.5.0",
+    "@pixiv/three-vrm": "^3.5.5",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.187.0",
+    "happy-dom": "^21.0.4",
+    "vite": "^8.3.8"
+  },
+  "scripts": {
+    "web:dev": "vite web",
+    "web:build": "vite build web"
+  }
+}

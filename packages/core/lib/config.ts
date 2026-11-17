@@ -15,10 +15,62 @@ export interface Persona {
   personality: string;
 }
 
+export const VOICE_PIPELINES = ["cascaded", "realtime"] as const;
+export type VoicePipelineKind = (typeof VOICE_PIPELINES)[number];
+
+/** Provider names per slot; must match the registries in plugins/voice. */
+export const VOICE_PROVIDERS = {
+  stt: ["auto", "whisper", "groq", "elevenlabs"],
+  tts: ["auto", "kokoro", "edge-tts", "elevenlabs"],
+  realtime: ["gemini"],
+} as const;
+
+/** Providers that send audio off the machine (privacy toggle, Req 11). */
+export const CLOUD_VOICE_PROVIDERS: readonly string[] = ["groq", "elevenlabs", "edge-tts", "gemini"];
+
 export interface VoiceConfig {
   stt: string;
   tts: string;
   ttsSpeed?: number; // 0.5 to 2.0 (default 1.0)
+  /** Which pipeline shape to run; cascaded is the local default. */
+  pipeline?: VoicePipelineKind;
+  /** Realtime provider + model, used when pipeline is "realtime". */
+  realtime?: string;
+  realtimeModel?: string;
+  /** Daily request cap per "provider:model" key (copy from AI Studio). */
+  dailyLimits?: Record<string, number>;
+  /** Refuse cloud providers for DMs / private memory. */
+  blockCloudInPrivate?: boolean;
+}
+
+function checkProvider(slot: keyof typeof VOICE_PROVIDERS, name: unknown): void {
+  const known: readonly string[] = VOICE_PROVIDERS[slot];
+  if (typeof name !== "string" || !known.includes(name)) {
+    throw new Error(
+      `Unknown voice ${slot} provider: "${String(name)}". Available: ${known.join(", ")}`,
+    );
+  }
+}
+
+/** Validate a voice config block; throws with the bad key named. */
+export function parseVoiceConfig(voice: VoiceConfig): VoiceConfig {
+  const pipeline = voice.pipeline ?? "cascaded";
+  if (!VOICE_PIPELINES.includes(pipeline)) {
+    throw new Error(
+      `Unknown voice.pipeline: "${String(pipeline)}". Available: ${VOICE_PIPELINES.join(", ")}`,
+    );
+  }
+  checkProvider("stt", voice.stt);
+  checkProvider("tts", voice.tts);
+  if (pipeline === "realtime" || voice.realtime !== undefined) {
+    checkProvider("realtime", voice.realtime);
+  }
+  for (const [key, limit] of Object.entries(voice.dailyLimits ?? {})) {
+    if (!Number.isInteger(limit) || limit < 0) {
+      throw new Error(`voice.dailyLimits["${key}"] must be a non-negative integer, got ${String(limit)}`);
+    }
+  }
+  return { ...voice, pipeline };
 }
 
 export interface YouTubeConfig extends SocialsPlatformConfig {
@@ -183,10 +235,10 @@ function mergeConfig(saved: Partial<Config>): Config {
       ...DEFAULT_CONFIG.personas,
       ...savedPersonas,
     },
-    voice: {
+    voice: parseVoiceConfig({
       ...DEFAULT_CONFIG.voice,
       ...savedVoice,
-    },
+    }),
     ...(savedSocials ? { socials: savedSocials } : {}),
     ...(model ? { model } : {}),
     ...(fallbackModel ? { fallbackModel } : {}),
