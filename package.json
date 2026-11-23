@@ -22,14 +22,17 @@
     "daemon": "bun packages/core/daemon.ts",
     "install:launchd": "packages/core/scripts/install-launchd.sh",
     "webbrain": "bun packages/webbrain/cli.ts",
-    "activity:dev": "bun plugins/activity/server/dev.ts"
+    "activity:dev": "bun plugins/activity/server/dev.ts",
+    "apibrain": "bun packages/apibrain/cli.ts"
   },
   "lint-staged": {
     "*.ts": "eslint --fix"
   },
   "dependencies": {
+    "@choomfie/apibrain": "workspace:*",
     "@choomfie/browser": "workspace:*",
     "@choomfie/core": "workspace:*",
+    "@choomfie/free": "workspace:*",
     "@choomfie/shared": "workspace:*",
     "@choomfie/socials": "workspace:*",
     "@choomfie/tutor": "workspace:*",

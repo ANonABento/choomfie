@@ -47,6 +47,8 @@ export interface PluginConfig {
   getEnabledPlugins(): string[];
   getVoiceConfig(): { stt: string; tts: string; ttsSpeed?: number };
   getSocialsConfig(): SocialsConfig | undefined;
+  /** The persona Choomfie speaks as (non-Claude brains that take a system prompt use it). */
+  getActivePersona?(): { name: string; personality: string };
 }
 
 export interface PluginContext {

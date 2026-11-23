@@ -224,6 +224,26 @@
 - [ ] Daemon monitors and load-balances across brains
 - [ ] Discord progress reporting from each brain
 
+## Phase 15.5: Free Brain (Core done)
+
+> `/brain free` — free API tiers + web brains behind one router. See [free-brain.md](free-brain.md); routing, context and delegation plan in [brains-plan.md](brains-plan.md).
+
+- [x] `@choomfie/apibrain` kit — OpenAI-compatible client, typed failures, multi-key pools, cooldowns, local + header quota, `/models` catalog, transcripts, compaction, router, classifier
+- [x] `free` plugin — OpenRouter, Groq, Gemini, NVIDIA NIM, SambaNova, Cloudflare, Ollama; one `/brain <provider>` each
+- [x] Smart routing — buckets, zero-shot classifier with keyword fallback; API models float per message, web members lock (first message, mode, or "Hand this to …"), failures offer Retry / Answer with free models
+- [x] `/brain` status, `bun run apibrain doctor free`
+- [x] `/model` per chat for any brain (`Brain.models()`), `/compact` for any brain (`Brain.compact()`), context carried across `/brain` switches (`carry`)
+- [x] `ask_brain` renamed `delegate`
+- [ ] Delegation: `Brain.capabilities` listed by `delegate`; Claude delegating cheap work to `free` with a model; "Try a bigger model" button
+- [ ] Web-brain compact (ask the site for a summary, open a new conversation seeded with it)
+- [ ] Harness kit: Codex / OpenCode / Gemini CLI as brains (T3 Code's agent wrappers as reference), then as `agentic` members
+- [ ] More web members — Claude.ai, ChatGPT, Gemini web, Grok, Perplexity, DeepSeek (record each with the `new-web-brain` skill)
+- [ ] Multi-profile web brains — several logged-in profiles per site, each with its own sticky proxy, as separate capacity units
+- [ ] Always-on / ambient mode — opt-in per channel: debounce bursts, reply / react / ignore gate (rules first), per-channel reply caps
+- [ ] Embeddings classifier stage (reuse `ollama-embeddings`) if zero-shot latency or accuracy disappoints
+- [ ] Persistent cooldowns; per-channel free defaults; opt-in fallback to Claude when every free provider is limited
+- [ ] Non-LLM freemium — image generation, TTS/STT, search, embeddings behind the same router pattern
+
 ## Phase 16: Extended Autonomy
 
 - [ ] Cron scheduling via Claude Code's `/schedule` feature

@@ -1,0 +1,14 @@
+import { defineProvider } from "@choomfie/apibrain";
+
+/** Cloudflare Workers AI: 10k "neurons" a day free, prompts not used for training. Needs the account id too. */
+export default defineProvider({
+  id: "cloudflare",
+  label: "Cloudflare AI",
+  baseURL: "https://api.cloudflare.com/client/v4/accounts/{accountId}/ai/v1",
+  vars: { accountId: "CLOUDFLARE_ACCOUNT_ID" },
+  keyEnv: "CLOUDFLARE_API_KEY",
+  signup: "https://dash.cloudflare.com/profile/api-tokens",
+  defaultModels: ["@cf/openai/gpt-oss-120b", "@cf/openai/gpt-oss-20b", "@cf/meta/llama-3.3-70b-instruct-fp8-fast"],
+  listsModels: false,
+  contextTokens: 8_000,
+});

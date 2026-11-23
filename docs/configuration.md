@@ -56,6 +56,10 @@ Editing `config.json` by hand still works. `ConfigManager`'s setters are what `/
 
 A brain channel only answers messages addressed to it (DM, @mention, reply). Ambient conversation-mode messages are dropped there, because a web-UI driver can't decide to stay quiet the way Claude does.
 
+## Free brain (`free`)
+
+How `/brain free` routes across free API tiers and web brains: `strategy`, `priority`, per-bucket target lists, the zero-shot classifier (`classifier.targets`, `suggestAt`), per-provider `models`/`limits`/`baseURL`/`enabled`, `footer` and `contextTokens`. All optional; invalid values fall back to the defaults with a warning. API keys never go in config.json — they're `<PROVIDER>_API_KEY` (and `_2`, `_3`… to pool more keys) in the data dir's `.env`. Full reference: [free-brain.md](free-brain.md).
+
 ## Pipelines (`pipelines`)
 
 Local command-line tools a brain may run through the `pipeline` tool (see `docs/tools.md`). Edited by hand, like `chatRoots`, because each one widens what a chat, and the remote endpoint if the tools are on its allowlist, can do on this machine. Read at startup: restart after editing.

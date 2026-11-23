@@ -45,7 +45,7 @@ export async function createContext(): Promise<{
   try {
     const envFile = await Bun.file(envPath).text();
     for (const line of envFile.split("\n")) {
-      const match = line.match(/^([A-Z_]+)=(.+)$/);
+      const match = line.match(/^([A-Z_][A-Z0-9_]*)=(.+)$/); // digits too: GROQ_API_KEY_2
       if (match) {
         const [, key, value] = match;
         const trimmed = value.trim();

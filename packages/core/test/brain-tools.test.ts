@@ -4,17 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pushBrainReply, registerBrain, unregisterBrain, type BrainMessage, type BrainReply } from "@choomfie/shared";
 import { brainTools } from "../lib/tools/brain-tools.ts";
-import { askBrain } from "../lib/ask-brain.ts";
+import { delegate } from "../lib/delegate.ts";
 import { inConversation } from "../lib/brain-router.ts";
 import { _resetTurns, callerIsOwner, recordTurn } from "../lib/caller.ts";
 import type { AppContext } from "../lib/types.ts";
 
-const askTool = brainTools.find((t) => t.definition.name === "ask_brain")!;
-const dataDir = mkdtempSync(join(tmpdir(), "ask-brain-"));
+const askTool = brainTools.find((t) => t.definition.name === "delegate")!;
+const dataDir = mkdtempSync(join(tmpdir(), "delegate-"));
 const ctx = { DATA_DIR: dataDir } as unknown as AppContext;
 const textOf = (r: Awaited<ReturnType<typeof askTool.handler>>) => (r.content[0] as { text: string }).text;
 const fake = (send: (m: BrainMessage) => Promise<BrainReply>) => registerBrain({ id: "fake", label: "Fake", send });
-const ask = (args: Record<string, unknown>) => askTool.handler({ brain: "fake", prompt: "go", chat_id: "c1", ...args }, ctx, { via: "local" });
+const ask = (args: Record<string, unknown>) => askTool.handler({ to: "fake", task: "go", chat_id: "c1", ...args }, ctx, { via: "local" });
 
 beforeEach(() => {
   _resetTurns();
@@ -44,8 +44,8 @@ describe("callerIsOwner", () => {
   });
 });
 
-describe("ask_brain", () => {
-  test("sends the prompt and files, saves what comes back under safe names", async () => {
+describe("delegate tool", () => {
+  test("sends the task and files, saves what comes back under safe names", async () => {
     let got: BrainMessage | null = null;
     fake(async (m) => {
       got = m;
@@ -75,7 +75,7 @@ describe("ask_brain", () => {
     expect(textOf(r)).toContain("owner only");
     expect(sent).toBe(false);
     // a daemon session is judged by its own chat, not by the chat_id it names
-    const s = await askTool.handler({ brain: "fake", prompt: "go", chat_id: "owner-dm" }, ctx, { via: "session", location: "c1" });
+    const s = await askTool.handler({ to: "fake", task: "go", chat_id: "owner-dm" }, ctx, { via: "session", location: "c1" });
     expect(s.isError).toBe(true);
   });
 
@@ -93,15 +93,15 @@ describe("ask_brain", () => {
 
   test("errors: unknown brain, claude, missing file, relative save_to", async () => {
     fake(async () => ({ text: "" }));
-    expect((await ask({ brain: "nope" })).isError).toBe(true);
-    expect((await ask({ brain: "claude" })).isError).toBe(true);
+    expect((await ask({ to: "nope" })).isError).toBe(true);
+    expect((await ask({ to: "claude" })).isError).toBe(true);
     expect((await ask({ files: ["/no/such.png"] })).isError).toBe(true);
     expect((await ask({ save_to: "rel/dir" })).isError).toBe(true);
   });
 });
 
-describe("askBrain", () => {
-  const req = { to: "fake", prompt: "go", conversation: "t1", saveTo: join(dataDir, "late"), from: "test" };
+describe("delegate()", () => {
+  const req = { to: "fake", task: "go", conversation: "t1", saveTo: join(dataDir, "late"), from: "test" };
 
   test("waits for work that went to the background and returns its files", async () => {
     fake(async () => {
@@ -111,7 +111,7 @@ describe("askBrain", () => {
       }, 10);
       return { text: "started", background: true };
     });
-    const r = await askBrain({ ...req, waitMs: 2000 }, ctx);
+    const r = await delegate({ ...req, waitMs: 2000 }, ctx);
     expect(r.text).toBe("started\n\nstep 2\n\ndone");
     expect(r.files).toEqual([join(dataDir, "late", "v.png")]);
     expect(r.stillWorking).toBe(false);
@@ -119,7 +119,7 @@ describe("askBrain", () => {
 
   test("stops waiting at the deadline and says it's still working", async () => {
     fake(async () => ({ text: "started", background: true }));
-    const r = await askBrain({ ...req, waitMs: 20 }, ctx);
+    const r = await delegate({ ...req, waitMs: 20 }, ctx);
     expect(r.stillWorking).toBe(true);
   });
 
@@ -128,7 +128,7 @@ describe("askBrain", () => {
     fake(async () => (order.push("ask"), { text: "" }));
     let release!: () => void;
     const busy = inConversation("t1", () => new Promise<void>((r) => (release = () => (order.push("message"), r()))));
-    const asked = askBrain({ ...req, waitMs: 100 }, ctx);
+    const asked = delegate({ ...req, waitMs: 100 }, ctx);
     await Bun.sleep(10);
     expect(order).toEqual([]);
     release();

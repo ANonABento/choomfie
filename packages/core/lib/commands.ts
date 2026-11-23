@@ -26,6 +26,7 @@ import { formatContextUsage, isDaemonMode, readDaemonStatus } from "./daemon-sta
 import { McpProxy } from "./mcp-proxy.ts";
 import { formatDuration, fromSQLiteDatetime } from "./time.ts";
 import { isOwner, requireOwner } from "./handlers/shared.ts";
+import { brainModelReply } from "./handlers/brain-model.ts";
 import { buildGhArgs, runGh } from "./handlers/github.ts";
 import { discoverPlugins } from "./plugins.ts";
 import {
@@ -720,7 +721,17 @@ registerCommand("model", {
       o.setName("everywhere").setDescription("Change the default for every chat instead of this one")
     )
     .toJSON(),
-  autocomplete: async (interaction) => {
+  autocomplete: async (interaction, ctx) => {
+    const here = brainAt(interaction, ctx);
+    const brain = here === CLAUDE_BRAIN ? undefined : getBrain(here);
+    if (brain) {
+      const q = interaction.options.getFocused().toLowerCase();
+      const models = (brain.models?.() ?? []).filter((m) => m.id.toLowerCase().includes(q)).slice(0, AUTOCOMPLETE_LIMIT);
+      await interaction.respond(
+        models.map((m) => ({ name: `${m.id}${m.description ? ` — ${m.description}` : ""}`.slice(0, 100), value: m.id.slice(0, 100) }))
+      );
+      return;
+    }
     const setting = findSetting(MODEL_SETTING_KEY)!;
     await interaction.respond(
       suggestValues(setting, interaction.options.getFocused()).map((value) => ({
@@ -736,6 +747,13 @@ registerCommand("model", {
     const requested = interaction.options.getString("model");
     const fallback = setting.read(ctx.config);
     const reply = (content: string) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
+
+    // Another brain here: its own models, per chat (`everywhere` is Claude's default).
+    const here = brainAt(interaction, ctx);
+    if (here !== CLAUDE_BRAIN && !interaction.options.getBoolean("everywhere")) {
+      await reply(brainModelReply(ctx, interaction.channelId, here, requested));
+      return;
+    }
 
     // A Claude chat with its own session here?
     const perChat =

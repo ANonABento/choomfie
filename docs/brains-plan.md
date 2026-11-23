@@ -1,0 +1,173 @@
+# Brains: routing, context and delegation
+
+How brains pick models, keep context, switch and call each other: the decisions, and what's left. How to use the free brain is in [free-brain.md](free-brain.md); the checklist lives in [roadmap.md](roadmap.md) Phase 15.5.
+
+## Three commands, three questions
+
+| Command | Answers | Default |
+|---|---|---|
+| `/brain` | which system answers here: `claude`, `waymond`, `free`, `groq`, … (later more web brains, Codex/OpenCode) | — |
+| `/mode` | what kind of work: code, plan, cad, research | plain chat |
+| `/model` | which model inside that brain (`Brain.models()`) | Claude: configured model · a provider: its best free model · free: `auto` |
+
+Routing buckets (chat, quality, code, …) are internal to `free`; they are not modes.
+
+## Where context lives
+
+Choomfie's chat store (`chats` / `chat_bindings`) is the **index** for every brain: one chat per (location, brain), with its title, mode, model and a pointer to the real conversation.
+
+| Brain | Conversation stored in | Pointer | `/compact` |
+|---|---|---|---|
+| Claude | Agent SDK session on disk | session id | summary → fresh session seeded with it (auto at ~120k / 80 turns) |
+| Waymond (web) | the site (Ambition) | site conversation id | nothing — the site manages it |
+| free / a provider brain | `<data>/apibrain/transcripts.db`, keyed by chat id | — | rolling summary past 70% of the budget, or now with `/compact` |
+| free, web member | the site, plus a text copy in free's transcript | site conversation id | as Waymond |
+
+`/clear` starts a new chat id for (location, brain); `/resume` re-binds an old one. Nothing is deleted.
+
+**The Discord thread is the one transcript every brain writes to.** That's what lets a handoff work without any backend exporting its history.
+
+## Decisions
+
+1. **Routing: API models float, stateful members lock** (decided). Alternatives weighed:
+   - re-route every message;
+   - a sticky threshold;
+   - route once and lock;
+   - start small and step up;
+   - suggest but don't switch.
+
+   - **Why this one:** switching between API models loses nothing (one shared transcript), so each message gets the best one. Switching into or out of a web brain loses its work state, so that only happens:
+     - on the first message;
+     - through a member mode;
+     - or by your click ("Hand this to Waymond").
+   - **Once a web member has answered, it holds the chat** (`chat.model`) until `/model auto`.
+   - **A holding member that fails never moves silently:** Retry · Answer with free models.
+   - **One-turn override:** an image the pinned model can't see goes to a vision model.
+2. **`/mode` = work modes only** (decided). In `free` it lists the web members' modes; picking one routes to that member.
+3. **`/model` belongs to the brain** (decided). Each brain lists its own models; the pick is stored on the chat.
+   - Provider brains (`/brain openrouter`) stay, with `/model` over their free models.
+   - `free` offers `auto`, any member, or `member:model`.
+4. **`/compact` for any brain** with `Brain.compact()`.
+5. **`/brain <id>` carries context** (decided, built). The new brain gets this location's latest Discord messages as a one-time chat note with its next message (`lib/handoff.ts`). `carry:false` skips it; `/clear` starts fresh.
+   - **Later:** a cheap-model summary instead of the raw excerpt, or Claude's compaction summary when the old brain is Claude.
+6. **`ask_brain` → `delegate`** (decided, built). `delegate(to, task, chat_id, …)`.
+
+## Parked: modes rework
+
+Park until the multi-brain and free systems are working and tested. Today a mode is a fixed prompt frame added to every message, which risks context poisoning: it can pull a model off what it's good at. Direction:
+
+- **Global but soft:** a mode works for any brain. It's guidance the model can draw on, not a frame forced onto every turn.
+- **Retrieved, not fixed:** mode know-how lives in a store with embeddings (snippets, checklists, examples). Only what's relevant to this message is pulled in. This shares a backend with the memory rework.
+- **Benchmarked:** before a mode ships, it's measured against a baseline. Each mode must beat no-mode on its own tasks without regressing general ability. It would use the same benchmark harness as model ranking (proposed, not built yet).
+
+## Proposed: no hardcoded models — discovery and ranking
+
+**Today:**
+- Each provider's live `/models` list is re-read every 6h, and only free models are kept.
+- A configured model that disappears is skipped. If all of them go, the provider uses its largest free listed models.
+- **What doesn't happen:** a new good model is never picked up on its own. Which model is best for which kind of message is a hand-written list in `buckets.ts`, checked on build day (Nov 2026) against the providers' lists and docs. It's checked for existence, not for quality.
+
+**Proposed:**
+- **Buckets name needs, not models:** fast · strong · sees images · biggest context.
+- **Candidates come from the live lists.** Traits come from the catalog (context, vision, price).
+- **The order comes from evidence.** Config can still pin a model.
+
+**What counts as evidence:**
+
+| Signal | Source | Measures | Noise |
+|---|---|---|---|
+| Errors, latency, limit hits | every call (already recorded by health and quota) | reliability, speed | low |
+| Probe benchmark | `apibrain doctor --rank` and a weekly run: a few prompts per bucket with checkable answers (exact answers, code that must pass a test, JSON that must parse), plus a coherence probe (a short multi-turn chat that must stay consistent) | capability, and coherence over turns | low, but narrow |
+| Reactions | 👍 / 👎 on a bot reply (Discord-native, one click) | your judgment | low per vote, sparse |
+| Implicit | **Bad:** "Try a bigger model", Retry, Hand off, `/stop`, a quick rephrase of the same ask, "no / wrong / that didn't work". **Good:** the chat moves on, "thanks", a plan task whose CI passed | outcome | high: harder tasks take more turns anyway |
+
+**How the evidence becomes an order:**
+- Scores are per **model × bucket**, compared only within a bucket, so a hard code task isn't measured against small talk.
+- A bandit (Thompson sampling) keeps mostly using the best and sometimes tries a newcomer, so a new free model earns its place without anyone editing a list.
+- The probe benchmark gives a new model a starting score. Real use refines it.
+- **Capability vs coherence are kept as separate scores:**
+  - **Capability:** solves the task. Probes, CI results, the 👍/👎 that follows.
+  - **Coherence:** stays consistent with the persona and earlier turns. The multi-turn probe, plus a cheap grader over a few sampled real chats now and then.
+
+  A model can be strong at one-shot answers and still drift over a conversation.
+- **Improves with use:** scores and your reactions live in the data dir. Later they join the memory layer, so preferences ("you like short answers", "this model's code needs fixing for you") travel with you. That needs a separate discussion.
+
+## Proposed: hand off to any agent
+
+Instead of "Hand this to Waymond":
+- **Hand off to…** offers one button per agent that could take the job, and you choose.
+- **Agents declare what they can do** (`Brain.capabilities`: `agentic`, `image-gen`, `web-search`, …), so no bucket names a brain.
+- **Today's lock applies to whoever you pick.** It holds the chat until `/model auto`, and if it fails you get Retry or Answer with free models.
+
+## The classifier
+
+- **Default:** a small cloud model (Groq `llama-3.1-8b-instant`, then `gpt-oss-20b`, Gemini Flash-Lite, Cloudflare, Ollama if on). If none answers within 2.5s, local keyword rules.
+- **Cost:** each call spends the classifier provider's daily requests, once per message (messages of three words or fewer skip it).
+- **Google has no dedicated classifier model.** Options:
+  - Flash-Lite as a zero-shot classifier (reported ~500 RPD free);
+  - **`gemini-embedding`** (reported ~1,000 RPD free) as an embeddings classifier: embed each bucket's examples once, then per message one embedding and a nearest match. That's cheaper, faster and steadier than asking a model.
+- **Fully local:** the same embeddings classifier on Ollama (`nomic-embed-text` or similar, tens of ms on this Mac). This is the likely default once built. Zero-shot stays as the tie-breaker for low-confidence matches.
+
+## Providers
+
+**In:** OpenRouter, Groq, Gemini, NVIDIA NIM, SambaNova, Cloudflare Workers AI, Ollama.
+
+**To add** (one file each, after checking each live):
+- **Mistral free mode** (limits only visible after login);
+- **Cohere trial** (1,000 calls a month: a spare);
+- **LM Studio** (local, OpenAI-compatible, like Ollama);
+- **Z.ai GLM Flash** (not in the research pass; verify first).
+
+**Not standing free tiers** (as of Nov 2026):
+- **Cerebras:** a $5, 30-day credit after adding a card.
+- **GitHub Models:** retired 30 July 2026.
+- **Hugging Face:** no included inference credits for free users.
+- **DeepSeek API:** paid only.
+- **Fireworks, Together, DeepInfra:** one-time signup credit.
+- **Amazon Kiro:** IDE-only, and bans automation.
+
+**Terms that matter for a bot answering other people:**
+- NVIDIA's trial forbids production use.
+- Gemini's unpaid tier trains on prompts, can't serve users in the EEA, UK or Switzerland, and requires 18+.
+
+Both are in [free-brain.md](free-brain.md#getting-keys).
+
+**Key setup:** today it's a table in free-brain.md plus `.env.example`.
+- **Next:** `bun run apibrain keys`. It lists what's set, opens each signup page, takes the key without echoing it, writes the data dir `.env` atomically, then runs the doctor.
+- **Not through Discord:** a pasted key would pass through Discord's servers.
+
+## Delegation: one agent asking another
+
+Different from routing: routing picks **who answers the user**; delegation is **a tool an agent calls mid-task**.
+
+- **Exists:** `delegate` (`lib/tools/brain-tools.ts`, owner only). Claude can hand Waymond an image job and get the files back. Any registered brain works, `free` included.
+- **Next: capabilities.** Optional `Brain.capabilities` (`image-gen`, `web-search`, `code-exec`, `vision`, `long-context`). `delegate`'s description and errors list who can do what, so Claude picks the right brain without being told.
+- **Next: Claude offloads cheap work to free.** `delegate to:free` (optionally `model:`) for bulk summarising, translation, first drafts. That saves Claude usage.
+- **Escalation, small → big:**
+  - **Hard failures** (too large, errors, an unreadable reply) already fail over inside `free`.
+  - **Quality failures** ("the fix didn't work") can't be detected reliably. They're the user's call: a `Try a bigger model` button under API answers, re-running that turn on a bigger target with the same transcript.
+- **Not planned:** free API models get no tools. They stay cheap chat endpoints; agentic work goes to Waymond, a harness, or Claude.
+
+## Work list
+
+**Done:**
+- [x] Routing policy (decision 1), with the Hand-to, Retry and Answer-with-free-models buttons.
+- [x] `/mode` in free = members' work modes.
+- [x] `/model` per chat for any brain.
+- [x] `/compact` for any brain with `compact()`.
+- [x] Context carried on `/brain` switch.
+- [x] `delegate` rename.
+
+**Next (in this order):**
+- [ ] `bun run apibrain keys` setup command, then test the free brain for real (needs keys).
+- [ ] "Hand off to…" any capable agent, via `Brain.capabilities`; `delegate` lists them too; `delegate` → free with `model:`.
+- [ ] Model discovery and ranking: needs-based buckets, probe benchmark (`doctor --rank`), health and latency stats, 👍/👎 and implicit signals, bandit ordering.
+- [ ] Embeddings classifier (Ollama local, Gemini embedding as the cloud option).
+- [ ] Compaction: big-context models get the original turns instead of the summary; structured summary (goals, decisions, facts, open questions, code and numbers verbatim); a real token count.
+- [ ] More providers: Mistral free, Cohere trial, LM Studio, (Z.ai after checking).
+- [ ] `Try a bigger model` button.
+- [ ] Handoff summary by a cheap model (or Claude's compaction summary) instead of the raw excerpt.
+- [ ] Web-brain compact: ask the site for a summary, open a new site conversation seeded with it.
+- [ ] Harness kit (Codex / OpenCode / Gemini CLI as brains; T3 Code's agent wrappers as reference), then as `agentic` members.
+
+**Already on the roadmap:** more web members, multi-profile web brains, always-on mode, embeddings classifier, persistent cooldowns, non-LLM freemium.

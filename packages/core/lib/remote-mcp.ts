@@ -254,7 +254,7 @@ export function startLocalMcp(
     hostname: "127.0.0.1",
     port: 0,
     fetch: (req, server) => {
-      // Responses are JSON, sent when the tool finishes: a long tool (ask_brain)
+      // Responses are JSON, sent when the tool finishes: a long tool (delegate)
       // is silent for minutes, and Bun would close it after 10 s idle.
       server.timeout(req, 0);
       return handleMcpRequest(req, auth, (caller) =>

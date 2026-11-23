@@ -25,7 +25,7 @@ export interface ChatRecord {
   title: string;
   /** Working directory (Claude chats only). */
   cwd: string | null;
-  /** Model for this chat (Claude chats only); null = the configured default. */
+  /** Model for this chat (`/model`: Claude's, or one of the brain's `models()`); null = the default. */
   model: string | null;
   /** Working mode for this chat (a web brain's `modes`: code, cad, …); null = plain chat. */
   mode: string | null;
@@ -50,6 +50,10 @@ export interface ChatsApi {
   touch(chatId: string): void;
   /** Start a fresh chat here and bind it; the previous one stays listable. */
   start(locationId: string, brain: string, title?: string): ChatRecord;
+  /** Put a chat in one of its brain's modes (null = none). */
+  setMode?(chatId: string, mode: string | null): void;
+  /** Put a chat on one of its brain's models (null = the brain chooses). */
+  setModel?(chatId: string, model: string | null): void;
   /** The pipeline this location is on (`/pipeline`), if any. */
   pipelineAt?(locationId: string): { pipeline: string } | null;
 }

@@ -651,7 +651,7 @@ export function runningWork(): string[] {
 
 /**
  * Run `job` when the conversation `chatKey` is free: Discord messages and
- * askBrain share the queue, so nothing talks over a reply in progress.
+ * delegate share the queue, so nothing talks over a reply in progress.
  */
 export function inConversation<T>(chatKey: string, job: () => Promise<T>): Promise<T> {
   const run = (queues.get(chatKey) ?? Promise.resolve()).then(job);

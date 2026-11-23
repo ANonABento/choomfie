@@ -180,6 +180,14 @@ export interface BrainMode {
   readsRepo?: boolean;
 }
 
+/** A model a brain can run a chat on (`/model`). */
+export interface BrainModel {
+  /** What `/model` stores on the chat, e.g. `openai/gpt-oss-120b`, or `groq:openai/gpt-oss-120b` in free. */
+  id: string;
+  /** One line for autocomplete. */
+  description?: string;
+}
+
 export interface Brain {
   /** Stable id used in config and `/brain <name>`. Lowercase, no spaces. */
   id: string;
@@ -196,6 +204,22 @@ export interface Brain {
   stop?(chatKey: string): Promise<boolean>;
   /** Approve or decline a pending approval. Returns a short status for the card. */
   resolveApproval?(chatKey: string, approvalId: string, approve: boolean): Promise<string>;
+  /** A few lines on how it stands (providers, quota, cooldowns), shown by `/brain`. */
+  status?(): Promise<string[]>;
+  /**
+   * Models a chat can be put on (`/model`), best first. In memory and
+   * synchronous: autocomplete calls it. The pick is the chat's `model`;
+   * null means the brain chooses. Absent: the brain has no choice to offer.
+   */
+  models?(): BrainModel[];
+  /** Summarize this chat's context now (`/compact`). Returns a short status line. */
+  compact?(chatKey: string): Promise<string>;
+}
+
+/** Brains only ever see one account, so say who's talking when it isn't the owner. */
+export function framePrompt(content: string, meta: Record<string, string>): string {
+  const from = meta.role === "owner" ? "" : `[Discord message from ${meta.user ?? "someone"}]\n`;
+  return `${from}${content}`;
 }
 
 /**
@@ -211,7 +235,7 @@ export function setBrainPoster(fn: BrainPoster): void {
 }
 
 /**
- * Someone waiting for a conversation's late result (askBrain after a reply
+ * Someone waiting for a conversation's  late result (delegate after a reply
  * that went to the background). It takes the result instead of the chat.
  */
 const lateWaiters = new Map<string, (reply: BrainReply) => void>();

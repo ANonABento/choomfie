@@ -71,9 +71,28 @@ import { activeJobs } from "../pipelines/index.ts";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { requireOwner } from "./shared.ts";
+import { carryContext } from "../handoff.ts";
 
 function label(id: string): string {
   return id === CLAUDE_BRAIN ? "Claude" : (getBrain(id)?.label ?? `${id} (not loaded)`);
+}
+
+/** The brain's own status lines for `/brain`, or none. Bounded: the interaction has 3 seconds. */
+export async function brainStatus(id: string, timeoutMs = 1_500): Promise<string[]> {
+  const brain = id === CLAUDE_BRAIN ? undefined : getBrain(id);
+  if (!brain?.status) return [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const lines = await Promise.race([
+      brain.status(),
+      new Promise<string[]>((resolve) => (timer = setTimeout(() => resolve([]), timeoutMs))),
+    ]);
+    return lines.length ? ["", ...lines] : [];
+  } catch (e) {
+    return ["", `-# ${brain.label} status unavailable: ${e instanceof Error ? e.message : String(e)}`];
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 registerCommand("brain", {
@@ -91,6 +110,11 @@ registerCommand("brain", {
         o
           .setName("threads")
           .setDescription("Server channels: open a thread for each @mention (default on)")
+      )
+      .addBooleanOption((o) =>
+        o
+          .setName("carry")
+          .setDescription("Give the new brain the conversation so far (default on; /clear starts fresh)")
       )
       .toJSON(),
     // Usable in group DMs (user install), so /choomfie there can be pointed at a brain.
@@ -154,7 +178,9 @@ registerCommand("brain", {
             : `It answers everyone on your allowlist. To keep it to yourself: \`/config setting:brainAccess value:owner\``,
         `Loaded brains: ${listBrainIds().map((b) => `\`${b}\``).join(", ")} · \`/brain <name>\` to switch`,
       ].filter(Boolean);
-      await reply(lines.join("\n"));
+      // A brain's own report (providers, quota, cooldowns). In memory, so it's quick; never let it block the reply.
+      const status = await brainStatus(current);
+      await reply([...lines, ...status].join("\n").slice(0, 2000));
       return;
     }
 
@@ -167,6 +193,8 @@ registerCommand("brain", {
     ctx.config.setChannelBrain(channelId, wanted === CLAUDE_BRAIN ? undefined : wanted);
     const now = resolveBrainId(channelId, parentId, (id) => ctx.config.getChannelBrain(id));
     const name = label(now);
+    // Mid-conversation, the new brain gets what was said so far (read after replying: the interaction has 3s).
+    const carry = now !== current && interaction.options.getBoolean("carry") !== false;
     await interaction.reply(
       now === CLAUDE_BRAIN
         ? "This channel is answered by **Claude**."
@@ -176,6 +204,9 @@ registerCommand("brain", {
           : `**${name}** answers everyone on your allowlist in this channel. ` +
             "To keep it to yourself: `/config setting:brainAccess value:owner`"
     );
+    if (carry && (await carryContext(interaction.channel, channelId, label(current), name))) {
+      await interaction.followUp({ content: `-# ${name} gets the conversation so far with your next message. \`/clear\` to start fresh instead.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+    }
   },
 });
 

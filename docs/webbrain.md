@@ -45,6 +45,10 @@ The `new-web-brain` skill (`.claude/skills/new-web-brain/`) walks a Claude Code 
 
 A site that kept state in `<data>/<id>/` before the kit (Waymond) has it moved to `<data>/webbrain/<id>/` on first start.
 
+## In the free router
+
+A web brain can also be one of the free brain's members: name its id in a bucket's targets (`free.buckets.agentic: ["<id>", "@code"]`) and `/brain free` hands it the messages that bucket gets, with a recap of turns other models answered. See [free-brain.md](free-brain.md).
+
 ## Caveat
 
 Automating a site's web UI is usually against its terms, and an account can be flagged whatever the tooling. Patchright and CloakBrowser lower detection, they don't remove it. Where a site has an official API, use that instead.

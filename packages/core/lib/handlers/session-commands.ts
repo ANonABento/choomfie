@@ -12,7 +12,8 @@
  * - `/mode [name]` puts this chat in one of its brain's modes (Waymond: code,
  *   plan, cad, 3d), or shows them; `off` goes back to plain chat.
  * - `/compact` (Claude) summarises this chat's session and carries on fresh
- *   with the summary. Other brains manage their own context.
+ *   with the summary. A brain with `compact()` (free, API providers) folds its
+ *   older turns into its summary; web brains manage their own context.
  *
  * Claude needs the daemon, which runs one session per location. In foreground
  * mode the session belongs to the `claude` CLI in your terminal and there is
@@ -73,11 +74,21 @@ registerCommand("compact", {
     if (await requireOwner(interaction, ctx)) return;
     const brain = brainAt(interaction, ctx);
     if (brain !== CLAUDE_BRAIN) {
-      return ephemeral(
-        interaction,
-        `This channel is answered by **${brainName(brain)}**, which manages its own context — nothing to compact. ` +
-          "`/clear` starts a fresh conversation with it here."
-      );
+      const own = getBrain(brain);
+      if (!own?.compact) {
+        return ephemeral(
+          interaction,
+          `This channel is answered by **${brainName(brain)}**, which manages its own context — nothing to compact. ` +
+            "`/clear` starts a fresh conversation with it here."
+        );
+      }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        await interaction.editReply(await own.compact(interaction.channelId));
+      } catch (e) {
+        await interaction.editReply(`Couldn't compact: ${e instanceof Error ? e.message : String(e)}`.slice(0, 2000));
+      }
+      return;
     }
     if (!(await isDaemonMode(ctx.DATA_DIR))) return ephemeral(interaction, FOREGROUND_NOTICE);
 

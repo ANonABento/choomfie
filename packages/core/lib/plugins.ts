@@ -11,6 +11,7 @@ const PLUGIN_PACKAGES: Record<string, string> = {
   tutor: "@choomfie/tutor",
   socials: "@choomfie/socials",
   waymond: "@choomfie/waymond",
+  free: "@choomfie/free",
 };
 
 export interface PluginConfigSource {

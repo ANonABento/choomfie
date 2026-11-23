@@ -12,6 +12,7 @@ import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
   errorMessage,
+  framePrompt,
   parseTaskList,
   pushBrainReply,
   registerBrain,
@@ -59,11 +60,7 @@ async function channelFor(ctx: PluginContext, chatKey: string): Promise<StatusCh
   }
 }
 
-/** The site only ever sees one account, so say who's talking when it isn't the owner. */
-export function framePrompt(content: string, meta: Record<string, string>): string {
-  const from = meta.role === "owner" ? "" : `[Discord message from ${meta.user ?? "someone"}]\n`;
-  return `${from}${content}`;
-}
+export { framePrompt };
 
 /** Discord inbox files are named `<ts>_<rand>_<name>`; give the site the original name. */
 export function originalName(inboxPath: string): string {
