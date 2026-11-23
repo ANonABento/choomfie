@@ -60,6 +60,9 @@ function onlyKey(env: Env, keyEnv: string, value: string): Env {
   return { ...out, [keyEnv]: value };
 }
 
+/** Failures that say nothing about the key or model: the router just tries the next target. */
+const TRANSIENT = new Set(["server", "timeout", "rate_limit"]);
+
 async function checkProvider(spec: ApiProviderSpec, env: Env, settings: Record<string, unknown> | undefined): Promise<boolean> {
   const overrides = (settings ?? {}) as ConstructorParameters<typeof ApiMember>[1]["overrides"];
   const probe = new ApiMember(spec, { env, health: new Health(), quota: new Quota(), overrides });
@@ -85,9 +88,11 @@ async function checkProvider(spec: ApiProviderSpec, env: Env, settings: Record<s
         ok &&= pong;
         console.error(`  ${pong ? "✅" : "❌"} key ${key.n} · ${model} · ${((Date.now() - started) / 1000).toFixed(1)}s${pong ? "" : ` · said ${JSON.stringify(r.text.slice(0, 80))}`}`);
       } catch (e) {
-        ok = false;
+        // Busy or rate-limited is the provider's moment, not your setup: warn, don't fail.
+        const passing = e instanceof ProviderError && TRANSIENT.has(e.kind);
+        ok &&= passing;
         const kind = e instanceof ProviderError ? `${e.kind}: ` : "";
-        console.error(`  ❌ key ${key.n} · ${model} · ${kind}${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`);
+        console.error(`  ${passing ? "⚠️" : "❌"} key ${key.n} · ${model} · ${kind}${(e instanceof Error ? e.message : String(e)).slice(0, 160)}${passing ? " (temporary — try again later)" : ""}`);
       }
     }
   }
