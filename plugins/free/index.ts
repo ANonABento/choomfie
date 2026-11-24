@@ -87,7 +87,7 @@ export function setupFree(
                 signal,
                 waitMs: (t) => members.get(t.member)!.waitMs(t.model),
                 attempt: async (t) =>
-                  (await members.get(t.member)!.complete(messages, { model: t.model, maxTokens: 300, temperature: 0, signal, timeoutMs: 2_500, purpose: "classify" })).text,
+                  (await members.get(t.member)!.complete(messages, { model: t.model, maxTokens: 300, temperature: 0, signal, timeoutMs: 2_500, briefThinking: true, purpose: "classify" })).text,
               })
             ).value,
         })

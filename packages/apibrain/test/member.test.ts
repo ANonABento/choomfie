@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Availability } from "../availability.ts";
 import { Health } from "../health.ts";
 import { discoverKeys } from "../keys.ts";
 import { ApiMember } from "../member.ts";
@@ -106,5 +107,50 @@ describe("ApiMember.complete", () => {
     await m.refreshCatalog(true);
     expect(m.models()).toEqual(["y-3.1-flash:free", "x-70b:free", "x-8b:free"]);
     expect(m.ranked("tiny")[0].id).toBe("x-8b:free");
+  });
+});
+
+describe("models that think first", () => {
+  const spec2 = defineProvider({ ...spec, limits: {} });
+  const reasoning = (text: string) => ok(text, { choices: [{ message: { content: text, reasoning: "hmm" } }], usage: { prompt_tokens: 10, completion_tokens: 40, completion_tokens_details: { reasoning_tokens: 30 } } });
+
+  test("are remembered, then asked to keep it brief on one-line calls", async () => {
+    const f = fakeFetch(() => reasoning("ok"));
+    const availability = new Availability();
+    const m = new ApiMember(spec2, { env: { ACME_API_KEY: "k" }, health: new Health(), quota: new Quota(), fetch: f, availability });
+    await m.complete(msgs, { model: "big", briefThinking: true });
+    expect(f.calls[0].body?.reasoning_effort).toBeUndefined(); // not known yet
+    expect(availability.get("acme:big")?.reasons).toBe(true);
+    await m.complete(msgs, { model: "big", briefThinking: true });
+    expect(f.calls[1].body?.reasoning_effort).toBe("low");
+    await m.complete(msgs, { model: "big" });
+    expect(f.calls[2].body?.reasoning_effort).toBeUndefined(); // only when asked
+  });
+
+  test("a model that refuses the field is asked again without it, and never sent it again", async () => {
+    const f = fakeFetch((c) => (c.body?.reasoning_effort ? fail(400, "Model 'big' does not support reasoning.") : reasoning("ok")));
+    const availability = new Availability();
+    availability.note("acme:big", { reasons: true });
+    const m = new ApiMember(spec2, { env: { ACME_API_KEY: "k" }, health: new Health(), quota: new Quota(), fetch: f, availability });
+    expect((await m.complete(msgs, { model: "big", briefThinking: true })).text).toBe("ok");
+    await m.complete(msgs, { model: "big", briefThinking: true });
+    expect(f.calls.map((c) => c.body?.reasoning_effort)).toEqual(["low", undefined, undefined]);
+  });
+
+  test("an answer that was all thinking is a failure, except for a probe", async () => {
+    const empty = () => ok("", { choices: [{ message: { content: null, reasoning: "1. Analyze the request" } }] });
+    const m = new ApiMember(spec2, { env: { ACME_API_KEY: "k" }, health: new Health(), quota: new Quota(), fetch: fakeFetch(empty) });
+    await expect(m.complete(msgs, { model: "big" })).rejects.toThrow("thinking");
+    expect((await m.complete(msgs, { model: "small", purpose: "probe" })).text).toBe("");
+  });
+
+  test("rank below plain models for tiny jobs", () => {
+    const availability = new Availability();
+    const m = new ApiMember(defineProvider({ ...spec2, fallbackModels: ["think-20b", "plain-27b"] }), { env: { ACME_API_KEY: "k" }, health: new Health(), quota: new Quota(), fetch: fakeFetch(() => ok("x")), availability });
+    availability.mark("acme:think-20b", true);
+    availability.mark("acme:plain-27b", true);
+    expect(m.ranked("tiny")[0].id).toBe("think-20b");
+    availability.note("acme:think-20b", { reasons: true });
+    expect(m.ranked("tiny")[0].id).toBe("plain-27b");
   });
 });

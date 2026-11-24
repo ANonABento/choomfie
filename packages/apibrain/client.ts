@@ -28,6 +28,8 @@ export interface ChatRequest {
   signal?: AbortSignal;
   /** Give up after this long. Default 120s (big free models can be slow). */
   timeoutMs?: number;
+  /** `reasoning_effort`, for a model known to reason (others may refuse the field). */
+  reasoningEffort?: "low" | "medium" | "high";
 }
 
 /** What the provider said about its limits on this response. All optional: providers differ. */
@@ -46,6 +48,8 @@ export interface ChatResponse {
   model: string;
   usage?: { prompt: number; completion: number };
   rate: RateSnapshot;
+  /** It thought before answering (reasoning tokens, or a `reasoning` field): it spends tokens nobody sees. */
+  reasoned?: boolean;
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -120,7 +124,14 @@ export function classifyFailure(status: number, body: string, rate: RateSnapshot
 
 /** Reasoning models put their thinking inline on some providers: the reply is what's after it. */
 export function stripThinking(text: string): string {
-  return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  let t = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  // Only the closing tag (the opening one is in the model's chat template): the thinking is everything before it.
+  const close = t.search(/<\/think>/i);
+  if (close >= 0) t = t.slice(close + "</think>".length);
+  // Cut off mid-thought: nothing after the opening tag is an answer.
+  const open = t.search(/<think>/i);
+  if (open >= 0) t = t.slice(0, open);
+  return t.trim();
 }
 
 function linkedSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
@@ -157,6 +168,7 @@ export async function chatCompletion(req: ChatRequest, fetchImpl: FetchLike = fe
         stream: false,
         ...(req.maxTokens ? { max_tokens: req.maxTokens } : {}),
         ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+        ...(req.reasoningEffort ? { reasoning_effort: req.reasoningEffort } : {}),
       }),
     },
     signal,
@@ -167,8 +179,8 @@ export async function chatCompletion(req: ChatRequest, fetchImpl: FetchLike = fe
   if (!res.ok) throw classifyFailure(res.status, body, rate);
   let data: {
     model?: string;
-    choices?: { message?: { content?: string | null } }[];
-    usage?: { prompt_tokens?: number; completion_tokens?: number };
+    choices?: { message?: { content?: string | null; reasoning?: string | null; reasoning_content?: string | null } }[];
+    usage?: { prompt_tokens?: number; completion_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } };
     error?: { message?: string; code?: number | string };
   };
   try {
@@ -178,13 +190,17 @@ export async function chatCompletion(req: ChatRequest, fetchImpl: FetchLike = fe
   }
   // Some providers (OpenRouter) report an upstream failure inside a 200.
   if (data.error) throw classifyFailure(Number(data.error.code) || 502, data.error.message ?? JSON.stringify(data.error), rate);
-  const content = data.choices?.[0]?.message?.content;
-  if (typeof content !== "string") throw new ProviderError("server", "answer had no text");
+  const message = data.choices?.[0]?.message;
+  const thought = message?.reasoning || message?.reasoning_content;
+  const reasoned = !!thought || (data.usage?.completion_tokens_details?.reasoning_tokens ?? 0) > 0 || /<think>/i.test(message?.content ?? "");
+  // A reasoning model that spent the whole budget thinking answers with no text: it works, the budget was short.
+  if (typeof message?.content !== "string" && !thought) throw new ProviderError("server", "answer had no text");
   return {
-    text: stripThinking(content),
+    text: stripThinking(message?.content ?? ""),
     model: data.model ?? req.model,
     ...(data.usage ? { usage: { prompt: data.usage.prompt_tokens ?? 0, completion: data.usage.completion_tokens ?? 0 } } : {}),
     rate,
+    ...(reasoned ? { reasoned } : {}),
   };
 }
 

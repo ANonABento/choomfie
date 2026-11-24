@@ -137,6 +137,8 @@ export interface ScoreContext {
   latencyMs?: number;
   /** The input budget the provider gets (for `long`). */
   contextTokens: number;
+  /** Seen thinking before answering: hidden tokens and time on every call. */
+  reasons?: boolean;
 }
 
 const log2 = Math.log2;
@@ -153,7 +155,8 @@ export function score(m: ModelTraits, need: Need, c: ScoreContext): number {
       return Math.min(strength, log2(80)) - (m.params > 200 ? 1 : 0) + speed - (c.scarce ? 2 : 0);
     case "tiny":
       // The classifier and summaries: small, quick, plentiful. Not so small it can't follow a format.
-      return -Math.abs(log2(Math.max(1, m.params)) - log2(20)) + speed * 2 - (c.scarce ? 4 : 0) - (m.params < 3 ? 2 : 0);
+      // A one-line JSON answer gains nothing from thinking first (gpt-oss-20b: 74 tokens to Qwen's 13).
+      return -Math.abs(log2(Math.max(1, m.params)) - log2(20)) + speed * 2 - (c.scarce ? 4 : 0) - (m.params < 3 ? 2 : 0) - (c.reasons ? 1 : 0);
     case "vision":
       return m.vision ? strength + speed * 0.3 - (c.scarce ? 0.5 : 0) : -Infinity;
     case "long":

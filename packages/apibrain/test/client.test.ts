@@ -94,4 +94,6 @@ test("listModels reads OpenAI and Gemini shapes", async () => {
 
 test("stripThinking", () => {
   expect(stripThinking("<think>\nplan\n</think>\n\nAnswer")).toBe("Answer");
+  expect(stripThinking("plan, plan\n</think>\nAnswer")).toBe("Answer");
+  expect(stripThinking("Answer<think>cut off mid-thou")).toBe("Answer");
 });

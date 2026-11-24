@@ -170,11 +170,13 @@ Different from routing: routing picks **who answers the user**; delegation is **
 
 **Next (in this order):**
 - [ ] **Commands audit, rest:** check `/stop`, `/clear`, `/resume`, `/config` (no `free` section), `/persona`, `/memory` (API brains don't see memories today) against free, a provider brain and Waymond.
-- [ ] **Optimization stage** (tokens and latency per call):
-  - Classifier: a local zero-shot or embeddings model first (no API call for clear cases), the LLM only when unsure; and `reasoning_effort: low` where a provider takes it (gpt-oss spends ~100 reasoning tokens to emit one JSON line).
-  - Persona prompt measured and trimmed; history clipped per bucket (small talk needs fewer turns).
-  - Probe timeout shorter than an answer's (a 30s probe of a dead model is wasted).
-  - Strip `<think>`/reasoning from what's stored, never just from what's shown.
+- [x] **Optimization stage, first pass (Nov 24).** Measured on real calls before cutting anything:
+  - Classifier output was the waste: gpt-oss-20b spent 63–136 tokens (mostly hidden reasoning) per one-line JSON. Each model is now remembered as thinking-first or not (from `reasoning_tokens` / a `reasoning` field, kept in `apibrain-models.json`); for the `tiny` need a thinking model ranks below a plain one, so the classifier moved to Groq qwen3.8-27b (13 tokens, ~200 ms). A known thinker still on a one-line job gets `reasoning_effort: low` (gpt-oss-20b: 74 → 32 tokens); a provider that refuses the field (LLM7) is asked again without it and never sent it again.
+  - An answer that was all thinking (budget spent before any text) fails over instead of posting nothing; a probe counts it as answering.
+  - Probe timeout 30s → 15s (a timeout isn't recorded anyway; it's retried later).
+  - `stripThinking` also drops a lone `</think>` prefix and an unclosed `<think>` tail, so stored turns never carry reasoning.
+  - Not worth doing yet: the persona system prompt is ~210 tokens and a first answer's whole prompt ~290; per-bucket history would save ~100 tokens a call.
+  - Still open: a local classifier (embeddings or NLI zero-shot) — with the classifier at ~200 ms and ~15 tokens on Groq, it mainly buys independence from Groq; worth it with the embeddings item below.
 - [ ] "Hand off to…" any capable agent, via `Brain.capabilities`; `delegate` lists them too; `delegate` → free with `model:`.
 - [ ] Ranking from evidence (discovery, needs and availability are done): probe benchmark with checkable answers (`doctor --rank`), implicit signals, bandit ordering.
 - [ ] Embeddings classifier (Ollama local, Gemini embedding as the cloud option).

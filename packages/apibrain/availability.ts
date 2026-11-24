@@ -18,6 +18,10 @@ export interface ModelCheck {
   /** Why it isn't usable. */
   reason?: string;
   at: number;
+  /** Seen thinking before it answers (hidden tokens on every call). */
+  reasons?: boolean;
+  /** Refused a `reasoning_effort` field. */
+  noEffort?: boolean;
 }
 
 /** A refused model is tried again after this long (plans and free tiers change). */
@@ -61,7 +65,16 @@ export class Availability {
   mark(unit: string, ok: boolean, reason?: string): void {
     const prev = this.checks.get(unit);
     if (ok && prev?.ok) return void (prev.at = this.now()); // nothing worth a write
-    this.checks.set(unit, { ok, ...(reason ? { reason } : {}), at: this.now() });
+    const traits = { ...(prev?.reasons !== undefined ? { reasons: prev.reasons } : {}), ...(prev?.noEffort ? { noEffort: true } : {}) };
+    this.checks.set(unit, { ok, ...(reason ? { reason } : {}), at: this.now(), ...traits });
+    this.scheduleSave();
+  }
+
+  /** Record how a model behaves (thinks first, refuses `reasoning_effort`), kept across restarts. */
+  note(unit: string, traits: Pick<ModelCheck, "reasons" | "noEffort">): void {
+    const prev = this.checks.get(unit) ?? { ok: true, at: this.now() };
+    if (Object.entries(traits).every(([k, v]) => prev[k as keyof ModelCheck] === v)) return;
+    this.checks.set(unit, { ...prev, ...traits });
     this.scheduleSave();
   }
 

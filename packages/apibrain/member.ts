@@ -47,6 +47,8 @@ export interface CompleteOptions {
   timeoutMs?: number;
   /** Rough prompt size, for the tokens-per-minute check. */
   tokens?: number;
+  /** Ask a model known to reason to keep it short (`reasoning_effort: low`): for one-line answers like the classifier's. */
+  briefThinking?: boolean;
   /** For the call log. */
   purpose?: CallEntry["purpose"];
   chatId?: string;
@@ -129,9 +131,10 @@ export class ApiMember {
   }
 
   score(m: ModelTraits, need: Need): number {
-    const base = score(m, need, { scarce: this.scarce, latencyMs: this.latency.get(m.id), contextTokens: this.contextTokens });
+    const check = this.deps.availability?.get(this.modelUnit(m.id));
+    const base = score(m, need, { scarce: this.scarce, latencyMs: this.latency.get(m.id), contextTokens: this.contextTokens, reasons: check?.reasons });
     // A model seen answering beats one only known by its name.
-    const seen = this.deps.availability?.get(this.modelUnit(m.id))?.ok;
+    const seen = check?.ok;
     return base - (this.deps.availability && !seen ? UNTESTED_PENALTY : 0);
   }
 
@@ -216,20 +219,38 @@ export class ApiMember {
           ...fields,
         });
         try {
-          const r = await chatCompletion(
-            {
-              baseURL: this.baseURL!,
-              apiKey: key.value || undefined,
-              model,
-              messages,
-              headers: this.spec.headers,
-              maxTokens: opts.maxTokens,
-              temperature: opts.temperature,
-              signal: opts.signal,
-              timeoutMs: opts.timeoutMs,
-            },
-            this.fetchImpl
-          );
+          const av = this.deps.availability;
+          const unit = this.modelUnit(model);
+          const call = (reasoningEffort?: "low") =>
+            chatCompletion(
+              {
+                baseURL: this.baseURL!,
+                apiKey: key.value || undefined,
+                model,
+                messages,
+                headers: this.spec.headers,
+                maxTokens: opts.maxTokens,
+                temperature: opts.temperature,
+                signal: opts.signal,
+                timeoutMs: opts.timeoutMs,
+                ...(reasoningEffort ? { reasoningEffort } : {}),
+              },
+              this.fetchImpl
+            );
+          const known = av?.get(unit);
+          const effort = opts.briefThinking && known?.reasons && !known.noEffort ? "low" : undefined;
+          let r;
+          try {
+            r = await call(effort);
+          } catch (e) {
+            // Some providers refuse the field for this model ("does not support reasoning"): remember, ask plainly.
+            if (!effort || !(e instanceof ProviderError) || e.kind !== "bad_request" || !/reason/i.test(e.message)) throw e;
+            av?.note(unit, { noEffort: true });
+            r = await call();
+          }
+          av?.note(unit, { reasons: !!r.reasoned });
+          // All of its budget went to thinking: a real answer needs more room (a probe only asks whether it answers).
+          if (!r.text && opts.purpose !== "probe") throw new ProviderError("server", "spent its whole reply thinking");
           this.deps.log?.write(entry({ ok: true, reply: r.text, ...(r.usage ? { usage: r.usage } : {}) }));
           this.deps.availability?.mark(this.modelUnit(model), true);
           const took = Date.now() - started;
@@ -293,7 +314,7 @@ export class ApiMember {
       if (opts.signal?.aborted) return;
       if (i) await new Promise((r) => setTimeout(r, gap));
       try {
-        await this.complete(PROBE, { model: m.id, maxTokens: 200, temperature: 0, timeoutMs: 30_000, purpose: "probe", signal: opts.signal });
+        await this.complete(PROBE, { model: m.id, maxTokens: 200, temperature: 0, timeoutMs: 15_000, briefThinking: true, purpose: "probe", signal: opts.signal });
         opts.onResult?.(m.id, true, "answers");
       } catch (e) {
         const kind = e instanceof ProviderError ? e.kind : String(e);
