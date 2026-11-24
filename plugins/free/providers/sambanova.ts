@@ -7,6 +7,7 @@ export default defineProvider({
   baseURL: "https://api.sambanova.ai/v1",
   keyEnv: "SAMBANOVA_API_KEY",
   signup: "https://cloud.sambanova.ai/apis",
+  note: "a few requests a day",
   contextTokens: 12_000,
   limits: { rpm: 20, rpd: 20 },
   limitScope: "model",

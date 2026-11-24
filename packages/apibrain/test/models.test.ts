@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Availability, RECHECK_MS } from "../availability.ts";
-import { classifyFailure } from "../client.ts";
+import { classifyFailure, parseListed } from "../client.ts";
+import { stripSpeakerLabel } from "../context.ts";
 import { isChatModel, modelTraits, newestOnly, score } from "../models.ts";
 import { dayIn, msToMidnight, Quota } from "../quota.ts";
 
@@ -75,5 +76,29 @@ describe("daily limits reset in the provider's zone", () => {
     expect(q.waitMs("gemini#1:m", { rpd: 1 })).toBe(3 * 3_600_000);
     now += 3 * 3_600_000;
     expect(q.usage("gemini#1:m").requestsToday).toBe(0);
+  });
+});
+
+describe("listings and replies", () => {
+  test("model lists in each provider's shape", () => {
+    expect(parseListed({ id: "x:free", pricing: { prompt: "0", completion: "0" }, architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] } })).toEqual({
+      id: "x:free",
+      pricing: { prompt: 0, completion: 0 },
+      vision: true,
+      chat: true,
+    });
+    expect(parseListed({ id: "codestral-latest", tier: "turbo", model_type: "chat", context_window: { tokens: 32_000 }, modalities: { input: ["text"] } })).toMatchObject({ tier: "turbo", chat: true, contextLength: 32_000, vision: false });
+    expect(parseListed({ id: "mistral-embed", capabilities: { completion_chat: false, vision: false } })).toMatchObject({ chat: false });
+    expect(parseListed({ name: "command-a", endpoints: ["chat", "generate"], context_length: 256_000 })).toMatchObject({ id: "command-a", chat: true });
+    expect(isChatModel("Qwen3Guard-Gen-8B")).toBe(false);
+    expect(isChatModel("bge-m3")).toBe(false);
+  });
+
+  test("a leading speaker label is cut; ordinary openings stay", () => {
+    const p = { name: "Mahiro Oyama", personality: "" };
+    expect(stripSpeakerLabel("**Mahiro**\n\nSure!", p)).toBe("Sure!");
+    expect(stripSpeakerLabel("**Mahiro Oyama:** hi", p)).toBe("hi");
+    expect(stripSpeakerLabel("Note: this", p)).toBe("Note: this");
+    expect(stripSpeakerLabel("Mahiro is here", p)).toBe("Mahiro is here");
   });
 });

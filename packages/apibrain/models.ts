@@ -42,8 +42,11 @@ export interface ModelTraits {
 const NOT_CHAT = new Set([
   "embed", "embedding", "embeddings", "whisper", "tts", "speech", "transcribe", "transcription", "audio", "guard", "safeguard",
   "moderation", "rerank", "reranker", "retriever", "orpheus", "image", "imagen", "veo", "lyria", "music", "aqa", "robotics",
-  "computer", "live", "banana", "research", "ocr", "clip", "playai", "diffusion", "flux", "sdxl", "video",
+  "computer", "live", "banana", "research", "ocr", "clip", "playai", "diffusion", "flux", "sdxl", "video", "bge", "kokoro",
+  "chatterbox", "kling", "voxtral", "riva", "nvr", "asr", "vad", "translate", "summarise", "summarize",
 ]);
+/** Inside a run-together token too (`qwen3guard`, `bgem3`). */
+const NOT_CHAT_PARTS = ["guard", "embed", "whisper", "tts", "diffusion", "rerank"];
 const SMALL = new Set(["lite", "mini", "nano", "instant", "tiny", "small", "micro", "haiku"]);
 const MID = new Set(["flash", "medium", "turbo", "air"]);
 const BIG = new Set(["pro", "ultra", "large", "max", "opus", "plus", "maverick"]);
@@ -55,7 +58,7 @@ const tokens = (id: string) => id.toLowerCase().split(/[^a-z0-9]+/).filter(Boole
 /** Can it hold a conversation? Judged from the listing when it says, otherwise from the id. */
 export function isChatModel(id: string, info?: ModelInfo): boolean {
   if (info?.chat === false) return false;
-  return !tokens(id).some((t) => NOT_CHAT.has(t) || t.startsWith("embed"));
+  return !tokens(id).some((t) => NOT_CHAT.has(t) || NOT_CHAT_PARTS.some((p) => t.includes(p)));
 }
 
 /** Billions of parameters named in an id: `120b`, `8x7b`, `e4b`, `500m`. Active (`a55b`) is skipped. */

@@ -4,6 +4,7 @@
  *
  *   bun run apibrain doctor <plugin> [provider]   check keys and models
  *   bun run apibrain log [count] [--full] [--chat <id>]   what was sent, and why
+ *   bun run apibrain keys [list | add <provider> | setup]  get and save API keys (keys-cli.ts)
  *
  * doctor: for each provider the plugin exports (or just the one named):
  * which keys are set, how many chat models its `/models` lists today, a real
@@ -26,11 +27,13 @@ import type { LogEntry } from "./calllog.ts";
 import { ProviderError } from "./errors.ts";
 import { Health } from "./health.ts";
 import { discoverKeys } from "./keys.ts";
+import { keysCommand } from "./keys-cli.ts";
 import { ApiMember } from "./member.ts";
 import type { ApiProviderSpec } from "./provider.ts";
 import { Quota } from "./quota.ts";
 
-const USAGE = "usage: bun run apibrain doctor <plugin> [provider]   (e.g. `doctor free groq`)\n       bun run apibrain log [count] [--full] [--chat <id>]";
+const USAGE =
+  "usage: bun run apibrain doctor <plugin> [provider]   (e.g. `doctor free groq`)\n       bun run apibrain log [count] [--full] [--chat <id>]\n       bun run apibrain keys [list | add <provider> | setup]";
 const PONG = "Reply with exactly: pong";
 
 type Env = Record<string, string | undefined>;
@@ -185,6 +188,7 @@ export function showLog(dataDir: string, args: string[]): void {
     console.log(`   → ${e.bucket} (${how}) · plan: ${e.plan.slice(0, 5).join(", ")}${e.plan.length > 5 ? ", …" : ""}`);
     for (const c of mine) printCall(c);
     for (const p of e.passed) console.log(`   ⤼ ${clip(p, 140)}`);
+    if (e.offered) console.log(`   ☞ offered a button to hand this to ${e.offered}`);
     console.log(e.answered ? `   ✓ answered by ${e.answered} in ${((e.ms ?? 0) / 1000).toFixed(1)}s` : `   ✗ ${e.error ?? "no answer"}`);
   }
   if (pending.length) console.log("");
@@ -198,6 +202,14 @@ if (import.meta.main) {
     if (command === "log") {
       showLog(resolveDataDir(), process.argv.slice(3));
       process.exit(0);
+    }
+    if (command === "keys") {
+      // The free plugin's providers (the only API plugin today).
+      const mod = (await import("@choomfie/free")) as DoctorModule;
+      const dataDir = resolveDataDir();
+      const section = (readConfig(dataDir).free ?? {}) as { providers?: Record<string, { enabled?: unknown }> };
+      const disabled = (spec: ApiProviderSpec) => section.providers?.[spec.id]?.enabled === false;
+      process.exit(await keysCommand(process.argv.slice(3), mod.providers ?? [], loadEnv(dataDir), dataDir, disabled));
     }
     if (command !== "doctor" || !plugin || !/^[a-z0-9-]+$/.test(plugin)) throw new Error(USAGE);
     let mod: DoctorModule;
@@ -217,7 +229,7 @@ if (import.meta.main) {
     let ok = true;
     for (const spec of specs) {
       const settings = section.providers?.[spec.id];
-      if (settings?.enabled === false || (spec.noKey && settings?.enabled !== true && !only)) {
+      if (settings?.enabled === false || (spec.optIn && settings?.enabled !== true && !only)) {
         console.error(`${spec.label}: disabled in config`);
         continue;
       }

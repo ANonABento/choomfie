@@ -7,6 +7,7 @@ export default defineProvider({
   baseURL: "https://api.groq.com/openai/v1",
   keyEnv: "GROQ_API_KEY",
   signup: "https://console.groq.com/keys",
+  note: "very fast; 1,000 requests a day per model",
   // Free tier TPM is a few thousand per model: keep prompts small.
   contextTokens: 6_000,
   limits: { rpm: 30, rpd: 1_000 },

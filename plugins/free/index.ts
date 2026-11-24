@@ -65,7 +65,7 @@ export function setupFree(
   for (const spec of PROVIDERS) {
     const settings = config.providers[spec.id] ?? {};
     if (settings.enabled === false) continue;
-    if (spec.noKey && settings.enabled !== true) continue; // a local server is opt-in
+    if (spec.optIn && settings.enabled !== true) continue; // a local server is opt-in
     const member = new ApiMember(spec, { env, health, quota, overrides: settings, log, availability });
     if (member.configured) members.set(spec.id, member);
     else unconfigured.push({ id: spec.id, label: spec.label, signup: spec.signup });

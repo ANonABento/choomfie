@@ -31,6 +31,7 @@ import { join } from "node:path";
 import type { BrainAccess } from "./config.ts";
 import type { AppContext } from "./types.ts";
 import { onReplySent } from "./typing.ts";
+import { tablesForDiscord } from "./discord-markdown.ts";
 import { getBrainRelay } from "./ask-relay.ts";
 import { findPatch, offerPatch } from "./patch-pr.ts";
 import { takeChatNotes } from "./chat-notes.ts";
@@ -88,10 +89,10 @@ export function decideRoute(input: RouteInput): RouteDecision {
 
 const DISCORD_LIMIT = 2000;
 
-/** Split on paragraph/line boundaries where possible, hard-cut otherwise. */
+/** Rewrite what Discord can't render (tables), then split on paragraph/line boundaries where possible, hard-cut otherwise. */
 export function chunkForDiscord(text: string, limit = DISCORD_LIMIT): string[] {
   const chunks: string[] = [];
-  let rest = text.trim();
+  let rest = tablesForDiscord(text).trim();
   while (rest.length > limit) {
     const window = rest.slice(0, limit);
     const cut = Math.max(window.lastIndexOf("\n\n"), window.lastIndexOf("\n"));

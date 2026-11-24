@@ -8,6 +8,7 @@ export default defineProvider({
   vars: { accountId: "CLOUDFLARE_ACCOUNT_ID" },
   keyEnv: "CLOUDFLARE_API_KEY",
   signup: "https://dash.cloudflare.com/profile/api-tokens",
+  note: "10k neurons a day; also needs CLOUDFLARE_ACCOUNT_ID",
   // Workers AI has no OpenAI-style model list, so these are what it tries.
   fallbackModels: ["@cf/openai/gpt-oss-120b", "@cf/openai/gpt-oss-20b", "@cf/meta/llama-3.3-70b-instruct-fp8-fast"],
   listsModels: false,

@@ -6,7 +6,7 @@
 
 import { framePrompt, type Brain, type BrainReply, type PluginContext } from "@choomfie/shared";
 import { maybeCompact, SUMMARY_PROMPT } from "./compact.ts";
-import { buildMessages, systemPrompt, userContent, type Persona, type UserContent } from "./context.ts";
+import { buildMessages, stripSpeakerLabel, systemPrompt, userContent, type Persona, type UserContent } from "./context.ts";
 import type { ApiMember, Completion } from "./member.ts";
 import type { Transcript } from "./transcript.ts";
 
@@ -20,6 +20,8 @@ export interface ApiTurnInput {
   signal?: AbortSignal;
   /** Override the member's own input budget. */
   budget?: number;
+  /** Who the model speaks as: a leading "Name:" label is cut from the reply. */
+  persona?: Persona;
 }
 
 /** One answer from one API member, with the chat's history to its budget. Records nothing. */
@@ -32,7 +34,7 @@ export async function apiTurn(input: ApiTurnInput): Promise<Completion & { token
     budget: input.budget ?? input.member.contextTokens,
   });
   const r = await input.member.complete(built.messages, { model: input.model, signal: input.signal, tokens: built.tokens, purpose: "answer", chatId: input.chatId });
-  return { ...r, tokens: built.tokens };
+  return { ...r, text: stripSpeakerLabel(r.text, input.persona), tokens: built.tokens };
 }
 
 /** Summarize with a member (cheap, short). */
@@ -77,7 +79,8 @@ export function defineApiBrain(member: ApiMember, deps: ApiBrainDeps): (ctx: Plu
         const abort = new AbortController();
         running.set(message.chatKey, abort);
         try {
-          const r = await apiTurn({ member, model, transcript: deps.transcript, chatId: chat.id, system: systemPrompt(personaOf(ctx)), current, signal: abort.signal });
+          const persona = personaOf(ctx);
+          const r = await apiTurn({ member, model, transcript: deps.transcript, chatId: chat.id, system: systemPrompt(persona), persona, current, signal: abort.signal });
           deps.transcript.add(chat.id, "user", current.record);
           deps.transcript.add(chat.id, "assistant", r.text, member.id, r.model);
           void maybeCompact({ transcript: deps.transcript, chatId: chat.id, budget: member.contextTokens, summarize: summarizer(member) });

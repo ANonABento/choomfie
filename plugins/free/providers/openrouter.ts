@@ -7,6 +7,7 @@ export default defineProvider({
   baseURL: "https://openrouter.ai/api/v1",
   keyEnv: "OPENROUTER_API_KEY",
   signup: "https://openrouter.ai/keys",
+  note: "50 free requests a day (1,000 once $10 is added); free models may log prompts",
   isFree: (model, info) =>
     model.endsWith(":free") || model === "openrouter/free" || (info?.pricing?.prompt === 0 && info.pricing.completion === 0),
   // The listing says which models take images; this is only the fallback.

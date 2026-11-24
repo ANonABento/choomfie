@@ -72,7 +72,6 @@ Park until the multi-brain and free systems are working and tested. Today a mode
 |---|---|---|---|
 | Errors, latency, limit hits | every call (already recorded by health and quota) | reliability, speed | low |
 | Probe benchmark | `apibrain doctor --rank` and a weekly run: a few prompts per bucket with checkable answers (exact answers, code that must pass a test, JSON that must parse), plus a coherence probe (a short multi-turn chat that must stay consistent) | capability, and coherence over turns | low, but narrow |
-| Reactions | 👍 / 👎 on a bot reply (Discord-native, one click) | your judgment | low per vote, sparse |
 | Implicit | **Bad:** "Try a bigger model", Retry, Hand off, `/stop`, a quick rephrase of the same ask, "no / wrong / that didn't work". **Good:** the chat moves on, "thanks", a plan task whose CI passed | outcome | high: harder tasks take more turns anyway |
 
 **How the evidence becomes an order:**
@@ -80,11 +79,12 @@ Park until the multi-brain and free systems are working and tested. Today a mode
 - A bandit (Thompson sampling) keeps mostly using the best and sometimes tries a newcomer, so a new free model earns its place without anyone editing a list.
 - The probe benchmark gives a new model a starting score. Real use refines it.
 - **Capability vs coherence are kept as separate scores:**
-  - **Capability:** solves the task. Probes, CI results, the 👍/👎 that follows.
+  - **Capability:** solves the task. Probes, CI results, the implicit signals that follow.
   - **Coherence:** stays consistent with the persona and earlier turns. The multi-turn probe, plus a cheap grader over a few sampled real chats now and then.
 
   A model can be strong at one-shot answers and still drift over a conversation.
-- **Improves with use:** scores and your reactions live in the data dir. Later they join the memory layer, so preferences ("you like short answers", "this model's code needs fixing for you") travel with you. That needs a separate discussion.
+- **No 👍/👎 (decided Nov 24):** asking for votes is noise in the chat; implicit signals do the job.
+- **Improves with use:** scores live in the data dir. Later they join the memory layer, so preferences ("you like short answers", "this model's code needs fixing for you") travel with you. That needs a separate discussion.
 
 ## Proposed: hand off to any agent
 
@@ -126,8 +126,7 @@ Instead of "Hand this to Waymond":
 
 Both are in [free-brain.md](free-brain.md#getting-keys).
 
-**Key setup:** today it's a table in free-brain.md plus `.env.example`.
-- **Next:** `bun run apibrain keys`. It lists what's set, opens each signup page, takes the key without echoing it, writes the data dir `.env` atomically, then runs the doctor.
+**Key setup:** `bun run apibrain keys` (done Nov 24): lists what's set with a note per provider, opens each key page, takes the key without echoing it, checks it, writes the data dir `.env` (0600).
 - **Not through Discord:** a pasted key would pass through Discord's servers.
 
 ## Delegation: one agent asking another
@@ -163,14 +162,24 @@ Different from routing: routing picks **who answers the user**; delegation is **
 - [x] Daily quotas reset in the provider's zone (Gemini: Pacific).
 - [x] `/status` shows the brain here reporting on itself; Claude's daemon fields are labelled Claude. `/usage` adds the free/API brains' use today (in foreground mode too).
 
+**Done (Nov 24):**
+- [x] `bun run apibrain keys` (list, add, setup).
+- [x] 11 more providers: Cerebras, Mistral, Cohere, Z.ai, Aion, AxForge, Gonka, Runcrate, and keyless Kilo, LLM7, OVHcloud. Model lists parsed in each one's shape; every one probed.
+- [x] Tables rewritten for Discord, and speaker labels cut, on our side for every brain; the "don't sign your name" and "several people" prompt lines removed.
+- [x] Tool work that falls to a text model: told so for that turn only, and the reply says Waymond couldn't take it. The log records when a hand-off button was offered.
+
 **Next (in this order):**
 - [ ] **Commands audit, rest:** check `/stop`, `/clear`, `/resume`, `/config` (no `free` section), `/persona`, `/memory` (API brains don't see memories today) against free, a provider brain and Waymond.
-- [ ] `bun run apibrain keys` setup command, then test the free brain for real (needs keys).
+- [ ] **Optimization stage** (tokens and latency per call):
+  - Classifier: a local zero-shot or embeddings model first (no API call for clear cases), the LLM only when unsure; and `reasoning_effort: low` where a provider takes it (gpt-oss spends ~100 reasoning tokens to emit one JSON line).
+  - Persona prompt measured and trimmed; history clipped per bucket (small talk needs fewer turns).
+  - Probe timeout shorter than an answer's (a 30s probe of a dead model is wasted).
+  - Strip `<think>`/reasoning from what's stored, never just from what's shown.
 - [ ] "Hand off to…" any capable agent, via `Brain.capabilities`; `delegate` lists them too; `delegate` → free with `model:`.
-- [ ] Ranking from evidence (discovery, needs and availability are done): probe benchmark with checkable answers (`doctor --rank`), 👍/👎 and implicit signals, bandit ordering.
+- [ ] Ranking from evidence (discovery, needs and availability are done): probe benchmark with checkable answers (`doctor --rank`), implicit signals, bandit ordering.
 - [ ] Embeddings classifier (Ollama local, Gemini embedding as the cloud option).
 - [ ] Compaction: big-context models get the original turns instead of the summary; structured summary (goals, decisions, facts, open questions, code and numbers verbatim); a real token count.
-- [ ] More providers: Mistral free, Cohere trial, LM Studio, (Z.ai after checking).
+- [ ] More providers: LM Studio (local), GitHub Models (its catalog isn't at `/models`).
 - [ ] `Try a bigger model` button.
 - [ ] Handoff summary by a cheap model (or Claude's compaction summary) instead of the raw excerpt.
 - [ ] Web-brain compact: ask the site for a summary, open a new site conversation seeded with it.

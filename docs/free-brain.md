@@ -16,17 +16,7 @@ No tools and no instructions, so it costs the Claude session nothing.
 
 ## Setup
 
-1. Put keys in the data dir's `.env` (`~/.claude/plugins/data/choomfie-inline/.env`; the worker loads it at startup, so `/restart` after editing). A provider with no key is skipped. `.env.example` in the repo lists every name.
-   ```
-   GROQ_API_KEY=…
-   GROQ_API_KEY_2=…          # a second key you own: pooled, each with its own cooldown and quota
-   OPENROUTER_API_KEY=…
-   GEMINI_API_KEY=…
-   NVIDIA_API_KEY=…
-   SAMBANOVA_API_KEY=…
-   CLOUDFLARE_API_KEY=…  CLOUDFLARE_ACCOUNT_ID=…
-   ```
-   Groq + Gemini cover most of it. See [Getting keys](#getting-keys) for where each comes from.
+1. `bun run apibrain keys` shows every provider: key set or not, what its free tier gives and its catch. `bun run apibrain keys setup` walks through the ones without a key: their key page opens, you paste the key (hidden), it's checked against the provider and saved to the data dir's `.env` (0600). `keys add groq` adds one; a second `add` saves `GROQ_API_KEY_2` (pooled, each its own quota). Keys never go in config.json or through Discord. The worker loads `.env` at startup, so `/restart` after adding. Kilo, LLM7 and OVHcloud need no key and are on already.
 2. `bun run apibrain doctor free` checks each provider:
    - which keys are set, and how many free chat models `/models` lists today;
    - a real `pong` through each key on its best model;
@@ -35,6 +25,13 @@ No tools and no instructions, so it costs the Claude session nothing.
    It then shows the routing each bucket gets right now and how the classifier sorts a few sample messages. `bun run apibrain doctor free groq` checks one provider.
 3. Turn it on with `/plugins enable free`, then run `/brain free` in a channel. `/brain` with no name (or `/status` there) shows each provider's state, today's use, and the last few routes; `/usage` shows today's use too.
 4. To see exactly what was sent: `bun run apibrain log` (below).
+
+## Replies on Discord
+
+Fixed on our side, for every brain, not by rules in the prompt (a rule costs tokens on every call and still gets ignored):
+- **Tables:** Discord doesn't render markdown tables. A narrow one becomes an aligned code block, a wide one a bullet per row (`packages/core/lib/discord-markdown.ts`).
+- **Speaker labels:** some models open with `**Mahiro**:` when given a character. It's cut before the reply is posted or stored, so the next turn doesn't copy it.
+- **Tool work answered in text:** when Waymond couldn't take an `agentic` or `research` message, the text model is told (that turn only) it can't make images or run things, and the reply says who couldn't take it.
 
 ## Seeing what was sent
 
@@ -53,17 +50,30 @@ Three commands, three questions: `/brain` is which system answers (claude, waymo
 
 ## Getting keys
 
-None of these needs a card. Limits are as published in November 2026, and they change without notice. `/brain` and the doctor show what you actually get.
+None of these needs a card. Limits change without notice: `bun run apibrain keys` has a one-line note per provider, and `/brain` and the doctor show what you actually get.
 
-| Provider | Env | Where | Free allowance | Watch out for |
-|---|---|---|---|---|
-| Groq | `GROQ_API_KEY` | console.groq.com → API Keys | ~30 RPM, ~1,000 RPD, small TPM, per model (Groq's own pages disagree; trust the console) | Shared with the voice plugin |
-| Gemini | `GEMINI_API_KEY` | aistudio.google.com → Get API key (makes a Cloud project) | Flash / Flash-Lite / Gemma only; limits shown in AI Studio, no longer published (reported: Flash ~20 RPD, Flash-Lite ~500 RPD) | Unpaid prompts may train Google's models and be read by reviewers. Unpaid keys may not serve users in the EEA, UK or Switzerland. 18+. Quota is per project, not per key |
-| OpenRouter | `OPENROUTER_API_KEY` | openrouter.ai → Keys | `:free` models, 20 RPM, 50 RPD (1,000 RPD after $10 of lifetime credit) | A negative balance blocks free models; free endpoints have no SLA |
-| SambaNova | `SAMBANOVA_API_KEY` | cloud.sambanova.ai → APIs | 20 RPM, 20 RPD per model | A spare, not a main model |
-| Cloudflare | `CLOUDFLARE_API_KEY`, `CLOUDFLARE_ACCOUNT_ID` | dash.cloudflare.com → API Tokens (Workers AI template); the account id is on the dashboard | 10,000 Neurons a day, fails closed past it | Big models spend it fast |
-| NVIDIA NIM | `NVIDIA_API_KEY` | build.nvidia.com → any model → Get API key | up to ~40 RPM | The trial terms forbid production use. A bot answering other people is production, so keep it to yourself (`brainAccess: owner`) or leave it off |
-| Ollama | — | ollama.com, then `ollama pull <model>` | your machine | Opt-in: `free.providers.ollama.enabled: true` |
+| Provider | Key | Free allowance | Watch out for |
+|---|---|---|---|
+| Groq | console.groq.com/keys | ~30 RPM, ~1,000 RPD per model | Shared with the voice plugin |
+| Gemini | aistudio.google.com/apikey | Flash, Flash-Lite, Gemma; limits in AI Studio | Unpaid prompts may train Google's models; not for users in the EEA, UK or Switzerland; 18+; quota per project |
+| OpenRouter | openrouter.ai/keys | `:free` models, 20 RPM, 50 RPD (1,000 after $10 of lifetime credit) | Free endpoints may log prompts |
+| Cerebras | cloud.cerebras.ai | fast, ~30 RPM | Short context on the free tier |
+| Mistral | console.mistral.ai/api-keys | every Mistral model on the Experiment plan | Phone check; prompts may train |
+| NVIDIA NIM | build.nvidia.com | ~40 RPM | Trial terms forbid production use: keep it to yourself (`brainAccess: owner`) |
+| SambaNova | cloud.sambanova.ai/apis | ~20 RPD per model | A spare |
+| Cloudflare | dash.cloudflare.com/profile/api-tokens (+ `CLOUDFLARE_ACCOUNT_ID`) | 10,000 neurons a day | Big models spend it fast |
+| Cohere | dashboard.cohere.com/api-keys | 1,000 calls a month | Trial key: non-commercial only |
+| Z.ai | z.ai (API keys) | GLM `-flash` models (others are paid and never called) | One request at a time |
+| Aion Labs | aionlabs.ai/app/api-keys | 20k tokens a day | Roleplay models |
+| AxForge | console.axforge.ai/keys | 3M tokens per 30 days, EU, not logged | Bills once you add a balance — don't |
+| Gonka | app.gonkabroker.com/signup | ~1M tokens a month | Real (non-VoIP) phone number |
+| Runcrate | runcrate.ai/dashboard/api-keys | weekly allowance on five models | Sign up with GitHub (Google sign-up needs a card) |
+| Kilo | no key | `:free` models, 200 requests an hour | Free models may log prompts |
+| LLM7 | no key | its `turbo` models | Undocumented; may vanish |
+| OVHcloud | no key | 2 RPM per model, EU | A key here would be pay-as-you-go, so none is used |
+| Ollama | — | your machine | Opt-in: `free.providers.ollama.enabled: true` |
+
+A provider with credit on the account (AxForge, Runcrate, Gonka, Aion) bills past its free allowance. The free brain can't tell a free-tier key from a funded one, so keep those accounts unfunded. A keyless provider can be turned off with `free.providers.<id>.enabled: false`.
 
 Web brains sign in, not key in: `bun run webbrain login <id>` opens the site on its own profile; sign in and close the window ([webbrain.md](webbrain.md)).
 
@@ -147,7 +157,7 @@ No model id is written in code: providers rename and retire them every few weeks
 
 `/model` lists each provider's models best first with what's known (`~120B · 131k context · ~0.4s`). `bun run apibrain doctor free` shows the routing each bucket gets right now. To override, pin: `free.providers.<id>.models`, `free.buckets.<id>`, `free.classifier.targets`.
 
-Name-based ranking is a starting point. Next: a probe benchmark and your 👍/👎 refine it ([brains-plan.md](brains-plan.md)).
+Name-based ranking is a starting point. Next: a probe benchmark and implicit signals (retries, hand-offs, rephrasing) refine it ([brains-plan.md](brains-plan.md)).
 
 ## Context
 
@@ -171,7 +181,7 @@ To choose a model instead, use `/model`.
 ```jsonc
 "free": {
   "strategy": "smart",                    // or "priority": ignore buckets, use `priority` in order
-  "priority": ["groq", "gemini", "openrouter", "nvidia", "sambanova", "cloudflare", "ollama"],
+  "priority": ["groq", "gemini", "openrouter"],   // default: every provider, in providers/index.ts order
   "buckets": { "code": ["groq:openai/gpt-oss-120b", "gemini"] },   // pins that bucket (otherwise: by its need, from the live lists)
   "classifier": { "type": "zero-shot", "targets": ["groq:openai/gpt-oss-20b"], "suggestAt": 0.75, "longTokens": 6000 },   // targets: optional pin
   "summaryTargets": ["gemini"],                                     // optional pin

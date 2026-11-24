@@ -13,6 +13,7 @@
  */
 
 import type { BucketDef, Need } from "@choomfie/apibrain";
+import { PROVIDERS } from "./providers/index.ts";
 
 export interface Bucket extends BucketDef {
   need: Need;
@@ -76,4 +77,4 @@ export const BUCKETS: Bucket[] = [
 ];
 
 /** When a bucket's list is spent: any provider that can answer at all (each with its own best model). */
-export const DEFAULT_PRIORITY = ["groq", "gemini", "openrouter", "nvidia", "sambanova", "cloudflare", "ollama"];
+export const DEFAULT_PRIORITY = PROVIDERS.map((p) => p.id);

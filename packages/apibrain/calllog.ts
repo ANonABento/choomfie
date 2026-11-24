@@ -49,6 +49,8 @@ export interface RouteEntry {
   /** What was skipped or failed first. */
   passed: string[];
   answered?: string;
+  /** A web brain offered with a button instead of called (mid-chat). */
+  offered?: string;
   ms?: number;
   error?: string;
 }

@@ -5,12 +5,30 @@
  */
 
 import type { ApiProviderSpec } from "@choomfie/apibrain";
+import aion from "./aion.ts";
+import axforge from "./axforge.ts";
+import cerebras from "./cerebras.ts";
 import cloudflare from "./cloudflare.ts";
+import cohere from "./cohere.ts";
 import gemini from "./gemini.ts";
+import gonka from "./gonka.ts";
 import groq from "./groq.ts";
+import kilo from "./kilo.ts";
+import llm7 from "./llm7.ts";
+import mistral from "./mistral.ts";
 import nvidia from "./nvidia.ts";
 import ollama from "./ollama.ts";
 import openrouter from "./openrouter.ts";
+import ovh from "./ovh.ts";
+import runcrate from "./runcrate.ts";
 import sambanova from "./sambanova.ts";
+import zai from "./zai.ts";
 
-export const PROVIDERS: ApiProviderSpec[] = [openrouter, groq, gemini, nvidia, sambanova, cloudflare, ollama];
+export const PROVIDERS: ApiProviderSpec[] = [
+  // A key from their site (`bun run apibrain keys`).
+  groq, gemini, openrouter, cerebras, mistral, nvidia, sambanova, cloudflare, cohere, zai, aion, axforge, gonka, runcrate,
+  // No key: anonymous free tiers, on unless config turns them off.
+  kilo, llm7, ovh,
+  // Opt-in: a local server.
+  ollama,
+];

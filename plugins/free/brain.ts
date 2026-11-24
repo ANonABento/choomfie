@@ -62,6 +62,13 @@ import { PROVIDERS } from "./providers/index.ts";
 
 export const FREE_BRAIN = "free";
 /** Known API providers: one with no key is unavailable, not a brain to look for. */
+/** Added to the system prompt only when tool work fell to a text model. */
+const NO_TOOLS_FRAME = "You can't make images or files, run code, or browse here. If the request needs that, say so in a sentence and offer what you can do in text instead.";
+const clipNote = (s: string) => {
+  const one = s.replace(/\s+/g, " ").trim();
+  return one.length > 90 ? `${one.slice(0, 89)}…` : one;
+};
+
 const PROVIDER_IDS = new Set(PROVIDERS.map((p) => p.id));
 /** `/model` value for "let the router choose" (stored as null). */
 export const AUTO_MODEL = "auto";
@@ -237,10 +244,13 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
     return { bucket: chosen, by, targets: targets.filter(isApi), locked: false, ...why, ...(offer ? { suggest: offer.member } : {}) };
   }
 
-  async function answerWithApi(member: ApiMember, t: Target, chatId: string, framed: string, filePaths: string[], signal: AbortSignal): Promise<Answer> {
+  async function answerWithApi(member: ApiMember, t: Target, chatId: string, framed: string, filePaths: string[], signal: AbortSignal, bucketId?: string): Promise<Answer> {
     const current = userContent(framed, filePaths, member.vision(t.model));
     const budget = Math.min(member.contextTokens, config.contextTokens ?? Infinity);
-    const r = await apiTurn({ member, model: t.model, transcript, chatId, system: systemPrompt(personaOf(ctx)), current, signal, budget });
+    const persona = personaOf(ctx);
+    // Only on the turns that need it: work meant for a brain with tools, answered by a text model.
+    const frame = bucket(bucketId ?? "")?.brains.length ? NO_TOOLS_FRAME : undefined;
+    const r = await apiTurn({ member, model: t.model, transcript, chatId, system: systemPrompt(persona, frame), persona, current, signal, budget });
     return { reply: { text: r.text || `(${member.label} sent an empty reply)` }, record: current.record, model: r.model };
   }
 
@@ -334,7 +344,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         const decision = await decide(message, chat, framed, tokens, abort.signal, force);
         d = decision;
         const plan = decision.targets.map(targetKey);
-        const logRoute = (fields: { answered?: string; ms?: number; passed: string[]; error?: string }) =>
+        const logRoute = (fields: { answered?: string; ms?: number; passed: string[]; error?: string; offered?: string }) =>
           deps.log?.write({
             type: "route",
             at: nowIso(),
@@ -355,7 +365,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
           attempt: (t) => {
             run.member = t.member;
             const api = members.get(t.member);
-            if (api) return answerWithApi(api, t, chat.id, framed, message.filePaths, abort.signal);
+            if (api) return answerWithApi(api, t, chat.id, framed, message.filePaths, abort.signal, decision.bucket);
             return answerWithBrain(lookup(t.member)!, message, chat.id, framed, decision);
           },
         });
@@ -370,11 +380,15 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         recent.unshift({ ...r, text: message.content.slice(0, 40) });
         recent.length = Math.min(recent.length, 5);
         if (routed.passed.length) console.error(`[free] ${targetKey(routed.target)} answered after: ${routed.passed.join("; ")}`);
-        logRoute({ answered: model ? `${member}:${model}` : member, ms: routed.latencyMs, passed: routed.passed });
+        logRoute({ answered: model ? `${member}:${model}` : member, ms: routed.latencyMs, passed: routed.passed, ...(decision.suggest ? { offered: decision.suggest } : {}) });
         void maybeCompact({ transcript, chatId: chat.id, budget: budget(), summarize });
 
         let text = reply.text;
-        if (decision.pin && member !== decision.pin.member && !reply.stopped) text += `\n-# ${label(decision.pin.member)} couldn't answer — ${label(member)} did.`;
+        // A brain with tools was meant to take this and couldn't: say so, so a text answer isn't mistaken for the real thing.
+        const skipped = members.has(member) ? (bucket(decision.bucket)?.brains ?? []).find((id) => decision.targets.some((t) => t.member === id)) : undefined;
+        const skippedWhy = skipped ? routed.passed.find((p) => p.startsWith(`${skipped}:`)) : undefined;
+        if (skipped && !reply.stopped) text += `\n-# ${label(skipped)} couldn't take this${skippedWhy ? ` (${clipNote(skippedWhy.slice(skipped.length + 1))})` : ""} — answered by ${label(member)}, which has no tools.`;
+        else if (decision.pin && member !== decision.pin.member && !reply.stopped) text += `\n-# ${label(decision.pin.member)} couldn't answer — ${label(member)} did.`;
         else if (config.footer && !reply.stopped) text += footer(r);
         const suggested: [string, OfferKind][] =
           decision.suggest && !reply.stopped ? [[handChoice(label(decision.suggest)), { kind: "hand", to: decision.suggest }]] : [];

@@ -282,12 +282,12 @@ describe("config", () => {
     expect(expandTargets(["@a"], new Map([["a", ["@a", "x"]]]))).toEqual(["x"]);
   });
 
-  test("setupFree: providers with keys become members; keyless local ones are opt-in", () => {
+  test("setupFree: providers with keys become members, keyless free tiers too; a local server is opt-in", () => {
     const s = setupFree({}, { GROQ_API_KEY: "k", GEMINI_API_KEY: "g" }, new Health(), new Quota());
-    expect([...s.members.keys()]).toEqual(["groq", "gemini"]);
+    expect([...s.members.keys()]).toEqual(["groq", "gemini", "kilo", "llm7", "ovh"]);
     expect(s.unconfigured.map((u) => u.id)).toContain("openrouter");
     expect(s.unconfigured.map((u) => u.id)).not.toContain("ollama");
-    const local = setupFree({ providers: { ollama: { enabled: true }, groq: { enabled: false } } }, { GROQ_API_KEY: "k" }, new Health(), new Quota());
-    expect([...local.members.keys()]).toEqual(["ollama"]);
+    const local = setupFree({ providers: { ollama: { enabled: true }, groq: { enabled: false }, kilo: { enabled: false } } }, { GROQ_API_KEY: "k" }, new Health(), new Quota());
+    expect([...local.members.keys()]).toEqual(["llm7", "ovh", "ollama"]);
   });
 });

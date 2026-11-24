@@ -22,6 +22,8 @@ export interface ModelInfo {
   vision?: boolean;
   /** Answers in text, per the listing's output types (false: an image or audio model). */
   chat?: boolean;
+  /** The provider's own tier label for the model (LLM7: "turbo" is the keyless free tier). */
+  tier?: string;
 }
 
 export interface ApiProviderSpec {
@@ -40,8 +42,14 @@ export interface ApiProviderSpec {
    * key is its own capacity unit with its own cooldown and quota.
    */
   keyEnv?: string;
-  /** Needs no key (a local server). Then it's only used when config enables it. */
+  /** Needs no key: an anonymous free tier, or a local server. */
   noKey?: boolean;
+  /** Only used when config enables it (`free.providers.<id>.enabled: true`): a local server that may not be running. */
+  optIn?: boolean;
+  /** Where the model list lives when it isn't `<baseURL>/models` (Cohere lists on its native API). */
+  modelsURL?: string;
+  /** One line for `apibrain keys`: what the free tier gives, and its catch (prompt logging, phone check…). */
+  note?: string;
   /** Env var that overrides `baseURL` (a local server on another port). */
   baseURLEnv?: string;
   /**
@@ -80,6 +88,7 @@ export interface ApiProviderSpec {
 
 export function defineProvider(spec: ApiProviderSpec): ApiProviderSpec {
   if (!/^[a-z0-9-]+$/.test(spec.id)) throw new Error(`provider id "${spec.id}": lowercase letters, digits and dashes only`);
+  if (spec.optIn && !spec.noKey) throw new Error(`provider ${spec.id}: optIn is for keyless providers (a keyed one is on when its key is set)`);
   if (!spec.noKey && !spec.keyEnv) throw new Error(`provider ${spec.id}: needs keyEnv (or noKey)`);
   return { protocol: "openai", listsModels: true, ...spec };
 }

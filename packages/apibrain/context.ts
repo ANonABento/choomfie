@@ -84,12 +84,28 @@ export function systemPrompt(persona: Persona | undefined, modeFrame?: string): 
   return [
     who,
     "You're replying in a Discord chat. Use Discord markdown, keep replies concise unless asked for depth, and stay under about 1800 characters when you can.",
-    "Write the reply itself: don't start it with your name, a label or a heading saying who is speaking.",
-    "Several people may write here; messages from anyone but the owner start with who sent them.",
     modeFrame?.trim(),
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/**
+ * A reply that opens with a speaker label (`**Mahiro**:`, `Mahiro Oyama —`,
+ * a `### Mahiro` heading): some models write a script when given a
+ * character. Cut here rather than forbidden in the prompt, so it never
+ * reaches Discord or the transcript (where the next turn would copy it).
+ */
+export function stripSpeakerLabel(text: string, persona?: Persona): string {
+  const names = new Set(["assistant", "ai"]);
+  if (persona?.name) {
+    names.add(persona.name.toLowerCase());
+    names.add(persona.name.split(/\s+/)[0].toLowerCase());
+  }
+  const m = /^\s*(?:#{1,6}\s*)?(?:\*\*|__|\*)?([^\n*_:：—–-]{1,40}?)(?:\s*[:：]\s*(?:\*\*|__|\*)?|(?:\*\*|__|\*)?\s*(?:[:：—–-]|\n))\s*/.exec(text);
+  if (!m || !names.has(m[1].trim().toLowerCase())) return text;
+  const rest = text.slice(m[0].length);
+  return rest.trim() ? rest.trimStart() : text;
 }
 
 export interface BuildInput {

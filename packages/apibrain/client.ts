@@ -189,32 +189,66 @@ export async function listModels(
   apiKey: string | undefined,
   headers: Record<string, string> | undefined,
   fetchImpl: FetchLike = fetch,
-  timeoutMs = 15_000
+  timeoutMs = 15_000,
+  url = `${baseURL}/models`
 ): Promise<ModelInfo[]> {
-  const res = await send(fetchImpl, `${baseURL}/models`, { headers: authHeaders(apiKey, headers) }, linkedSignal(undefined, timeoutMs));
+  const res = await send(fetchImpl, url, { headers: authHeaders(apiKey, headers) }, linkedSignal(undefined, timeoutMs));
   const body = await res.text().catch(() => "");
   if (!res.ok) throw classifyFailure(res.status, body);
   const data = JSON.parse(body) as { data?: unknown[]; models?: unknown[] };
-  const rows = (data.data ?? data.models ?? []) as {
-    id?: string;
-    name?: string;
-    pricing?: { prompt?: string | number; completion?: string | number };
-    context_length?: number;
-    context_window?: number;
-    architecture?: { input_modalities?: string[]; output_modalities?: string[] };
-  }[];
-  return rows.flatMap((m) => {
-    const id = (m.id ?? m.name)?.replace(/^models\//, "");
-    if (!id) return [];
-    const price = (v: string | number | undefined) => (v === undefined || v === "" ? undefined : Number(v));
-    return [
-      {
-        id,
-        ...(m.pricing ? { pricing: { prompt: price(m.pricing.prompt), completion: price(m.pricing.completion) } } : {}),
-        ...(m.context_length || m.context_window ? { contextLength: m.context_length ?? m.context_window } : {}),
-        ...(m.architecture?.input_modalities ? { vision: m.architecture.input_modalities.includes("image") } : {}),
-        ...(m.architecture?.output_modalities ? { chat: m.architecture.output_modalities.includes("text") } : {}),
-      },
-    ];
+  return ((data.data ?? data.models ?? []) as ListedModel[]).flatMap((m) => {
+    const info = parseListed(m);
+    return info ? [info] : [];
   });
+}
+
+/** One row of a `/models` listing. Providers agree on `id` and little else. */
+interface ListedModel {
+  id?: string;
+  name?: string;
+  pricing?: { prompt?: string | number; completion?: string | number; input?: string | number; output?: string | number };
+  context_length?: number;
+  context_window?: number | { tokens?: number };
+  max_context_length?: number;
+  architecture?: { input_modalities?: string[]; output_modalities?: string[]; modality?: string };
+  input_modalities?: string[];
+  output_modalities?: string[];
+  modalities?: { input?: string[]; output?: string[] };
+  /** Mistral. */
+  capabilities?: { completion_chat?: boolean; vision?: boolean };
+  /** Cohere's native list: which endpoints take the model. */
+  endpoints?: string[];
+  supports_vision?: boolean;
+  model_type?: string;
+  type?: string;
+  tier?: string;
+}
+
+/** Normalize the shapes seen so far (OpenAI, OpenRouter/Kilo, Mistral, Cohere, LLM7, Gonka/Runcrate). Exported for tests. */
+export function parseListed(m: ListedModel): ModelInfo | null {
+  const id = (m.id ?? m.name)?.replace(/^models\//, "");
+  if (!id) return null;
+  const num = (v: string | number | undefined) => (v === undefined || v === "" ? undefined : Number(v));
+  const prompt = num(m.pricing?.prompt ?? m.pricing?.input);
+  const completion = num(m.pricing?.completion ?? m.pricing?.output);
+  const ctxWindow = typeof m.context_window === "object" ? m.context_window?.tokens : m.context_window;
+  const contextLength = m.context_length || ctxWindow || m.max_context_length || undefined;
+  const inputs = m.architecture?.input_modalities ?? m.input_modalities ?? m.modalities?.input;
+  const outputs = m.architecture?.output_modalities ?? m.output_modalities ?? m.modalities?.output;
+  const arrow = m.architecture?.modality?.split("->");
+  const vision = m.capabilities?.vision ?? m.supports_vision ?? (inputs ? inputs.includes("image") : arrow ? arrow[0].includes("image") : undefined);
+  const kind = m.model_type ?? m.type;
+  const chat =
+    m.capabilities?.completion_chat ??
+    (m.endpoints ? m.endpoints.includes("chat") : undefined) ??
+    (kind && kind !== "model" ? /chat|text|llm|language/.test(kind) && !/embed|image|audio|speech|rerank/.test(kind) : undefined) ??
+    (outputs ? outputs.includes("text") : arrow ? arrow[1]?.includes("text") : undefined);
+  return {
+    id,
+    ...(m.pricing && (prompt !== undefined || completion !== undefined) ? { pricing: { prompt, completion } } : {}),
+    ...(contextLength ? { contextLength } : {}),
+    ...(vision !== undefined ? { vision } : {}),
+    ...(chat !== undefined ? { chat } : {}),
+    ...(m.tier ? { tier: m.tier } : {}),
+  };
 }

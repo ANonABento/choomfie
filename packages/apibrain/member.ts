@@ -281,7 +281,8 @@ export class ApiMember {
   async probe(opts: { signal?: AbortSignal; onResult?: (model: string, ok: boolean, why: string) => void } = {}): Promise<void> {
     const av = this.deps.availability;
     if (!av || !this.configured) return;
-    const gap = this.limits.rpm ? Math.ceil(60_000 / this.limits.rpm) : 1_000;
+    // Per-model limits: models don't share a budget, so only a polite second between them.
+    const gap = this.limits.rpm && this.spec.limitScope !== "model" ? Math.ceil(60_000 / this.limits.rpm) : 1_000;
     const todo = this.catalog.candidates(this.spec, this.deps.overrides?.models).filter((m) => av.untested(this.modelUnit(m.id)));
     for (const [i, m] of todo.entries()) {
       if (opts.signal?.aborted) return;
@@ -294,6 +295,8 @@ export class ApiMember {
         // Refusing a plain "say ok" means it isn't a chat model we can use (an agent, a special endpoint).
         if (kind === "bad_request") av.mark(this.modelUnit(m.id), false, "refused a plain chat request");
         opts.onResult?.(m.id, false, kind);
+        // The key itself is out (bad, or its shared allowance spent): the rest would fail the same way.
+        if (kind === "auth" || (this.spec.limitScope !== "model" && (kind === "rate_limit" || kind === "quota"))) return;
       }
     }
   }
@@ -310,7 +313,7 @@ export class ApiMember {
     if (!force && this.catalog.known && !this.catalog.stale(CATALOG_MAX_AGE_MS)) return;
     const key = this.keys.keys[0];
     try {
-      this.catalog.set(await listModels(this.baseURL!, key.value || undefined, this.spec.headers, this.fetchImpl));
+      this.catalog.set(await listModels(this.baseURL!, key.value || undefined, this.spec.headers, this.fetchImpl, 15_000, this.spec.modelsURL));
       const models = this.models();
       if (!models.length) console.error(`[apibrain] ${this.label}: none of its models are listed or free right now`);
     } catch (e) {

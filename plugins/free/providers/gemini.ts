@@ -7,6 +7,7 @@ export default defineProvider({
   baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
   keyEnv: "GEMINI_API_KEY",
   signup: "https://aistudio.google.com/apikey",
+  note: "big context, sees images; free prompts may be used for training",
   vision: (model) => !/tts|embed/.test(model),
   contextTokens: 32_000,
   limits: { rpm: 10, rpd: 250 },
