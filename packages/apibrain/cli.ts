@@ -155,27 +155,40 @@ export function showLog(dataDir: string, args: string[]): void {
   const routes = entries.flatMap((e, i) => (e.type === "route" ? [i] : []));
   const from = routes.length > count ? routes[routes.length - count - 1] + 1 : 0;
   const time = (at: string) => new Date(at).toLocaleTimeString();
+  const printCall = (e: Extract<LogEntry, { type: "call" }>) => {
+    const mark = e.ok ? "✓" : "✗";
+    const tokens = e.usage ? ` · ${e.usage.prompt}+${e.usage.completion} tok` : "";
+    console.log(`   ${mark} ${e.purpose.padEnd(8)} ${e.provider}:${e.model} key ${e.key} · ${(e.ms / 1000).toFixed(1)}s${tokens}${e.error ? ` · ${clip(e.error, 120)}` : ""}`);
+    if (full) {
+      for (const m of e.messages) console.log(`       ${m.role.padEnd(9)} ${contentText(m.content).replace(/\n/g, "\n                 ")}`);
+      if (e.reply) console.log(`       ${"→ reply".padEnd(9)} ${e.reply.replace(/\n/g, "\n                 ")}`);
+    } else if (e.purpose === "answer") {
+      const system = e.messages.filter((m) => m.role === "system").length;
+      const last = e.messages[e.messages.length - 1];
+      console.log(`       sent ${e.messages.length} messages (system ${system}, history ${e.messages.length - 1 - system}) · last: “${clip(contentText(last?.content), 90)}”`);
+      if (e.reply) console.log(`       reply: “${clip(e.reply, 110)}”`);
+    }
+  };
+  // A message's route line is written once it's answered, after its calls: show the message first.
+  let pending: Extract<LogEntry, { type: "call" }>[] = [];
   for (const e of entries.slice(from)) {
     if (e.type === "call") {
-      const mark = e.ok ? "✓" : "✗";
-      const tokens = e.usage ? ` · ${e.usage.prompt}+${e.usage.completion} tok` : "";
-      console.log(`   ${mark} ${e.purpose.padEnd(8)} ${e.provider}:${e.model} key ${e.key} · ${(e.ms / 1000).toFixed(1)}s${tokens}${e.error ? ` · ${clip(e.error, 120)}` : ""}`);
-      if (full) {
-        for (const m of e.messages) console.log(`       ${m.role.padEnd(9)} ${contentText(m.content).replace(/\n/g, "\n                 ")}`);
-        if (e.reply) console.log(`       ${"→ reply".padEnd(9)} ${e.reply.replace(/\n/g, "\n                 ")}`);
-      } else if (e.purpose === "answer") {
-        const last = e.messages[e.messages.length - 1];
-        console.log(`       sent ${e.messages.length} messages (system ${e.messages.filter((m) => m.role === "system").length}, history ${e.messages.length - 1 - e.messages.filter((m) => m.role === "system").length}) · last: “${clip(contentText(last?.content), 90)}”`);
-        if (e.reply) console.log(`       reply: “${clip(e.reply, 110)}”`);
-      }
-    } else {
-      const how = `${e.by}${e.confidence !== undefined ? ` ${e.confidence.toFixed(2)}` : ""}${e.reason && e.reason !== e.by ? `, ${e.reason}` : ""}`;
-      console.log(`\n${time(e.at)} [chat ${e.chat.slice(0, 8)}] “${clip(e.text, 80)}”`);
-      console.log(`   → ${e.bucket} (${how}) · plan: ${e.plan.slice(0, 5).join(", ")}${e.plan.length > 5 ? ", …" : ""}`);
-      for (const p of e.passed) console.log(`   ⤼ ${clip(p, 140)}`);
-      console.log(e.answered ? `   ✓ answered by ${e.answered} in ${((e.ms ?? 0) / 1000).toFixed(1)}s` : `   ✗ ${e.error ?? "no answer"}`);
+      pending.push(e);
+      continue;
     }
+    const mine = pending.filter((c) => (c.chat === e.chat || (!c.chat && c.purpose === "classify")) && c.purpose !== "probe");
+    const others = pending.filter((c) => !mine.includes(c));
+    pending = [];
+    for (const c of others) printCall(c);
+    const how = `${e.by}${e.confidence !== undefined ? ` ${e.confidence.toFixed(2)}` : ""}${e.reason && e.reason !== e.by ? `, ${e.reason}` : ""}`;
+    console.log(`\n${time(e.at)} [chat ${e.chat.slice(0, 8)}] “${clip(e.text, 80)}”`);
+    console.log(`   → ${e.bucket} (${how}) · plan: ${e.plan.slice(0, 5).join(", ")}${e.plan.length > 5 ? ", …" : ""}`);
+    for (const c of mine) printCall(c);
+    for (const p of e.passed) console.log(`   ⤼ ${clip(p, 140)}`);
+    console.log(e.answered ? `   ✓ answered by ${e.answered} in ${((e.ms ?? 0) / 1000).toFixed(1)}s` : `   ✗ ${e.error ?? "no answer"}`);
   }
+  if (pending.length) console.log("");
+  for (const c of pending) printCall(c);
   console.log(`\n${file}${full ? "" : " — add --full to see every message sent"}`);
 }
 
