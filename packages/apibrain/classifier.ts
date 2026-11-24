@@ -62,7 +62,7 @@ export function hardRules(ids: Set<string>, opts: HardRuleOptions) {
 }
 
 const KEYWORDS: [bucket: string, re: RegExp][] = [
-  ["agentic", /\b(in (the|my) (repo|workspace|sandbox)|open a pr|commit|run (it|the|this)|execute|deploy|build (me|a|an|the)|scaffold|browse|click|cad|stl|3d model|create (a|the) (file|repo|project))\b/i],
+  ["agentic", /\b(in (the|my) (repo|workspace|sandbox)|open a pr|commit|run (it|the|this)|execute|deploy|build (me|a|an|the)|scaffold|browse|click|cad|stl|3d model|create (a|the) (file|repo|project)|(make|draw|generate|create|paint|design) (me )?(an? |the |some )?(image|picture|pic|drawing|art|artwork|logo|sticker|wallpaper|icon)s?)\b/i],
   ["code", /```|\b(code|function|class|bug|error|stack ?trace|refactor|typescript|javascript|python|regex|sql|compile|exception|api)\b/i],
   ["research", /\b(latest|news|today|current(ly)?|this (week|month|year)|sources?|cite|look up|search|price of|who won)\b/i],
   ["quality", /\b(analy[sz]e|compare|explain (why|how|in detail)|essay|proof|reason|plan out|trade-?offs?|pros and cons|rewrite)\b/i],

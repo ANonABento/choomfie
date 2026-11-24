@@ -11,7 +11,7 @@ const spec = defineProvider({
   label: "Acme",
   baseURL: "https://acme/v1",
   keyEnv: "ACME_API_KEY",
-  defaultModels: ["big", "small"],
+  fallbackModels: ["big", "small"],
   limits: { rpm: 2 },
 });
 
@@ -85,11 +85,26 @@ describe("ApiMember.complete", () => {
     expect((await m.complete(msgs).catch((x) => x)).kind).toBe("auth");
   });
 
-  test("catalog: configured models that vanished fall back to listed free ones", async () => {
-    const { m } = member(() =>
-      new Response(JSON.stringify({ data: [{ id: "new-a:free", context_length: 9 }, { id: "new-b:free", context_length: 99 }, { id: "paid" }] }))
-    , undefined, { isFree: (id: string) => id.endsWith(":free") });
+  test("catalog: models come from the live list — free chat models only, newest of each family, strongest first", async () => {
+    const { m } = member(
+      () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              { id: "x-8b:free" },
+              { id: "x-70b:free" },
+              { id: "y-2.5-flash:free" },
+              { id: "y-3.1-flash:free" },
+              { id: "z-embed-1b:free" },
+              { id: "paid-400b" },
+            ],
+          })
+        ),
+      undefined,
+      { isFree: (id: string) => id.endsWith(":free") }
+    );
     await m.refreshCatalog(true);
-    expect(m.models()).toEqual(["new-b:free", "new-a:free"]);
+    expect(m.models()).toEqual(["y-3.1-flash:free", "x-70b:free", "x-8b:free"]);
+    expect(m.ranked("tiny")[0].id).toBe("x-8b:free");
   });
 });

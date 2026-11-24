@@ -1,15 +1,12 @@
 /**
  * Which models a provider has right now, from its `/models`. Refreshed at
- * startup and daily, so a renamed or retired model is skipped without a code
- * change, and a provider whose configured models have all gone still answers
- * with whatever free models it lists today.
+ * startup and every few hours, so a new model is picked up and a renamed or
+ * retired one dropped without a code change (models.ts ranks them).
  */
 
+import { isChatModel, modelTraits, newestOnly, type ModelTraits } from "./models.ts";
 import type { ApiProviderSpec, ModelInfo } from "./provider.ts";
-import { modelIsFree } from "./provider.ts";
-
-/** How many catalog models to fall back on when none of the configured ones exist any more. */
-const FALLBACK_MODELS = 3;
+import { modelHasVision, modelIsFree } from "./provider.ts";
 
 export class Catalog {
   private models: Map<string, ModelInfo> | null = null;
@@ -20,13 +17,17 @@ export class Catalog {
     this.fetchedAt = at;
   }
 
-  /** True once a model list has been fetched. Before that, configured models are taken on trust. */
+  /** True once a model list has been fetched. */
   get known(): boolean {
     return this.models !== null;
   }
 
   get size(): number {
     return this.models?.size ?? 0;
+  }
+
+  ids(): string[] {
+    return [...(this.models?.keys() ?? [])];
   }
 
   info(model: string): ModelInfo | undefined {
@@ -38,17 +39,19 @@ export class Catalog {
   }
 
   /**
-   * The models to use, in order: the preferred ones that exist and are free;
-   * if none do, the largest free models the provider lists.
+   * The models this provider may use, with their traits, unordered:
+   * - `pinned` (config) when given: those that are listed and free, in that order;
+   * - otherwise every free chat model listed, newest of each family;
+   * - with no list (not fetched yet, or a provider that can't list): the spec's fallback.
    */
-  pick(preferred: string[], spec: ApiProviderSpec): string[] {
-    if (!this.models) return preferred.filter((m) => modelIsFree(spec, m));
-    const present = preferred.filter((m) => this.models!.has(m) && modelIsFree(spec, m, this.models!.get(m)));
-    if (present.length) return present;
-    return [...this.models.values()]
-      .filter((m) => modelIsFree(spec, m.id, m) && !/embed|whisper|tts|guard|safety|retriever|rerank|moderation|lyria|music|image-|audio/i.test(m.id))
-      .sort((a, b) => (b.contextLength ?? 0) - (a.contextLength ?? 0))
-      .slice(0, FALLBACK_MODELS)
-      .map((m) => m.id);
+  candidates(spec: ApiProviderSpec, pinned?: string[]): ModelTraits[] {
+    const traits = (id: string) => modelTraits(id, this.info(id), modelHasVision(spec, id, this.info(id)));
+    if (pinned?.length) {
+      const usable = this.models ? pinned.filter((m) => this.models!.has(m)) : pinned;
+      return usable.filter((m) => modelIsFree(spec, m, this.info(m))).map(traits);
+    }
+    if (!this.models) return (spec.fallbackModels ?? []).filter((m) => modelIsFree(spec, m)).map(traits);
+    const chat = [...this.models.values()].filter((m) => modelIsFree(spec, m.id, m) && isChatModel(m.id, m));
+    return newestOnly(chat.map((m) => traits(m.id)));
   }
 }

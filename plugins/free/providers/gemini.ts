@@ -7,9 +7,9 @@ export default defineProvider({
   baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
   keyEnv: "GEMINI_API_KEY",
   signup: "https://aistudio.google.com/apikey",
-  defaultModels: ["gemini-flash-latest", "gemini-3.8-flash", "gemini-3.5-flash-lite"],
   vision: (model) => !/tts|embed/.test(model),
   contextTokens: 32_000,
   limits: { rpm: 10, rpd: 250 },
   limitScope: "model",
+  resetTimeZone: "America/Los_Angeles",
 });

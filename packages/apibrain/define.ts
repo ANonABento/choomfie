@@ -31,7 +31,7 @@ export async function apiTurn(input: ApiTurnInput): Promise<Completion & { token
     current: input.current,
     budget: input.budget ?? input.member.contextTokens,
   });
-  const r = await input.member.complete(built.messages, { model: input.model, signal: input.signal, tokens: built.tokens });
+  const r = await input.member.complete(built.messages, { model: input.model, signal: input.signal, tokens: built.tokens, purpose: "answer", chatId: input.chatId });
   return { ...r, tokens: built.tokens };
 }
 
@@ -44,7 +44,7 @@ export function summarizer(member: ApiMember): (text: string) => Promise<string>
           { role: "system", content: SUMMARY_PROMPT },
           { role: "user", content: text },
         ],
-        { maxTokens: 600, temperature: 0.2, timeoutMs: 60_000 }
+        { maxTokens: 600, temperature: 0.2, timeoutMs: 60_000, purpose: "summary" }
       )
     ).text;
 }
@@ -70,6 +70,7 @@ export function defineApiBrain(member: ApiMember, deps: ApiBrainDeps): (ctx: Plu
 
       async send(message): Promise<BrainReply> {
         const chat = chats.current(message.chatKey, member.id, message.content);
+        await member.ready();
         // The chat's `/model`, while the provider still lists it; otherwise its models in order.
         const model = chat.model && member.models().includes(chat.model) ? chat.model : undefined;
         const current = userContent(framePrompt(message.content, message.meta), message.filePaths, member.vision(model));
@@ -104,7 +105,7 @@ export function defineApiBrain(member: ApiMember, deps: ApiBrainDeps): (ctx: Plu
       },
 
       models() {
-        return member.models().map((id) => ({ id, ...(member.vision(id) ? { description: "sees images" } : {}) }));
+        return member.models().map((id) => ({ id, description: member.describe(id) || member.label }));
       },
 
       async compact(chatKey) {

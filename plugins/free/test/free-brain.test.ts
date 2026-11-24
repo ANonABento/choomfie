@@ -32,7 +32,7 @@ function fakeChats(): ChatsApi & { all: ChatRecord[] } {
 type Script = (model: string, body: { messages: { role: string; content: unknown }[] }) => Response;
 
 function apiMember(id: string, script: Script, health: Health, quota: Quota) {
-  const spec = defineProvider({ id, label: id.toUpperCase(), baseURL: `https://${id}/v1`, keyEnv: `${id.toUpperCase()}_KEY`, defaultModels: [`${id}-m`] });
+  const spec = defineProvider({ id, label: id.toUpperCase(), baseURL: `https://${id}/v1`, keyEnv: `${id.toUpperCase()}_KEY`, fallbackModels: [`${id}-m`], listsModels: false });
   const calls: { model: string; messages: { role: string; content: unknown }[] }[] = [];
   const fetchImpl = (async (_url: string, init?: RequestInit) => {
     const body = JSON.parse(String(init!.body));
@@ -272,9 +272,11 @@ describe("config", () => {
     );
     expect(c.strategy).toBe("smart");
     expect(c.buckets.find((b) => b.id === "code")!.targets).toEqual(["groq"]);
-    expect(c.buckets.find((b) => b.id === "agentic")!.targets).toEqual(["waymond", "groq"]);
+    // Unpinned buckets route by need, from the live model lists.
+    expect(c.buckets.find((b) => b.id === "agentic")!.targets).toBeUndefined();
+    expect(c.buckets.find((b) => b.id === "agentic")!.brains).toEqual(["waymond"]);
     expect(c.classifier.suggestAt).toBe(0.75);
-    expect(c.classifier.targets[0]).toBe("groq:tiny");
+    expect(c.classifier.targets![0]).toBe("groq:tiny");
     expect(c.providers.groq).toEqual({ models: ["a"], limits: { rpm: 5 } });
     expect(warnings.length).toBe(2);
     expect(expandTargets(["@a"], new Map([["a", ["@a", "x"]]]))).toEqual(["x"]);

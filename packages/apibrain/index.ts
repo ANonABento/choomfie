@@ -12,9 +12,12 @@ export { chatCompletion, listModels, classifyFailure, parseRateHeaders, parseDur
 export { ProviderError, AllUnavailableError, type ProviderErrorKind } from "./errors.ts";
 export { Health, COOLDOWN_MS, shortDuration, type HealthOptions } from "./health.ts";
 export { KeyPool, discoverKeys, type ApiKey } from "./keys.ts";
-export { Quota } from "./quota.ts";
+export { Quota, dayIn, msToMidnight } from "./quota.ts";
 export { Catalog } from "./catalog.ts";
-export { ApiMember, type MemberOverrides, type ApiMemberDeps, type CompleteOptions, type Completion } from "./member.ts";
+export { isChatModel, modelTraits, newestOnly, score, describeModel, NEEDS, type Need, type ModelTraits, type ScoreContext } from "./models.ts";
+export { Availability, RECHECK_MS, type ModelCheck } from "./availability.ts";
+export { CallLog, redact, nowIso, type CallEntry, type RouteEntry, type LogEntry } from "./calllog.ts";
+export { ApiMember, rankAcross, type MemberOverrides, type ApiMemberDeps, type CompleteOptions, type Completion } from "./member.ts";
 export { Transcript, type Turn, type Summary } from "./transcript.ts";
 export { buildMessages, estimateTokens, isImage, recap, systemPrompt, userContent, IMAGE_TOKENS, type Persona, type UserContent } from "./context.ts";
 export { maybeCompact, SUMMARY_PROMPT } from "./compact.ts";

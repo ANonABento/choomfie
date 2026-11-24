@@ -1,18 +1,25 @@
 /**
- * The kinds of message the free brain tells apart, and who answers each.
+ * The kinds of message the free brain tells apart, and what each needs.
  *
  * One table: the zero-shot classifier's prompt is built from `description`,
- * `/mode` lists `id`/`label`, and `targets` is the default routing — tried in
- * order, failing over down the list, then down `free.priority`. A target is
- * `member[:model]`: an API provider (`groq`, optionally pinned to a model) or
- * any registered brain (`waymond`). `@bucket` splices in another bucket's list.
- * config.json `free.buckets.<id>` replaces a bucket's targets.
+ * and each bucket names a **need** (fast, strong, vision, long), never a
+ * model. Which models meet a need is worked out from each provider's live
+ * model list (`@choomfie/apibrain` models.ts), so nothing here goes stale
+ * when a provider renames or retires a model. `brains` are web brains tried
+ * first for that kind of work (on a first message) or offered with a button.
+ *
+ * config.json `free.buckets.<id>` pins a bucket to explicit targets
+ * (`member[:model]`; `@bucket` splices another bucket's pins).
  */
 
-import type { BucketDef } from "@choomfie/apibrain";
+import type { BucketDef, Need } from "@choomfie/apibrain";
 
 export interface Bucket extends BucketDef {
-  targets: string[];
+  need: Need;
+  /** Web brains for this kind of work, before any API model. */
+  brains: string[];
+  /** Explicit targets from config, replacing need-based routing. */
+  targets?: string[];
 }
 
 export const BUCKETS: Bucket[] = [
@@ -20,70 +27,53 @@ export const BUCKETS: Bucket[] = [
     id: "chat",
     label: "Chat",
     description: "small talk, greetings, opinions, jokes, quick factual questions, short everyday help",
-    targets: ["groq:llama-3.3-70b-versatile", "gemini:gemini-3.5-flash-lite", "groq:openai/gpt-oss-20b", "cloudflare", "openrouter", "ollama"],
+    need: "fast",
+    brains: [],
   },
   {
     id: "quality",
     label: "Think it through",
     description: "needs careful thinking or good writing: analysis, comparisons, plans, long explanations, math, editing or rewriting text",
-    targets: [
-      "openrouter:nvidia/nemotron-3-ultra-550b-a55b:free",
-      "gemini:gemini-flash-latest",
-      "nvidia:nvidia/nemotron-3-ultra-550b-a55b",
-      "groq:openai/gpt-oss-120b",
-      "sambanova",
-    ],
+    need: "strong",
+    brains: [],
   },
   {
     id: "code",
     label: "Code",
     description: "about programming, answered in the reply itself: explain, write, review or debug code, errors, shell commands, regex, SQL",
-    targets: [
-      "groq:openai/gpt-oss-120b",
-      "openrouter:nvidia/nemotron-3-ultra-550b-a55b:free",
-      "nvidia:z-ai/glm-5.3-flash",
-      "gemini:gemini-flash-latest",
-      "groq:qwen/qwen3.8-27b",
-      "sambanova",
-    ],
+    need: "strong",
+    brains: [],
   },
   {
     id: "agentic",
     label: "Do the work",
     description:
-      "asks the assistant to DO work with tools, not just answer: change a repo, make or edit files, run code, build an app, a website or a 3D/CAD part, browse sites, multi-step tasks",
-    targets: ["waymond", "@code"],
+      "asks the assistant to DO or MAKE something with tools, not just answer in text: make, draw or edit an image, picture or art; change a repo; make or edit files; run code; build an app, a website or a 3D/CAD part; browse sites; multi-step tasks",
+    need: "strong",
+    brains: ["waymond"],
   },
   {
     id: "research",
     label: "Research",
     description: "needs current or sourced information from the web: news, today's prices, recent releases, looking something up, citations",
-    targets: ["waymond", "gemini:gemini-flash-latest", "openrouter"],
+    need: "strong",
+    brains: ["waymond"],
   },
   {
     id: "vision",
     label: "Images",
     description: "about an attached image",
-    targets: [
-      "gemini:gemini-flash-latest",
-      "openrouter:nvidia/nemotron-3.5-super-vl:free",
-      "openrouter:google/gemma-4-31b-it:free",
-      "nvidia:nvidia/nemotron-3.5-super-vl-120b-a12b",
-    ],
+    need: "vision",
+    brains: [],
   },
   {
     id: "long",
     label: "Long input",
     description: "a very long document or message to read",
-    targets: ["gemini:gemini-flash-latest", "openrouter:nvidia/nemotron-3-ultra-550b-a55b:free", "openrouter"],
+    need: "long",
+    brains: [],
   },
 ];
 
-/** When a bucket's list is spent: anything that can answer at all. */
+/** When a bucket's list is spent: any provider that can answer at all (each with its own best model). */
 export const DEFAULT_PRIORITY = ["groq", "gemini", "openrouter", "nvidia", "sambanova", "cloudflare", "ollama"];
-
-/** Small, fast models for the zero-shot classifier (it runs on most messages: keep it off scarce quotas like OpenRouter's 50/day). */
-export const DEFAULT_CLASSIFIER_TARGETS = ["groq:llama-3.1-8b-instant", "groq:openai/gpt-oss-20b", "gemini:gemini-3.5-flash-lite", "cloudflare:@cf/openai/gpt-oss-20b", "ollama"];
-
-/** For background summaries: cheap and plentiful. */
-export const DEFAULT_SUMMARY_TARGETS = ["groq:llama-3.3-70b-versatile", "gemini:gemini-3.5-flash-lite", "groq:openai/gpt-oss-20b", "cloudflare", "ollama"];

@@ -7,7 +7,7 @@
  */
 
 import type { Limits, MemberOverrides } from "@choomfie/apibrain";
-import { BUCKETS, DEFAULT_CLASSIFIER_TARGETS, DEFAULT_PRIORITY, DEFAULT_SUMMARY_TARGETS, type Bucket } from "./buckets.ts";
+import { BUCKETS, DEFAULT_PRIORITY, type Bucket } from "./buckets.ts";
 
 export type Strategy = "smart" | "priority";
 
@@ -20,12 +20,13 @@ export interface FreeConfig {
   /** smart: classify, then the bucket's targets. priority: always `priority`, in order. */
   strategy: Strategy;
   priority: string[];
-  /** Buckets with their targets, `@bucket` references expanded. */
+  /** Buckets; one config pinned has `targets`, `@bucket` references expanded. */
   buckets: Bucket[];
   classifier: {
     /** zero-shot: a fast model classifies. keywords: regex rules only (no calls). */
     type: "zero-shot" | "keywords";
-    targets: string[];
+    /** Pinned classifier models; otherwise the smallest quick ones listed (need "tiny"). */
+    targets?: string[];
     /**
      * How sure (0–1) the classifier must be, mid-chat, before a reply offers
      * to hand the chat to a web brain ("Hand this to Waymond").
@@ -34,7 +35,8 @@ export interface FreeConfig {
     /** Prompts over this many tokens are `long`. */
     longTokens: number;
   };
-  summaryTargets: string[];
+  /** Pinned summary models; otherwise need "fast". */
+  summaryTargets?: string[];
   providers: Record<string, ProviderSettings>;
   /** Add "-# via Groq · model" under each answer. */
   footer: boolean;
@@ -82,13 +84,13 @@ export function parseFreeConfig(raw: unknown, warn: (msg: string) => void = (m) 
     if (!BUCKETS.some((b) => b.id === id)) warn(`unknown bucket "${id}" — buckets are ${BUCKETS.map((b) => b.id).join(", ")}`);
     else if (!isStringList(v)) warn(`bucket "${id}" should be a list of targets`);
   }
-  const raw_ = new Map(BUCKETS.map((b) => [b.id, isStringList(overrides[b.id]) ? (overrides[b.id] as string[]) : b.targets]));
-  const buckets = BUCKETS.map((b) => ({ ...b, targets: expandTargets(raw_.get(b.id)!, raw_) }));
+  const pins = new Map(BUCKETS.flatMap((b) => (isStringList(overrides[b.id]) ? [[b.id, overrides[b.id] as string[]] as const] : [])));
+  const buckets = BUCKETS.map((b) => (pins.has(b.id) ? { ...b, targets: expandTargets(pins.get(b.id)!, pins) } : { ...b }));
 
   const cl = isRecord(c.classifier) ? c.classifier : {};
   const classifier: FreeConfig["classifier"] = {
     type: cl.type === "keywords" ? "keywords" : "zero-shot",
-    targets: isStringList(cl.targets) ? cl.targets : typeof cl.target === "string" ? [cl.target, ...DEFAULT_CLASSIFIER_TARGETS] : DEFAULT_CLASSIFIER_TARGETS,
+    ...(isStringList(cl.targets) ? { targets: cl.targets } : typeof cl.target === "string" ? { targets: [cl.target] } : {}),
     suggestAt: num(cl.suggestAt, 0, 1) ?? 0.75,
     longTokens: num(cl.longTokens, 500, 1e7) ?? 6_000,
   };
@@ -113,7 +115,7 @@ export function parseFreeConfig(raw: unknown, warn: (msg: string) => void = (m) 
     priority,
     buckets,
     classifier,
-    summaryTargets: isStringList(c.summaryTargets) ? c.summaryTargets : DEFAULT_SUMMARY_TARGETS,
+    ...(isStringList(c.summaryTargets) ? { summaryTargets: c.summaryTargets } : {}),
     providers,
     footer: c.footer === true,
     ...(num(c.contextTokens, 500, 2e6) ? { contextTokens: num(c.contextTokens, 500, 2e6) } : {}),

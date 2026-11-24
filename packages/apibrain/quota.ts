@@ -14,7 +14,7 @@ import type { RateSnapshot } from "./client.ts";
 import type { Limits } from "./provider.ts";
 
 interface Counter {
-  /** UTC day the daily counts belong to (YYYY-MM-DD). */
+  /** Day the daily counts belong to (YYYY-MM-DD) in the provider's reset zone (UTC unless set). */
   day: string;
   requestsToday: number;
   tokensToday: number;
@@ -26,11 +26,24 @@ interface Counter {
   headerRemaining?: number;
 }
 
-const utcDay = (t: number) => new Date(t).toISOString().slice(0, 10);
+/** The date at `t` in a time zone, YYYY-MM-DD. */
+export function dayIn(t: number, zone = "UTC"): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(t);
+}
+
+/** Milliseconds from `t` to the next midnight in a time zone. */
+export function msToMidnight(t: number, zone = "UTC"): number {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(t);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  const into = ((get("hour") * 60 + get("minute")) * 60 + get("second")) * 1000 + (t % 1000);
+  return 86_400_000 - into;
+}
 
 export class Quota {
   private counters = new Map<string, Counter>();
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Provider id → the zone its days reset in. */
+  private zones = new Map<string, string>();
 
   constructor(
     /** Where to keep daily counts; null keeps them in memory (tests, the CLI). */
@@ -49,6 +62,15 @@ export class Quota {
     }
   }
 
+  /** A provider's daily limits reset at midnight in this zone, not UTC. */
+  zone(providerId: string, timeZone: string): void {
+    this.zones.set(providerId, timeZone);
+  }
+
+  private zoneOf(unit: string): string {
+    return this.zones.get(unit.split(/[#:]/)[0]) ?? "UTC";
+  }
+
   /** Room for one more request of about `tokens` on this unit? */
   hasCapacity(unit: string, limits: Limits = {}, tokens = 0): boolean {
     return this.waitMs(unit, limits, tokens) === 0;
@@ -60,7 +82,7 @@ export class Quota {
     const now = this.now();
     if (c.blockedUntil && c.blockedUntil > now) return c.blockedUntil - now;
     if ((limits.rpd && c.requestsToday >= limits.rpd) || (limits.tpd && c.tokensToday + tokens > limits.tpd)) {
-      return Date.parse(`${c.day}T00:00:00Z`) + 86_400_000 - now;
+      return msToMidnight(now, this.zoneOf(unit));
     }
     const minuteTokens = c.minute.reduce((s, [, t]) => s + t, 0);
     const oldest = c.minute[0]?.[0] ?? now;
@@ -114,7 +136,7 @@ export class Quota {
 
   private counter(unit: string): Counter {
     const now = this.now();
-    const day = utcDay(now);
+    const day = dayIn(now, this.zoneOf(unit));
     let c = this.counters.get(unit);
     if (!c) this.counters.set(unit, (c = { day, requestsToday: 0, tokensToday: 0, minute: [] }));
     if (c.day !== day) Object.assign(c, { day, requestsToday: 0, tokensToday: 0 });

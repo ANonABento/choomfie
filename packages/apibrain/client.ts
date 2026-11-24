@@ -99,6 +99,8 @@ export function classifyFailure(status: number, body: string, rate: RateSnapshot
   const goneModel =
     /model[_ ]not[_ ]found|decommissioned|deprecated|does not exist|no endpoints found|unknown model|not a valid model|is not supported|invalid model/.test(text);
 
+  // A quota of zero: the model is listed, but not on this (free) plan.
+  if ((status === 429 || status === 403) && /\blimit:?\s*0\b|not available (on|for) (the )?free|free tier.{0,40}not (supported|available)/.test(text)) return make("not_free");
   if (status === 401 || status === 403) return make("auth");
   if (status === 402) return make("quota", rate.retryAfterMs);
   if (status === 413 || (tooLarge && status !== 429)) return make("too_large");
@@ -199,7 +201,7 @@ export async function listModels(
     pricing?: { prompt?: string | number; completion?: string | number };
     context_length?: number;
     context_window?: number;
-    architecture?: { input_modalities?: string[] };
+    architecture?: { input_modalities?: string[]; output_modalities?: string[] };
   }[];
   return rows.flatMap((m) => {
     const id = (m.id ?? m.name)?.replace(/^models\//, "");
@@ -211,6 +213,7 @@ export async function listModels(
         ...(m.pricing ? { pricing: { prompt: price(m.pricing.prompt), completion: price(m.pricing.completion) } } : {}),
         ...(m.context_length || m.context_window ? { contextLength: m.context_length ?? m.context_window } : {}),
         ...(m.architecture?.input_modalities ? { vision: m.architecture.input_modalities.includes("image") } : {}),
+        ...(m.architecture?.output_modalities ? { chat: m.architecture.output_modalities.includes("text") } : {}),
       },
     ];
   });

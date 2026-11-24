@@ -25,6 +25,8 @@ import {
   AllUnavailableError,
   apiTurn,
   maybeCompact,
+  nowIso,
+  rankAcross,
   parseTarget,
   personaOf,
   recap,
@@ -37,6 +39,7 @@ import {
   isImage,
   estimateTokens,
   type ApiMember,
+  type CallLog,
   type Classification,
   type Classifier,
   type Health,
@@ -80,6 +83,8 @@ export interface FreeBrainDeps {
   classifier: Classifier;
   transcript: Transcript;
   health: Health;
+  /** Where routing decisions are written (`apibrain log`). */
+  log?: CallLog;
   /** Defaults to the shared brain registry. */
   lookupBrain?: (id: string) => Brain | undefined;
 }
@@ -119,6 +124,8 @@ interface Decision {
   pin?: Target;
   /** A web member this message looks like a job for (offered, not taken). */
   suggest?: string;
+  confidence?: number;
+  reason?: string;
 }
 
 export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain {
@@ -136,7 +143,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
 
   /** Every target id that isn't an API provider: brains the router may hand to. */
   const brainMemberIds = (): string[] => {
-    const all = [...config.priority, ...config.buckets.flatMap((b) => b.targets)].map((t) => parseTarget(t).member);
+    const all = [...config.priority, ...config.buckets.flatMap((b) => [...b.brains, ...(b.targets ?? [])])].map((t) => parseTarget(t).member);
     return [...new Set(all)].filter((id) => !members.has(id) && id !== FREE_BRAIN && !config.providers[id] && !PROVIDER_IDS.has(id));
   };
   const isBrainMember = (id: string) => brainMemberIds().includes(id) && !!lookup(id);
@@ -165,7 +172,10 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
 
   function targetsFor(bucketId: string): Target[] {
     if (config.strategy === "priority") return config.priority.map(parseTarget);
-    return [...(bucket(bucketId)?.targets ?? []), ...config.priority].map(parseTarget);
+    const b = bucket(bucketId);
+    // Pinned in config, or: this kind of work's web brains, then the best live models for its need.
+    const planned = b?.targets ? b.targets.map(parseTarget) : [...(b?.brains ?? []).map((id) => ({ member: id })), ...rankAcross(members.values(), b?.need ?? "fast")];
+    return [...planned, ...config.priority.map(parseTarget)];
   }
 
   async function decide(
@@ -191,7 +201,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
       const api = members.get(pin.member)!;
       // An image the pinned model can't see goes to a vision model for this one turn.
       if (!(hasImages && !api.vision(pin.model))) {
-        return { bucket: "pinned", by: "pin", targets: [pin, ...config.priority.map(parseTarget).filter(isApi)], locked: false, pin };
+        return { bucket: "pinned", by: "pin", targets: [pin, ...rankAcross(members.values(), "strong"), ...config.priority.map(parseTarget).filter(isApi)], locked: false, pin };
       }
     }
 
@@ -199,6 +209,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
     let chosen: string;
     let by: Route["by"];
     let confidence = 1;
+    let reason: string | undefined;
     if (config.strategy === "priority") {
       chosen = "priority";
       by = "rule";
@@ -210,17 +221,20 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
       chosen = decision.bucket;
       by = decision.by;
       confidence = decision.confidence;
+      reason = decision.reason;
     }
     const targets = targetsFor(chosen);
     // A first message may go anywhere: nothing is lost if a web brain takes it.
-    if (first && !released) return { bucket: chosen, by, targets, locked: false };
+    const why = { confidence, ...(reason ? { reason } : {}) };
+    if (first && !released) return { bucket: chosen, by, targets, locked: false, ...why };
     // Mid-chat, only API members answer; a web member the bucket names is offered instead.
-    const own = (bucket(chosen)?.targets ?? []).map(parseTarget);
+    const b = bucket(chosen);
+    const own = [...(b?.brains ?? []), ...(b?.targets ?? [])].map(parseTarget);
     const offer =
       released || confidence < config.classifier.suggestAt
         ? undefined
         : own.find((t) => !isApi(t) && isBrainMember(t.member) && waitMs(t, 0) === 0);
-    return { bucket: chosen, by, targets: targets.filter(isApi), locked: false, ...(offer ? { suggest: offer.member } : {}) };
+    return { bucket: chosen, by, targets: targets.filter(isApi), locked: false, ...why, ...(offer ? { suggest: offer.member } : {}) };
   }
 
   async function answerWithApi(member: ApiMember, t: Target, chatId: string, framed: string, filePaths: string[], signal: AbortSignal): Promise<Answer> {
@@ -253,7 +267,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
 
   const summarize = async (text: string) =>
     (
-      await route(config.summaryTargets.map(parseTarget), {
+      await route(config.summaryTargets ? config.summaryTargets.map(parseTarget) : rankAcross(members.values(), "fast", 4), {
         waitMs: (t) => (members.has(t.member) ? members.get(t.member)!.waitMs(t.model) : Infinity),
         attempt: (t) => summarizer(members.get(t.member)!)(text),
       })
@@ -284,11 +298,13 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
     },
 
     models(): BrainModel[] {
-      const out: BrainModel[] = [{ id: AUTO_MODEL, description: "the router picks per message (default)" }];
-      for (const b of brainMembers()) out.push({ id: b.id, description: `${b.label} — keeps the conversation until /model auto` });
+      const out: BrainModel[] = [{ id: AUTO_MODEL, description: "picks the best model for each message (default)" }];
+      for (const b of brainMembers()) out.push({ id: b.id, description: `${b.label} web brain — keeps the chat until /model auto` });
       for (const m of members.values()) {
-        out.push({ id: m.id, description: `${m.label}, its best free model` });
-        for (const id of m.models()) out.push({ id: `${m.id}:${id}`, description: m.label });
+        const models = m.models();
+        if (!models.length) continue;
+        out.push({ id: m.id, description: `any ${m.label} model, best first (${models.length} free now)` });
+        for (const id of models) out.push({ id: `${m.id}:${id}`, description: [m.label, m.describe(id)].filter(Boolean).join(" · ") });
       }
       return out;
     },
@@ -306,14 +322,33 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
       }
 
       const framed = framePrompt(message.content, message.meta);
+      // Model lists are fetched at startup; a message in the first seconds waits for them.
+      await Promise.all([...members.values()].map((m) => m.ready()));
       const abort = new AbortController();
       const run: { abort: AbortController; member?: string } = { abort };
       running.set(message.chatKey, run);
       let d: Decision | undefined;
+      let routeLog: ((f: { passed: string[]; error?: string }) => void) | undefined;
       try {
         const tokens = estimateTokens(framed);
         const decision = await decide(message, chat, framed, tokens, abort.signal, force);
         d = decision;
+        const plan = decision.targets.map(targetKey);
+        const logRoute = (fields: { answered?: string; ms?: number; passed: string[]; error?: string }) =>
+          deps.log?.write({
+            type: "route",
+            at: nowIso(),
+            chat: chat.id,
+            brain: FREE_BRAIN,
+            text: message.content.slice(0, 200),
+            bucket: decision.bucket,
+            by: decision.by,
+            ...(decision.confidence !== undefined ? { confidence: decision.confidence } : {}),
+            ...(decision.reason ? { reason: decision.reason } : {}),
+            plan,
+            ...fields,
+          });
+        routeLog = logRoute;
         const routed = await route(decision.targets, {
           signal: abort.signal,
           waitMs: (t) => waitMs(t, tokens),
@@ -335,6 +370,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         recent.unshift({ ...r, text: message.content.slice(0, 40) });
         recent.length = Math.min(recent.length, 5);
         if (routed.passed.length) console.error(`[free] ${targetKey(routed.target)} answered after: ${routed.passed.join("; ")}`);
+        logRoute({ answered: model ? `${member}:${model}` : member, ms: routed.latencyMs, passed: routed.passed });
         void maybeCompact({ transcript, chatId: chat.id, budget: budget(), summarize });
 
         let text = reply.text;
@@ -345,6 +381,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         return withOffer({ ...reply, text }, message, suggested);
       } catch (e) {
         if (abort.signal.aborted) return { text: "⏹️ Stopped.", stopped: true };
+        routeLog?.({ passed: e instanceof AllUnavailableError ? e.attempts : [], error: e instanceof Error ? e.message : String(e) });
         if (!(e instanceof AllUnavailableError)) throw e;
         console.error(`[free] nothing answered: ${e.attempts.join("; ")}`);
         if (d?.locked) {

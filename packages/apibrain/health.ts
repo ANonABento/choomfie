@@ -30,6 +30,7 @@ export const COOLDOWN_MS: Partial<Record<ProviderErrorKind, number>> = {
   quota: 6 * HOUR,
   auth: 6 * HOUR,
   model_gone: 24 * HOUR,
+  not_free: 7 * 24 * HOUR,
 };
 
 export class Health {

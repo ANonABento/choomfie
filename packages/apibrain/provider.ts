@@ -20,6 +20,8 @@ export interface ModelInfo {
   contextLength?: number;
   /** Takes images, per the provider's own listing. */
   vision?: boolean;
+  /** Answers in text, per the listing's output types (false: an image or audio model). */
+  chat?: boolean;
 }
 
 export interface ApiProviderSpec {
@@ -42,8 +44,15 @@ export interface ApiProviderSpec {
   noKey?: boolean;
   /** Env var that overrides `baseURL` (a local server on another port). */
   baseURLEnv?: string;
-  /** Models in order of preference. config.json `free.providers.<id>.models` replaces them. */
-  defaultModels: string[];
+  /**
+   * Only for a provider that can't list its models (`listsModels: false`):
+   * what to try. Everyone else's models come from their live `/models`, so
+   * no model id goes stale in code. config.json `free.providers.<id>.models`
+   * pins a list for any provider.
+   */
+  fallbackModels?: string[];
+  /** IANA zone its daily limits reset in (Gemini: Pacific midnight). Default UTC. */
+  resetTimeZone?: string;
   /**
    * May this model be called on the free path? Default: every model (the key
    * is a free-tier key). OpenRouter overrides it: only `:free` or zero-priced.

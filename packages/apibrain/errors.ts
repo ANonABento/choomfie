@@ -13,6 +13,8 @@ export type ProviderErrorKind =
   | "auth"
   /** The model was renamed, retired, or never existed. */
   | "model_gone"
+  /** Listed, but this key's plan gets none of it (Gemini's "limit: 0" on Pro models). */
+  | "not_free"
   /** The prompt doesn't fit this model: a bigger one may take it. */
   | "too_large"
   /** 5xx or an unreadable answer. */

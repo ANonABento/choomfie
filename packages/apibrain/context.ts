@@ -84,6 +84,7 @@ export function systemPrompt(persona: Persona | undefined, modeFrame?: string): 
   return [
     who,
     "You're replying in a Discord chat. Use Discord markdown, keep replies concise unless asked for depth, and stay under about 1800 characters when you can.",
+    "Write the reply itself: don't start it with your name, a label or a heading saying who is speaking.",
     "Several people may write here; messages from anyone but the owner start with who sent them.",
     modeFrame?.trim(),
   ]
