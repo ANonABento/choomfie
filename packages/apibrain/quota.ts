@@ -114,6 +114,19 @@ export class Quota {
     return { requestsToday: c.requestsToday, tokensToday: c.tokensToday, headerRemaining: c.headerRemaining };
   }
 
+  /** Requests and tokens today across every unit of a provider (its keys, and each model on them). */
+  providerToday(providerId: string): { requests: number; tokens: number } {
+    let requests = 0;
+    let tokens = 0;
+    for (const unit of [...this.counters.keys()]) {
+      if (!unit.startsWith(`${providerId}#`)) continue;
+      const c = this.counter(unit);
+      requests += c.requestsToday;
+      tokens += c.tokensToday;
+    }
+    return { requests, tokens };
+  }
+
   /** Write pending counts now (shutdown). */
   flush(): void {
     if (this.saveTimer) clearTimeout(this.saveTimer);

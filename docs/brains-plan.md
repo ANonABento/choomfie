@@ -62,15 +62,9 @@ Park until the multi-brain and free systems are working and tested. Today a mode
 
 ## Proposed: no hardcoded models — discovery and ranking
 
-**Today:**
-- Each provider's live `/models` list is re-read every 6h, and only free models are kept.
-- A configured model that disappears is skipped. If all of them go, the provider uses its largest free listed models.
-- **What doesn't happen:** a new good model is never picked up on its own. Which model is best for which kind of message is a hand-written list in `buckets.ts`, checked on build day (Nov 2026) against the providers' lists and docs. It's checked for existence, not for quality.
+**Built (Nov 23):** buckets name needs (fast · strong · vision · long · tiny); candidates come from the live lists; each is tried once to learn whether it answers on a free key; the order comes from traits in the listing and the id, plus measured latency. Config can still pin. Details in [free-brain.md](free-brain.md#which-models).
 
-**Proposed:**
-- **Buckets name needs, not models:** fast · strong · sees images · biggest context.
-- **Candidates come from the live lists.** Traits come from the catalog (context, vision, price).
-- **The order comes from evidence.** Config can still pin a model.
+**Still proposed:** replace the name-based guess with evidence:
 
 **What counts as evidence:**
 
@@ -101,7 +95,7 @@ Instead of "Hand this to Waymond":
 
 ## The classifier
 
-- **Default:** a small cloud model (Groq `llama-3.1-8b-instant`, then `gpt-oss-20b`, Gemini Flash-Lite, Cloudflare, Ollama if on). If none answers within 2.5s, local keyword rules.
+- **Default:** the best models for the need `tiny` from the live lists (today Groq `gpt-oss-20b`, `qwen3.8-27b`, Gemini Flash-Lite). If none answers within 2.5s, local keyword rules.
 - **Cost:** each call spends the classifier provider's daily requests, once per message (messages of three words or fewer skip it).
 - **Google has no dedicated classifier model.** Options:
   - Flash-Lite as a zero-shot classifier (reported ~500 RPD free);
@@ -158,10 +152,22 @@ Different from routing: routing picks **who answers the user**; delegation is **
 - [x] Context carried on `/brain` switch.
 - [x] `delegate` rename.
 
+**Done (Nov 23, after the first real test):**
+- [x] Call log: every request and routing decision in `apibrain/calls.jsonl`; `bun run apibrain log [--full]`.
+- [x] No model ids in code: candidates from live `/models`, newest per family, ranked per need (fast, strong, vision, long, tiny) from size, tier, context, latency and scarce quotas. Buckets name needs.
+- [x] Each listed model tried once (`meta/apibrain-models.json`); `limit: 0` = `not_free`, skipped and re-checked weekly. Doctor shows what each bucket routes to now.
+- [x] `/restart` from a terminal: a keeper process starts the daemon again.
+- [x] `/plugins list|enable|disable` with name autocomplete.
+- [x] Image requests count as `agentic` (Waymond is offered).
+- [x] API models no longer sign replies with the persona's name.
+- [x] Daily quotas reset in the provider's zone (Gemini: Pacific).
+- [x] `/status` shows the brain here reporting on itself; Claude's daemon fields are labelled Claude. `/usage` adds the free/API brains' use today (in foreground mode too).
+
 **Next (in this order):**
+- [ ] **Commands audit, rest:** check `/stop`, `/clear`, `/resume`, `/config` (no `free` section), `/persona`, `/memory` (API brains don't see memories today) against free, a provider brain and Waymond.
 - [ ] `bun run apibrain keys` setup command, then test the free brain for real (needs keys).
 - [ ] "Hand off to…" any capable agent, via `Brain.capabilities`; `delegate` lists them too; `delegate` → free with `model:`.
-- [ ] Model discovery and ranking: needs-based buckets, probe benchmark (`doctor --rank`), health and latency stats, 👍/👎 and implicit signals, bandit ordering.
+- [ ] Ranking from evidence (discovery, needs and availability are done): probe benchmark with checkable answers (`doctor --rank`), 👍/👎 and implicit signals, bandit ordering.
 - [ ] Embeddings classifier (Ollama local, Gemini embedding as the cloud option).
 - [ ] Compaction: big-context models get the original turns instead of the summary; structured summary (goals, decisions, facts, open questions, code and numbers verbatim); a real token count.
 - [ ] More providers: Mistral free, Cohere trial, LM Studio, (Z.ai after checking).

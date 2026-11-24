@@ -27,6 +27,7 @@ import { McpProxy } from "./mcp-proxy.ts";
 import { formatDuration, fromSQLiteDatetime } from "./time.ts";
 import { isOwner, requireOwner } from "./handlers/shared.ts";
 import { brainModelReply } from "./handlers/brain-model.ts";
+import { brainStatus, fieldText } from "./handlers/brain-usage.ts";
 import { buildGhArgs, runGh } from "./handlers/github.ts";
 import { discoverPlugins } from "./plugins.ts";
 import {
@@ -465,6 +466,12 @@ registerCommand("status", {
         { name: "Here", value: await chatHere(interaction, ctx), inline: true },
       );
 
+    // The brain answering here reports on itself (providers, health, quota for API brains).
+    const hereId = resolveBrainId(interaction.channelId, parentChannelId(interaction.channel), (c) => ctx.config.getChannelBrain(c));
+    const hereBrain = hereId === CLAUDE_BRAIN ? undefined : getBrain(hereId);
+    const hereLines = hereBrain ? await brainStatus(hereBrain) : [];
+    if (hereLines.length) embed.addFields({ name: `${hereBrain!.label} brain`, value: fieldText(hereLines) });
+
     // Daemon block — only when a daemon is actually supervising. In foreground
     // mode there is no session to report on, and an empty "Session: unknown"
     // field reads like something is broken.
@@ -474,23 +481,24 @@ registerCommand("status", {
         typeof daemon.sessionUptimeSeconds === "number"
           ? formatDuration(daemon.sessionUptimeSeconds * 1000)
           : "unknown";
+      // The daemon's numbers are Claude's alone: label them so, whatever answers here.
       embed.addFields(
         {
-          name: "Session",
+          name: "Claude session",
           value:
             `${daemon.state ?? "unknown"} · ${sessionUptime}\n` +
             `Model: **${daemon.model ?? "Claude Code default"}**`,
           inline: true,
         },
         {
-          name: "Context",
+          name: "Claude context",
           value:
             `${formatContextUsage(daemon)}\n` +
             `Turns: ${daemon.turns?.current ?? "?"}/${daemon.turns?.threshold ?? "?"}`,
           inline: true,
         },
         {
-          name: "Cycles",
+          name: "Claude cycles",
           value:
             `${daemon.totalCycles ?? 0} · $${(daemon.costUsd ?? 0).toFixed(4)}\n` +
             (daemon.lastCycleReason ? `Last: ${daemon.lastCycleReason}` : "Last: —"),
@@ -808,24 +816,38 @@ registerCommand("plugins", {
   data: new SlashCommandBuilder()
     .setName("plugins")
     .setDescription("Manage plugins (owner only)")
-    .addStringOption((o) =>
-      o
-        .setName("action")
-        .setDescription("Action to perform (omit to list)")
-        .addChoices(
-          { name: "enable", value: "enable" },
-          { name: "disable", value: "disable" }
-        )
+    .addSubcommand((s) => s.setName("list").setDescription("Every plugin and whether it's on"))
+    .addSubcommand((s) =>
+      s
+        .setName("enable")
+        .setDescription("Turn a plugin on (restarts the worker)")
+        .addStringOption((o) => o.setName("name").setDescription("Plugin").setRequired(true).setAutocomplete(true))
     )
-    .addStringOption((o) =>
-      o.setName("name").setDescription("Plugin name (e.g. voice, tutor, socials)")
+    .addSubcommand((s) =>
+      s
+        .setName("disable")
+        .setDescription("Turn a plugin off (restarts the worker)")
+        .addStringOption((o) => o.setName("name").setDescription("Plugin").setRequired(true).setAutocomplete(true))
     )
     .toJSON(),
+  // enable suggests what's off, disable what's on.
+  autocomplete: async (interaction, ctx) => {
+    const typed = interaction.options.getFocused().toLowerCase();
+    const enabled = ctx.config.getEnabledPlugins();
+    const enabling = interaction.options.getSubcommand() === "enable";
+    await interaction.respond(
+      discoverPlugins()
+        .filter((p) => enabled.includes(p) !== enabling && p.includes(typed))
+        .slice(0, AUTOCOMPLETE_LIMIT)
+        .map((p) => ({ name: p, value: p }))
+    );
+  },
   handler: async (interaction, ctx) => {
     if (await requireOwner(interaction, ctx)) return;
 
-    const action = interaction.options.getString("action");
-    const name = interaction.options.getString("name");
+    const sub = interaction.options.getSubcommand();
+    const action = sub === "list" ? null : sub;
+    const name = action ? interaction.options.getString("name", true) : null;
 
     const available = discoverPlugins();
     const enabled = ctx.config.getEnabledPlugins();
@@ -855,7 +877,7 @@ registerCommand("plugins", {
         .setColor(0x5865f2)
         .setTitle("Plugins")
         .setDescription(lines.join("\n") || "No plugins found.")
-        .setFooter({ text: `/plugins action:enable name:<plugin> to enable` });
+        .setFooter({ text: "/plugins enable or /plugins disable to change" });
 
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       return;

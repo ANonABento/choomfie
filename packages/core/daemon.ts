@@ -11,14 +11,45 @@ import { DATA_DIR, PLUGIN_DIR, WORKER_HEALTH_INTERVAL, WORKER_MAX_CONSECUTIVE_FA
 import { FLAG_STATUS, FLAG_STOP, FLAG_VERBOSE } from "./daemon/flags.ts";
 import { log } from "./daemon/log.ts";
 import { acquirePid } from "./daemon/pid.ts";
-import { runDaemon } from "./daemon/hub.ts";
+import { RESTART_EXIT_CODE, runDaemon } from "./daemon/hub.ts";
 import { showStatus, stopDaemon } from "./daemon/cli.ts";
 import { getErrorMessage } from "./daemon/error.ts";
 import type { DaemonSettings } from "./daemon/types.ts";
 
+/** Set on the daemon a keeper started, so it doesn't start a keeper of its own. */
+const KEPT_ENV = "CHOOMFIE_DAEMON_KEPT";
+
+/** launchd starts it again after a restart (`KeepAlive`, install-launchd.sh); a terminal doesn't. */
+function underLaunchd(): boolean {
+  return process.ppid === 1 || (process.env.XPC_SERVICE_NAME ?? "").startsWith("dev.choomfie");
+}
+
+/**
+ * Run from a terminal, `/restart` would exit the daemon for good: it exits
+ * with RESTART_EXIT_CODE expecting launchd to start it again. So here this
+ * process becomes a small keeper that runs the daemon as its child and starts
+ * it again on that exit code, in the same terminal. Any other exit ends both.
+ * Ctrl-C reaches the child directly (same process group); SIGTERM/SIGHUP are passed on.
+ */
+async function keep(): Promise<never> {
+  let child: ReturnType<typeof Bun.spawn> | null = null;
+  process.on("SIGINT", () => {}); // the child got it too, and shuts down cleanly
+  for (const sig of ["SIGTERM", "SIGHUP"] as const) process.on(sig, () => child?.kill(sig));
+  for (;;) {
+    child = Bun.spawn([process.execPath, ...process.argv.slice(1)], {
+      env: { ...process.env, [KEPT_ENV]: "1" },
+      stdio: ["inherit", "inherit", "inherit"],
+    });
+    const code = await child.exited;
+    if (code !== RESTART_EXIT_CODE) process.exit(code ?? 0);
+    log("Starting again on the code on disk");
+  }
+}
+
 async function main(): Promise<void> {
   if (FLAG_STOP) return stopDaemon();
   if (FLAG_STATUS) return showStatus();
+  if (!process.env[KEPT_ENV] && !underLaunchd()) return void (await keep());
 
   // Daemon settings live in config.json (the single settings source for every
   // mode). Resolved here, at the entry point. Thresholds are daemon-only; the

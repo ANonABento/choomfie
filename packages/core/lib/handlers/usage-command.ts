@@ -5,8 +5,10 @@
  * numbers come from the SDK's `rate_limit_event`, normalised by the daemon into
  * `meta/daemon-state.json` — the same data the CLI shows, not an estimate.
  *
- * Daemon mode only, for the same reason `/compact` is: in foreground mode the
- * session belongs to the `claude` CLI, and nothing in Discord observes it.
+ * Claude's numbers are daemon mode only, for the same reason `/compact` is:
+ * in foreground mode the session belongs to the `claude` CLI, and nothing in
+ * Discord observes it. The API brains (free, groq, …) report their own use
+ * today in either mode.
  */
 
 import {
@@ -27,6 +29,7 @@ import {
   type RateLimitWindowView,
 } from "../daemon-status.ts";
 import type { AppContext } from "../types.ts";
+import { apiBrainsUsage, fieldText } from "./brain-usage.ts";
 
 /** Order the windows people actually care about first; anything new lands after. */
 const WINDOW_ORDER = ["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"];
@@ -226,15 +229,21 @@ function buildEmbed(daemon: DaemonSnapshot, now: number = Date.now()): EmbedBuil
 registerCommand("usage", {
   data: new SlashCommandBuilder()
     .setName("usage")
-    .setDescription("Show plan usage limits and what this session has spent")
+    .setDescription("Show Claude's plan limits and spend, and the free/API brains' use today")
     .toJSON(),
   handler: async (interaction, ctx: AppContext) => {
+    const api = await apiBrainsUsage();
+    const apiEmbed = api.length
+      ? new EmbedBuilder().setColor(0x57f287).setTitle("Free & API brains — today").setDescription(fieldText(api).slice(0, 4096))
+      : null;
+
     if (!(await isDaemonMode(ctx.DATA_DIR))) {
       await interaction.reply({
         content:
-          "Usage is only visible in **daemon mode** — in foreground mode the session " +
-          "belongs to the `claude` CLI, which doesn't report its limits here.\n" +
+          "Claude's usage is only visible in **daemon mode** — in foreground mode the session " +
+          "belongs to the `claude` CLI, which doesn't report its limits here. " +
           "Type `/usage` in that terminal instead.",
+        ...(apiEmbed ? { embeds: [apiEmbed] } : {}),
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -244,13 +253,14 @@ registerCommand("usage", {
     if (!daemon) {
       await interaction.reply({
         content: "The daemon is up but hasn't written its state yet — try again in a moment.",
+        ...(apiEmbed ? { embeds: [apiEmbed] } : {}),
         flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
     await interaction.reply({
-      embeds: [buildEmbed(daemon)],
+      embeds: [buildEmbed(daemon), ...(apiEmbed ? [apiEmbed] : [])],
       flags: MessageFlags.Ephemeral,
     });
   },

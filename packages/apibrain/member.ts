@@ -323,9 +323,11 @@ export class ApiMember {
     if (!this.configured) return `• **${this.label}** — no key${this.spec.signup ? ` (${this.spec.signup})` : ""}`;
     const wait = this.waitMs();
     const state = wait === 0 ? "ready" : Number.isFinite(wait) ? `cooling ${shortDuration(wait)}` : "unavailable";
-    const used = this.keys.keys.reduce((n, k) => n + this.deps.quota.usage(k.unit).requestsToday, 0);
+    const { requests, tokens } = this.deps.quota.providerToday(this.id);
     const rpd = this.limits.rpd;
-    const today = this.spec.limitScope === "model" ? "" : ` · ${used}${rpd ? `/${rpd * this.keys.size}` : ""} today`;
+    // Per-model limits (Groq, Gemini) are per model: the cap shown is one model's.
+    const cap = rpd ? `/${rpd * this.keys.size}${this.spec.limitScope === "model" ? " per model" : ""}` : "";
+    const today = ` · ${requests}${cap} requests today${tokens ? `, ${tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : tokens} tokens` : ""}`;
     const keys = this.spec.noKey ? "" : ` · ${this.keys.size} key${this.keys.size === 1 ? "" : "s"}`;
     return `• **${this.label}** — ${state}${keys}${today} · ${this.models()[0] ?? "no models"}`;
   }
