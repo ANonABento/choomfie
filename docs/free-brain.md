@@ -60,10 +60,10 @@ None of these needs a card. Limits change without notice: `bun run apibrain keys
 | Cerebras | cloud.cerebras.ai | fast, ~30 RPM | Short context on the free tier |
 | Mistral | console.mistral.ai/api-keys | every Mistral model on the Experiment plan | Phone check; prompts may train |
 | NVIDIA NIM | build.nvidia.com | ~40 RPM | Trial terms forbid production use: keep it to yourself (`brainAccess: owner`) |
-| SambaNova | cloud.sambanova.ai/apis | ~20 RPD per model | A spare |
+| SambaNova | cloud.sambanova.ai/apis | ~20 RPD per model, but new accounts get 402 "payment method required" | Benched for a week while it says so |
 | Cloudflare | dash.cloudflare.com/profile/api-tokens (+ `CLOUDFLARE_ACCOUNT_ID`) | 10,000 neurons a day | Big models spend it fast |
 | Cohere | dashboard.cohere.com/api-keys | 1,000 calls a month | Trial key: non-commercial only |
-| Z.ai | z.ai (API keys) | GLM `-flash` models (others are paid and never called) | One request at a time |
+| Z.ai | z.ai (API keys) | Older GLM flash models (4.5, 4.6v, 4.7), which `/models` doesn't list (`unlistedModels`); the listed glm-5.3-flash wants a balance | One request at a time |
 | Aion Labs | aionlabs.ai/app/api-keys | 20k tokens a day | Roleplay models |
 | AxForge | console.axforge.ai/keys | 3M tokens per 30 days, EU, not logged | Bills once you add a balance — don't |
 | Gonka | app.gonkabroker.com/signup | ~1M tokens a month | Real (non-VoIP) phone number |
@@ -129,8 +129,9 @@ message → a member mode, or a web member holding the chat?  → that member (l
   | 429 / rate limit | that key (or that key × model on Groq, Gemini and SambaNova, whose limits are per model), for `retry-after` or a minute |
   | daily quota / out of credits | that key, 6h |
   | rejected key | that key, 6h |
+  | account wants a card first (402 payment method required) | that key, 7 days |
   | retired model | that model, 24h |
-  | listed but not on the free plan (`limit: 0`) | that model, 7 days, and remembered |
+  | listed but not on the free plan (`limit: 0`, "insufficient balance", a paid model behind sign-in) | that model, 7 days, and remembered |
   | 5xx or timeout | that model, exponential after the second |
   | web brain failing | that brain, exponential |
   | web brain wants a login | that brain, 1h |

@@ -33,6 +33,10 @@ describe("classifyFailure", () => {
     expect(kind(503)).toBe("server");
     expect(kind(402, "Insufficient credits")).toBe("quota");
     expect(kind(400, "temperature must be <= 2")).toBe("bad_request");
+    // SambaNova: the whole account needs a card. Z.ai: this model costs money, the free ones don't.
+    expect(kind(402, '{"error":{"balance_units":0,"code":"PAYMENT_METHOD_REQUIRED","message":"A payment method is required"}}')).toBe("no_credit");
+    expect(kind(401, '{"error":{"code":"PAID_MODEL_AUTH_REQUIRED","message":"You need to sign in to use this model."}}')).toBe("not_free");
+    expect(kind(429, '{"error":{"code":"1113","message":"Insufficient balance or no resource package. Please recharge."}}')).toBe("not_free");
   });
 
   test("retry-after rides along on rate limits", () => {

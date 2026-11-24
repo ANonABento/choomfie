@@ -101,6 +101,10 @@ export function classifyFailure(status: number, body: string, rate: RateSnapshot
 
   // A quota of zero: the model is listed, but not on this (free) plan.
   if ((status === 429 || status === 403) && /\blimit:?\s*0\b|not available (on|for) (the )?free|free tier.{0,40}not (supported|available)/.test(text)) return make("not_free");
+  // The whole account needs a card first: no model on this key will answer.
+  if (/payment[_ ]method[_ ]required|add a payment method|payment method is required/.test(text)) return make("no_credit");
+  // This model costs money on this account (Z.ai "insufficient balance" on a non-free model): the free ones still answer.
+  if (/insufficient balance|no resource package|please recharge|paid[_ ]model|sign in to use this model/.test(text)) return make("not_free");
   if (status === 401 || status === 403) return make("auth");
   if (status === 402) return make("quota", rate.retryAfterMs);
   if (status === 413 || (tooLarge && status !== 429)) return make("too_large");
@@ -240,7 +244,7 @@ export function parseListed(m: ListedModel): ModelInfo | null {
   const kind = m.model_type ?? m.type;
   const chat =
     m.capabilities?.completion_chat ??
-    (m.endpoints ? m.endpoints.includes("chat") : undefined) ??
+    (m.endpoints ? m.endpoints.some((e) => /(^|\/)chat\b/.test(e)) : undefined) ??
     (kind && kind !== "model" ? /chat|text|llm|language/.test(kind) && !/embed|image|audio|speech|rerank/.test(kind) : undefined) ??
     (outputs ? outputs.includes("text") : arrow ? arrow[1]?.includes("text") : undefined);
   return {

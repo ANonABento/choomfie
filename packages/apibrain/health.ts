@@ -29,6 +29,7 @@ export const COOLDOWN_MS: Partial<Record<ProviderErrorKind, number>> = {
   rate_limit: 60_000,
   quota: 6 * HOUR,
   auth: 6 * HOUR,
+  no_credit: 7 * 24 * HOUR,
   model_gone: 24 * HOUR,
   not_free: 7 * 24 * HOUR,
 };

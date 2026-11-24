@@ -241,7 +241,9 @@ export class ApiMember {
           return { text: r.text, model: r.model || model, ...(r.usage ? { usage: r.usage } : {}) };
         } catch (e) {
           if (opts.signal?.aborted) throw e;
-          const pe = asProviderError(e);
+          let pe = asProviderError(e);
+          // No key to reject: an auth error is about this model (a paid one behind sign-in), not the provider.
+          if (pe.kind === "auth" && this.spec.noKey) pe = new ProviderError("not_free", pe.message, undefined, pe.status);
           this.deps.log?.write(entry({ error: `${pe.kind}: ${pe.message.slice(0, 300)}` }));
           last = pe;
           switch (pe.kind) {
@@ -251,6 +253,9 @@ export class ApiMember {
               continue keys;
             case "auth":
               health.cool(key.unit, COOLDOWN_MS.auth!, "key rejected");
+              continue keys;
+            case "no_credit":
+              health.cool(key.unit, COOLDOWN_MS.no_credit!, "account needs a card or balance");
               continue keys;
             case "model_gone":
             case "not_free":
@@ -296,7 +301,7 @@ export class ApiMember {
         if (kind === "bad_request") av.mark(this.modelUnit(m.id), false, "refused a plain chat request");
         opts.onResult?.(m.id, false, kind);
         // The key itself is out (bad, or its shared allowance spent): the rest would fail the same way.
-        if (kind === "auth" || (this.spec.limitScope !== "model" && (kind === "rate_limit" || kind === "quota"))) return;
+        if (kind === "auth" || kind === "no_credit" || (this.spec.limitScope !== "model" && (kind === "rate_limit" || kind === "quota"))) return;
       }
     }
   }

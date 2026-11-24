@@ -59,6 +59,12 @@ export interface ApiProviderSpec {
    * pins a list for any provider.
    */
   fallbackModels?: string[];
+  /**
+   * Free models the provider serves but leaves out of its `/models` (Z.ai's
+   * older GLM flash models). Tried alongside the listed ones; one that stops
+   * answering is probed out like any other.
+   */
+  unlistedModels?: string[];
   /** IANA zone its daily limits reset in (Gemini: Pacific midnight). Default UTC. */
   resetTimeZone?: string;
   /**

@@ -87,6 +87,8 @@ async function checkProvider(spec: ApiProviderSpec, env: Env, settings: Record<s
 
   // Each key, on the provider's best model: is the key good?
   let ok = true;
+  // Keys refused outright (bad key, or an account that wants a card): nothing to probe with.
+  let refused = 0;
   for (const key of keys) {
     const member = spec.noKey ? probe : new ApiMember(spec, { env: onlyKey(env, spec.keyEnv!, key.value), ...deps });
     if (member !== probe) member.catalog.set(probe.catalog.ids().map((id) => probe.catalog.info(id) ?? { id }));
@@ -106,9 +108,15 @@ async function checkProvider(spec: ApiProviderSpec, env: Env, settings: Record<s
       // Busy or rate-limited is the provider's moment, not your setup: warn, don't fail.
       const passing = e instanceof ProviderError && (TRANSIENT.has(e.kind) || e.kind === "not_free");
       ok &&= passing;
+      if (e instanceof ProviderError && (e.kind === "auth" || e.kind === "no_credit")) refused++;
       const kind = e instanceof ProviderError ? `${e.kind}: ` : "";
       console.error(`  ${passing ? "⚠️" : "❌"} key ${key.n} · ${model} · ${kind}${(e instanceof Error ? e.message : String(e)).slice(0, 160)}${passing ? (e instanceof ProviderError && e.kind === "not_free" ? " (not on the free plan — skipped from now on)" : " (temporary — try again later)") : ""}`);
     }
+  }
+
+  if (keys.length && refused === keys.length) {
+    console.error("  Every key was refused, so its models weren't tried. The bot skips this provider until a key works.");
+    return false;
   }
 
   // Every listed model nobody has tried: does it answer on this plan?

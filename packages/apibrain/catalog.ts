@@ -52,6 +52,8 @@ export class Catalog {
     }
     if (!this.models) return (spec.fallbackModels ?? []).filter((m) => modelIsFree(spec, m)).map(traits);
     const chat = [...this.models.values()].filter((m) => modelIsFree(spec, m.id, m) && isChatModel(m.id, m));
-    return newestOnly(chat.map((m) => traits(m.id)));
+    // Unlisted ones skip the newest-of-family cut: a listed newer sibling may be paid (Z.ai glm-5.3-flash vs glm-4.7-flash).
+    const unlisted = (spec.unlistedModels ?? []).filter((m) => !this.models!.has(m) && modelIsFree(spec, m));
+    return [...newestOnly(chat.map((m) => traits(m.id))), ...unlisted.map(traits)];
   }
 }

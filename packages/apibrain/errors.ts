@@ -11,6 +11,8 @@ export type ProviderErrorKind =
   | "quota"
   /** The key is wrong or revoked. */
   | "auth"
+  /** The account behind the key needs a card or a balance before it answers anything (SambaNova's 402). */
+  | "no_credit"
   /** The model was renamed, retired, or never existed. */
   | "model_gone"
   /** Listed, but this key's plan gets none of it (Gemini's "limit: 0" on Pro models). */

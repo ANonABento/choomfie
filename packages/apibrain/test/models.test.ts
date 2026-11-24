@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { Availability, RECHECK_MS } from "../availability.ts";
 import { classifyFailure, parseListed } from "../client.ts";
 import { stripSpeakerLabel } from "../context.ts";
+import { Catalog } from "../catalog.ts";
+import { defineProvider } from "../provider.ts";
 import { isChatModel, modelTraits, newestOnly, score } from "../models.ts";
 import { dayIn, msToMidnight, Quota } from "../quota.ts";
 
@@ -90,6 +92,9 @@ describe("listings and replies", () => {
     expect(parseListed({ id: "codestral-latest", tier: "turbo", model_type: "chat", context_window: { tokens: 32_000 }, modalities: { input: ["text"] } })).toMatchObject({ tier: "turbo", chat: true, contextLength: 32_000, vision: false });
     expect(parseListed({ id: "mistral-embed", capabilities: { completion_chat: false, vision: false } })).toMatchObject({ chat: false });
     expect(parseListed({ name: "command-a", endpoints: ["chat", "generate"], context_length: 256_000 })).toMatchObject({ id: "command-a", chat: true });
+    // OpenRouter lists endpoint paths.
+    expect(parseListed({ id: "x:free", endpoints: ["/api/v1/chat/completions", "/api/v1/messages"] })).toMatchObject({ chat: true });
+    expect(parseListed({ id: "e", endpoints: ["/api/v1/embeddings"] })).toMatchObject({ chat: false });
     expect(isChatModel("Qwen3Guard-Gen-8B")).toBe(false);
     expect(isChatModel("bge-m3")).toBe(false);
   });
@@ -100,5 +105,14 @@ describe("listings and replies", () => {
     expect(stripSpeakerLabel("**Mahiro Oyama:** hi", p)).toBe("hi");
     expect(stripSpeakerLabel("Note: this", p)).toBe("Note: this");
     expect(stripSpeakerLabel("Mahiro is here", p)).toBe("Mahiro is here");
+  });
+});
+
+describe("unlisted free models", () => {
+  test("join the listed ones, past the newest-of-family cut", () => {
+    const spec = defineProvider({ id: "z", label: "Z", baseURL: "https://z", keyEnv: "Z_KEY", isFree: (m) => /-flash$/.test(m), unlistedModels: ["glm-4.7-flash", "glm-5.3-flash"] });
+    const c = new Catalog();
+    c.set([{ id: "glm-5.3-flash" }, { id: "glm-5.3" }]);
+    expect(ids(c.candidates(spec))).toEqual(["glm-4.7-flash", "glm-5.3-flash"]);
   });
 });
