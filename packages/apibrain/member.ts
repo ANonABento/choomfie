@@ -6,6 +6,7 @@
  * router moves on to the next provider.
  */
 
+import { createHash } from "node:crypto";
 import type { Availability } from "./availability.ts";
 import { nowIso, redact, type CallEntry, type CallLog } from "./calllog.ts";
 import { chatCompletion, listModels, type ChatMessage, type FetchLike } from "./client.ts";
@@ -94,6 +95,27 @@ export class ApiMember {
 
   get id(): string {
     return this.spec.id;
+  }
+
+  /** A key's name in the availability file: a fingerprint, so the file never holds a key. */
+  private keyRecord(key: ApiKey): string | null {
+    return this.spec.noKey ? null : `key:${this.spec.id}:${createHash("sha256").update(key.value).digest("hex").slice(0, 12)}`;
+  }
+
+  /** Re-apply benches saved before a restart (a key that wants a card stays out for its week). The doctor skips this: it re-checks. */
+  restoreBenches(): void {
+    for (const key of this.keys.keys) {
+      const record = this.keyRecord(key);
+      const b = record ? this.deps.availability?.benched(record) : undefined;
+      if (b) this.deps.health.cool(key.unit, b.ms, b.reason);
+    }
+  }
+
+  private benchKey(key: ApiKey, kind: "auth" | "no_credit", reason: string): void {
+    const ms = COOLDOWN_MS[kind]!;
+    this.deps.health.cool(key.unit, ms, reason);
+    const record = this.keyRecord(key);
+    if (record) this.deps.availability?.bench(record, Date.now() + ms, reason);
   }
 
   get label(): string {
@@ -257,6 +279,8 @@ export class ApiMember {
           const avg = this.latency.get(model);
           this.latency.set(model, avg === undefined ? took : avg * 0.7 + took * 0.3);
           health.ok(key.unit);
+          const record = this.keyRecord(key);
+          if (record) av?.unbench(record);
           health.ok(this.modelUnit(model));
           quota.record(scope, (r.usage?.prompt ?? opts.tokens ?? 0) + (r.usage?.completion ?? 0), r.rate);
           return { text: r.text, model: r.model || model, ...(r.usage ? { usage: r.usage } : {}) };
@@ -273,10 +297,10 @@ export class ApiMember {
               health.cool(scope, pe.retryAfterMs ?? COOLDOWN_MS[pe.kind]!, pe.kind);
               continue keys;
             case "auth":
-              health.cool(key.unit, COOLDOWN_MS.auth!, "key rejected");
+              this.benchKey(key, "auth", "key rejected");
               continue keys;
             case "no_credit":
-              health.cool(key.unit, COOLDOWN_MS.no_credit!, "account needs a card or balance");
+              this.benchKey(key, "no_credit", "account needs a card or balance");
               continue keys;
             case "model_gone":
             case "not_free":

@@ -113,6 +113,8 @@ const plugin: Plugin = {
     const log = new CallLog(join(ctx.DATA_DIR, "apibrain", "calls.jsonl"));
     availability = new Availability(join(ctx.DATA_DIR, "meta", "apibrain-models.json"));
     const setup = setupFree(ctx.config.getConfig().free, process.env, health, quota, log, availability);
+    // Keys benched before a restart (wants a card, rejected) stay out. The doctor doesn't do this: it re-checks them.
+    for (const m of setup.members.values()) m.restoreBenches();
 
     for (const member of setup.members.values()) {
       // A web brain may already own the id (a future "gemini" site adapter): it keeps it.

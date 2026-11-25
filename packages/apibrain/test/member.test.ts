@@ -154,3 +154,30 @@ describe("models that think first", () => {
     expect(m.ranked("tiny")[0].id).toBe("plain-27b");
   });
 });
+
+describe("benched keys across a restart", () => {
+  const spec3 = defineProvider({ ...spec, limits: {} });
+  test("a key that wants a card stays out after a restart, by fingerprint only; an answer clears it", async () => {
+    const availability = new Availability();
+    const card = () => fail(402, '{"error":{"code":"PAYMENT_METHOD_REQUIRED","message":"A payment method is required"}}');
+    const before = new ApiMember(spec3, { env: { ACME_API_KEY: "secret-key" }, health: new Health(), quota: new Quota(), fetch: fakeFetch(card), availability });
+    await expect(before.complete(msgs, { model: "big" })).rejects.toThrow();
+    const saved = JSON.stringify(Object.fromEntries((availability as unknown as { checks: Map<string, unknown> }).checks));
+    expect(saved).not.toContain("secret-key");
+    expect(saved).toContain("key:acme:");
+
+    // After a restart: fresh health, same file.
+    const f = fakeFetch(() => ok("hi"));
+    const after = new ApiMember(spec3, { env: { ACME_API_KEY: "secret-key" }, health: new Health(), quota: new Quota(), fetch: f, availability });
+    after.restoreBenches();
+    await expect(after.complete(msgs, { model: "big" })).rejects.toThrow("cooling");
+    expect(f.calls.length).toBe(0);
+
+    // The doctor (no restoreBenches) re-checks; an answer clears the bench.
+    const doctor = new ApiMember(spec3, { env: { ACME_API_KEY: "secret-key" }, health: new Health(), quota: new Quota(), fetch: f, availability });
+    expect((await doctor.complete(msgs, { model: "big" })).text).toBe("hi");
+    const again = new ApiMember(spec3, { env: { ACME_API_KEY: "secret-key" }, health: new Health(), quota: new Quota(), fetch: f, availability });
+    again.restoreBenches();
+    expect((await again.complete(msgs, { model: "big" })).text).toBe("hi");
+  });
+});

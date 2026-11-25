@@ -182,7 +182,7 @@ Different from routing: routing picks **who answers the user**; delegation is **
 **Stage 1 — Stabilize apibrain.** Exit: the test checklist passes on the restarted bot and nothing in `apibrain log` surprises.
 - [ ] Owner's test pass (routing, tables, labels, Waymond fallback note, `/mode`, `/clear`, `/resume`, `/stop`, `/status`, `/usage`, `/brain <provider>`).
 - [ ] Commands audit, rest: `/config` (no `free` section), `/persona`, `/memory` (API brains don't see memories today) against free, a provider brain and Waymond.
-- [ ] Persistent benches: `no_credit`, `auth` and `not_free` outlive a restart (today a restart costs one wasted call per dead key).
+- [x] Persistent benches: `no_credit` and `auth` key benches outlive a restart (by key fingerprint); `not_free` models already did.
 
 **Stage 2 — Web brains.** Exit: adding a site and keeping it logged in is as easy as `apibrain keys`, and Waymond answers.
 - [ ] Waymond: "the message box never appeared" — adapter fix (overlaps the owner's uncommitted `adapter.ts`).

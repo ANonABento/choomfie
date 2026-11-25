@@ -22,6 +22,8 @@ export interface ModelCheck {
   reasons?: boolean;
   /** Refused a `reasoning_effort` field. */
   noEffort?: boolean;
+  /** A benched key (`key:<provider>:<fingerprint>`): out until then, across restarts. */
+  until?: number;
 }
 
 /** A refused model is tried again after this long (plans and free tiers change). */
@@ -75,6 +77,30 @@ export class Availability {
     const prev = this.checks.get(unit) ?? { ok: true, at: this.now() };
     if (Object.entries(traits).every(([k, v]) => prev[k as keyof ModelCheck] === v)) return;
     this.checks.set(unit, { ...prev, ...traits });
+    this.scheduleSave();
+  }
+
+  /**
+   * Bench a key until a time, kept on disk so a restart doesn't spend a call
+   * rediscovering a key that wants a card or was rejected. The unit is a
+   * fingerprint of the key, never the key.
+   */
+  bench(unit: string, until: number, reason: string): void {
+    this.checks.set(unit, { ok: false, reason, at: this.now(), until });
+    this.scheduleSave();
+  }
+
+  /** How long a benched key has left, and why; undefined once it's due back. */
+  benched(unit: string): { ms: number; reason: string } | undefined {
+    const c = this.checks.get(unit);
+    if (!c?.until || c.until <= this.now()) return undefined;
+    return { ms: c.until - this.now(), reason: c.reason ?? "benched" };
+  }
+
+  /** The key answered: forget its bench. */
+  unbench(unit: string): void {
+    if (this.checks.get(unit)?.until === undefined) return;
+    this.checks.delete(unit);
     this.scheduleSave();
   }
 

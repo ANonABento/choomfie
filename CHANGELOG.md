@@ -24,6 +24,7 @@
 
 ### Fixed
 
+- **A dead key cost a call after every restart.** Keys benched for "wants a card" (7 days) or "rejected" (6h) are saved by a fingerprint of the key (never the key) in `meta/apibrain-models.json` and stay benched across restarts; `apibrain doctor` re-checks them, and an answer clears the bench.
 - **Free brain's classifier spent ~100 hidden reasoning tokens per one-line answer.** Models seen thinking first are remembered and ranked below plain ones for tiny jobs (the classifier moved from gpt-oss-20b to qwen3.8-27b: 13 tokens, ~200 ms); a known thinker on a one-line job gets `reasoning_effort: low`, dropped for providers that refuse it. A reply that was all thinking fails over instead of posting nothing; stray `<think>` fragments are stripped before a turn is stored; probes time out after 15s, not 30s.
 - **OpenRouter's free models were all skipped.** Its `/models` now lists endpoints as paths (`/api/v1/chat/completions`), and the parser looked for the bare word `chat`.
 - **Accounts that want a card, and paid models behind a free label.** SambaNova's 402 "payment method required" benches that key for a week (`no_credit`) instead of retrying every 6h; Z.ai's "insufficient balance" and Kilo's "sign in to use this model" mark just that model as not free. On a keyless provider an auth error is now about the model, so one paid model no longer benches all of Kilo. Z.ai's free GLM flash models, missing from its list, come from `unlistedModels`. `doctor` stops after a refused key instead of probing every model with it.
