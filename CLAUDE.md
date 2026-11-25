@@ -20,6 +20,7 @@ This file holds the architecture and the rules that constrain changes. Inventori
 | [docs/voice-plugin.md](docs/voice-plugin.md) | Voice providers, audio pipeline, setup |
 | [docs/plugin-api.md](docs/plugin-api.md), [docs/plugins.md](docs/plugins.md) | Writing plugins |
 | [docs/webbrain.md](docs/webbrain.md) | Web brains: site adapters, the tab pool, stealth launch, login |
+| [docs/harness.md](docs/harness.md) | Harness brains: coding-agent CLIs (Antigravity `agy`) as brains |
 | [docs/free-brain.md](docs/free-brain.md), [docs/brains-plan.md](docs/brains-plan.md) | `/brain free`: providers, routing, keys, adding a provider; brain decisions and what's next |
 | [docs/multi-host.md](docs/multi-host.md) | A second computer: its own Discord bot, fully independent |
 | [docs/testing.md](docs/testing.md), [docs/roadmap.md](docs/roadmap.md) | Test strategy, what's done and what isn't |
@@ -40,7 +41,9 @@ packages/
                #   (adapter contract, tab pool, Patchright launch); see docs/webbrain.md
   apibrain/    # @choomfie/apibrain — kit that turns OpenAI-compatible APIs into brains
                #   (keys, cooldowns, quota, router, classifier); see docs/free-brain.md
-plugins/       # voice, browser, tutor, socials, waymond, free — workspace packages, each an
+  harness/     # @choomfie/harness — kit that turns coding-agent CLIs (agy, …) into brains;
+               #   see docs/harness.md
+plugins/       # voice, browser, tutor, socials, waymond, free, harnesses — workspace packages, each an
                #   index.ts exporting a Plugin
 docs/, .claude-plugin/, .mcp.json
 ```
@@ -183,4 +186,4 @@ Shapes and constraints that don't announce themselves. Getting one wrong compile
 
 This file is loaded into every daemon session's context and re-read from cache on every turn, as is `docs/` content you open. Measured: at 31.7KB it was ~7,900 tokens — roughly a quarter of the session's entire resident context, for documentation a Discord persona never needs. Keep it to rules and architecture; put inventories, walkthroughs and examples in `docs/`.
 
-The same applies to plugins: their tool schemas and instructions are resident too (voice ~511, browser ~844, tutor ~2,211, socials ~4,232 tokens; waymond and free 0 — they are brains, not tools). Enable only what's in use.
+The same applies to plugins: their tool schemas and instructions are resident too (voice ~511, browser ~844, tutor ~2,211, socials ~4,232 tokens; waymond, free and harnesses 0 — they are brains, not tools). Enable only what's in use.

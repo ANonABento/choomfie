@@ -4,6 +4,7 @@
 
 ### Added
 
+- **Harness brains: coding-agent CLIs answer in Discord.** New kit `@choomfie/harness` and plugin `harnesses`: `/brain antigravity` runs Google's Antigravity CLI (`agy`, free on a weekly quota) once per message, resuming its own conversation per chat, in a folder per chat; attachments go in, files it makes come back, `/stop` kills the run. Anyone but the owner gets its read-only mode. Adding a CLI is one spec file. See `docs/harness.md`.
 - **`/compact` for web brains.** The site is asked for a summary in its conversation; the next message opens a fresh site conversation that starts with it.
 - **`bun run webbrain sites` and `webbrain setup`.** Every web brain, logged in or not (checked headless, nothing sent), then the login window for each one that isn't — the web-brain counterpart of `apibrain keys`.
 - **`/brain free`: free API tiers and web brains behind one router.** New kit `@choomfie/apibrain` (OpenAI-compatible client, key pools, cooldowns, quota, model catalog, transcripts, classifier) and plugin `free` (OpenRouter, Groq, Gemini, NVIDIA NIM, SambaNova, Cloudflare, Ollama; one `/brain <provider>` each). API models float per message by a zero-shot classifier; a web brain (Waymond) takes a chat on its first message, through its modes, or by "Hand this to Waymond", then holds it until `/model auto`, and never loses it silently on a failure. See `docs/free-brain.md`, `docs/brains-plan.md`.

@@ -153,6 +153,7 @@ const PLUGIN_PACKAGES: Record<string, string> = {
   socials: "@choomfie/socials",
   waymond: "@choomfie/waymond",
   free: "@choomfie/free",
+  harnesses: "@choomfie/harnesses",
   hello: "@choomfie/hello",      // ← add this
 };
 ```
@@ -566,6 +567,7 @@ Study these for real-world patterns:
 | **socials** | `@choomfie/socials` | MCP notification forwarding, provider initialization from config, polling loops. |
 | **waymond** | `@choomfie/waymond` | A **brain** instead of tools: `registerBrain` in `init`, zero tool/instruction tokens. Built on the web-brain kit (`@choomfie/webbrain`, see [webbrain.md](webbrain.md)): `adapter.ts` holds the Ambition-specific steps, the kit runs the browser (log in once: `bun run webbrain login waymond`; `CHOOMFIE_WAYMOND_HEADED=1` for a visible window). Sends via the composer (clearing any stale draft attachments first; Discord attachments are uploaded under their original names), reads `/turn` + `/messages`. Quick replies (`offer_replies`) become buttons; `start_task` answers are followed by a 1-minute watcher (3h cap, in memory) that posts the background results via `pushBrainReply`. `/stop` → `POST …/stop`. Approval cards (`offer_*` tool calls, e.g. `offer_post`) are posted as an embed with Ambition's own button labels; the buttons are owner-only regardless of `brainAccess` and call `POST cards/:offer_id/send|decline` with `{conversation_id}`. Conversation ids live in the core chat store (`ctx.chats`); the old `chats.json` is imported once. State in `<data>/webbrain/waymond/`. |
 | **free** | `@choomfie/free` | Several brains from one plugin: `free` (routes each message across API providers and web brains — classifier, failover, shared transcript) plus one per API provider with a key. Built on the API-brain kit (`@choomfie/apibrain`, see [free-brain.md](free-brain.md)): each provider is a data file in `providers/`, routing policy in `buckets.ts`, config in `config.ts`. Zero tool/instruction tokens. |
+| **harnesses** | `@choomfie/harnesses` | Brains, not tools: each coding-agent CLI found on PATH registers one (`antigravity` → `agy`). Built on `@choomfie/harness`: one print-mode run per message, the CLI's conversation id kept per chat, a folder per chat (`<data>/harness/<id>/<chat id>`), changed files posted back, read-only mode for anyone but the owner. See [harness.md](harness.md). |
 
 ### Browser — minimal plugin
 

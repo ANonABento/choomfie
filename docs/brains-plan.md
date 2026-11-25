@@ -190,8 +190,12 @@ Different from routing: routing picks **who answers the user**; delegation is **
 - [ ] More web members (Claude.ai, ChatGPT, …) via the `new-web-brain` skill; multi-profile web brains.
 - [x] Web-brain compact: ask the site for a summary, open a new site conversation seeded with it on the next message.
 
-**Stage 3 — Harness brains.** Exit: Codex / OpenCode / Gemini CLI each answer as a brain (`/brain codex`) and can be an `agentic` member of free.
-- [ ] Harness kit, T3 Code's agent wrappers as reference: process lifecycle, streaming, approvals, files back to Discord.
+**Stage 3 — Harness brains.** Exit: the free CLIs (Antigravity, OpenCode) each answer as a brain (`/brain antigravity`) and can be an `agentic` member of free. (Codex and Gemini CLI have no free tier now.)
+- [x] Harness kit (`@choomfie/harness`, plugin `harnesses`, Nov 24): one print-mode run per message, the CLI's conversation id resumed per chat, a folder per chat, attachments in, changed files back, `/stop`, read-only mode for anyone but the owner. First harness: Antigravity `agy` (free, weekly quota). See [harness.md](harness.md).
+- [ ] OpenCode as the second harness (free with Zen's free models or the free brain's keys); install it, record its `run --format json` output, one spec file.
+- [ ] Harness as an `agentic` member of free (offered / locked like Waymond).
+- [ ] ACP (Agent Client Protocol) driver instead of print mode: streaming progress, tool approvals as Discord buttons, one protocol for agy, OpenCode, Gemini CLI, Goose.
+- Researched Nov 24: Cursor CLI's free plan runs out almost at once; Gemini CLI's free serving ended (June 2026) and Qwen Code's free tier ended (April 2026); Codex needs a paid plan or key.
 
 **Stage 4 — Agents talking to agents.** Exit: any brain can hand work to the right other brain mid-task and get the result back, and the user can hand a chat to any capable brain. (See "Delegation" and "hand off to any agent" above.)
 - [ ] `Brain.capabilities` (`agentic`, `image-gen`, `web-search`, `code-exec`, `vision`, `long-context`); `delegate`'s description and errors list who can do what.

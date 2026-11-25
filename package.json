@@ -33,6 +33,8 @@
     "@choomfie/browser": "workspace:*",
     "@choomfie/core": "workspace:*",
     "@choomfie/free": "workspace:*",
+    "@choomfie/harness": "workspace:*",
+    "@choomfie/harnesses": "workspace:*",
     "@choomfie/shared": "workspace:*",
     "@choomfie/socials": "workspace:*",
     "@choomfie/tutor": "workspace:*",

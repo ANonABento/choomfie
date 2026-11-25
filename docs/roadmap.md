@@ -237,7 +237,8 @@
 - [x] `ask_brain` renamed `delegate`
 - [ ] Agents talking to agents: `Brain.capabilities` listed by `delegate`; `delegate` from any brain, not only Claude; Claude delegating cheap work to `free` with a model; "Hand off to…" any capable brain; "Try a bigger model" button
 - [x] Web-brain compact (ask the site for a summary, open a new conversation seeded with it)
-- [ ] Harness kit: Codex / OpenCode / Gemini CLI as brains (T3 Code's agent wrappers as reference), then as `agentic` members
+- [x] Harness kit: coding-agent CLIs as brains — Antigravity (`agy`) first ([harness.md](harness.md))
+- [ ] More harnesses (OpenCode next), harnesses as `agentic` members of free, an ACP driver
 - [ ] More web members — Claude.ai, ChatGPT, Gemini web, Grok, Perplexity, DeepSeek (record each with the `new-web-brain` skill)
 - [ ] Multi-profile web brains — several logged-in profiles per site, each with its own sticky proxy, as separate capacity units
 - [ ] Always-on / ambient mode — opt-in per channel: debounce bursts, reply / react / ignore gate (rules first), per-channel reply caps

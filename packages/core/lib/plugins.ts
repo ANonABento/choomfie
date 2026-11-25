@@ -12,6 +12,7 @@ const PLUGIN_PACKAGES: Record<string, string> = {
   socials: "@choomfie/socials",
   waymond: "@choomfie/waymond",
   free: "@choomfie/free",
+  harnesses: "@choomfie/harnesses",
 };
 
 export interface PluginConfigSource {
