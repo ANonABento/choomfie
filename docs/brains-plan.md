@@ -188,7 +188,7 @@ Different from routing: routing picks **who answers the user**; delegation is **
 - [ ] Waymond: "the message box never appeared" — Ambition's composer redesign; the owner's uncommitted `adapter.ts` targets it. Profile is logged in (`webbrain sites`, Nov 24); verify with the owner's test, then commit.
 - [x] `webbrain sites` / `webbrain setup`: every site, logged in or not (headless check, sends nothing), then `login` for the ones that aren't.
 - [ ] More web members (Claude.ai, ChatGPT, …) via the `new-web-brain` skill; multi-profile web brains.
-- [ ] Web-brain compact: ask the site for a summary, open a new site conversation seeded with it.
+- [x] Web-brain compact: ask the site for a summary, open a new site conversation seeded with it on the next message.
 
 **Stage 3 — Harness brains.** Exit: Codex / OpenCode / Gemini CLI each answer as a brain (`/brain codex`) and can be an `agentic` member of free.
 - [ ] Harness kit, T3 Code's agent wrappers as reference: process lifecycle, streaming, approvals, files back to Discord.

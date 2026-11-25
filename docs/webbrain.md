@@ -37,6 +37,7 @@ The `new-web-brain` skill (`.claude/skills/new-web-brain/`) walks a Claude Code 
 
 ## Owner commands
 
+- **`/compact`** (kit-level, every web brain): asks the site, in its current conversation, for a summary (goal, decisions, facts, open items, code and numbers verbatim); the next message opens a fresh site conversation that starts with it. Until then the old conversation stays bound, so a restart loses nothing. `/clear` drops a pending summary.
 - `bun run webbrain sites` — every web brain the plugins provide (any plugin whose `index.ts` exports `adapter`), and whether its profile is logged in: opened headless at `chatUrl()`, logged in if the site keeps it in the chat rather than sending it to sign in (an adapter can override with `loggedIn(page)`). Sends nothing. A profile the bot has open shows as in use.
 - `bun run webbrain setup` — the same list, then the login window for each site that isn't logged in, one at a time.
 - `bun run webbrain login <id>` — opens the site headed on its profile; sign in, close the window. Refuses while the profile is open elsewhere (Chrome's `SingletonLock`).

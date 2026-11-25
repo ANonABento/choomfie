@@ -94,6 +94,16 @@ interface ActiveTurn {
   stop: boolean;
 }
 
+/** What `/compact` asks the site for: everything a fresh conversation needs to carry on. */
+export const COMPACT_PROMPT =
+  "Summarize our conversation so far so we can continue it in a new chat. Include the goal, decisions made, key facts, " +
+  "what's done and what's still open, and any file names, code, commands and numbers word for word. Reply with the summary only.";
+
+/** The first message of the fresh conversation after `/compact`: the summary, then what the owner wrote. */
+export function seededPrompt(summary: string, message: string): string {
+  return `[Summary of our earlier conversation, which we're continuing here:]\n${summary.trim()}\n\n[New message:]\n${message}`;
+}
+
 export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {}): Plugin {
   let pool: TabPool<Page> | null = null;
   let watch: LateWatch | null = null;
@@ -112,6 +122,12 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
     /** Continues sent for late answers, per chat, since the owner last wrote: bounded like the in-turn ones. */
     const lateContinues = new Map<string, number>();
     const active = new Map<string, ActiveTurn>();
+    /**
+     * `/compact` summaries waiting for the chat's next message, which opens a
+     * fresh site conversation seeded with them. In memory: a restart before
+     * then leaves the old conversation bound, so nothing is lost.
+     */
+    const compacted = new Map<string, string>();
     const tabs = (pool = new TabPool<Page>({
       launch: () => (opts.launch ? opts.launch(profile) : launchContext(profile, { headless: !headedFor(adapter.id), engine })),
       maxTabs: opts.maxTabs,
@@ -157,6 +173,31 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
       // Core has already bound a fresh chat here; only the background watch is ours to drop.
       async reset(chatKey) {
         lateWatch.stop(chatKey);
+        compacted.delete(chatKey);
+      },
+
+      // The site keeps the whole conversation; we can't trim it. So ask it for a summary, and
+      // start the next message in a fresh conversation that opens with it.
+      async compact(chatKey) {
+        const ref = refAt(chatKey);
+        if (!ref) return `Nothing to compact here yet — no ${adapter.label} conversation.`;
+        if (active.has(chatKey)) return `${adapter.label} is still working on a message here — /compact once it's done.`;
+        const result = await onTab(chatKey, (page) =>
+          adapter.turn(page, { text: COMPACT_PROMPT, files: [] }, {
+            ref,
+            started: () => {},
+            stopRequested: () => false,
+            progress: () => {},
+            notice: () => {},
+            human,
+            timeoutMs: 5 * 60_000,
+          })
+        );
+        const summary = result.text.trim();
+        if (!summary || result.stopped) return `${adapter.label} didn't give a summary — nothing changed.`;
+        lateWatch.delivered(chatKey, result.messageIds ?? []);
+        compacted.set(chatKey, summary);
+        return `${adapter.label} summarized this chat (${summary.length.toLocaleString()} characters). Your next message here starts a fresh ${adapter.label} conversation that opens with the summary.`;
       },
 
       async stop(chatKey) {
@@ -223,7 +264,9 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
           return dest;
         });
 
-        const turn: ActiveTurn = { ref: chat.backendRef ?? undefined, stop: false };
+        // After /compact: a fresh site conversation, opened with the summary.
+        const seed = message.meta?.[LATE_CONTINUE] ? undefined : compacted.get(message.chatKey);
+        const turn: ActiveTurn = { ref: seed ? undefined : (chat.backendRef ?? undefined), stop: false };
         try {
           // A thread on a pipeline (`/pipeline`) gets no default frame: its
           // note says how to work there, and a default like "do it in your
@@ -232,7 +275,9 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
           const { text, mode } = modePrompt(
             adapter,
             chat.mode ?? (onPipeline ? null : adapter.defaultMode) ?? null,
-            (adapter.framePrompt ?? framePrompt)(message.content, message.meta)
+            seed
+              ? seededPrompt(seed, (adapter.framePrompt ?? framePrompt)(message.content, message.meta))
+              : (adapter.framePrompt ?? framePrompt)(message.content, message.meta)
           );
           const runTurn = (prompt: string, attach: string[]) =>
             onTab(message.chatKey, (page) => {
@@ -270,6 +315,10 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
             if (kept.length) result = { ...result, files: [...kept, ...(result.files ?? [])] };
           }
           chats.setBackendRef(chat.id, result.ref);
+          if (seed) {
+            compacted.delete(message.chatKey);
+            lateWatch.stop(message.chatKey); // the old conversation's background work isn't this one's
+          }
           lateWatch.delivered(message.chatKey, result.messageIds ?? []);
           if (result.background && result.lastMessageId) lateWatch.start(message.chatKey, result.ref, result.lastMessageId);
           const planMode = mode ? adapter.modes?.find((m) => m.id === mode && m.tasks) : undefined;

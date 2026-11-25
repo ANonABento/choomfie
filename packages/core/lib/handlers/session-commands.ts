@@ -12,8 +12,9 @@
  * - `/mode [name]` puts this chat in one of its brain's modes (Waymond: code,
  *   plan, cad, 3d), or shows them; `off` goes back to plain chat.
  * - `/compact` (Claude) summarises this chat's session and carries on fresh
- *   with the summary. A brain with `compact()` (free, API providers) folds its
- *   older turns into its summary; web brains manage their own context.
+ *   with the summary. A brain with `compact()` folds its context: free and API
+ *   providers summarize their older turns; a web brain asks the site for a
+ *   summary and opens a fresh site conversation with it on the next message.
  *
  * Claude needs the daemon, which runs one session per location. In foreground
  * mode the session belongs to the `claude` CLI in your terminal and there is

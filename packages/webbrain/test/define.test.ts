@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getBrain, type Brain, type BrainMessage, type PluginContext } from "@choomfie/shared";
 import { ChatStore } from "../../core/lib/chats/store.ts";
-import { answerText, defineWebBrain, modePrompt } from "../define.ts";
+import { answerText, COMPACT_PROMPT, defineWebBrain, modePrompt } from "../define.ts";
 import { LoginRequiredError, type SiteAdapter, type TurnContext, type TurnInput } from "../adapter.ts";
 import { LateWatch } from "../watch.ts";
 import { FakeContext, gate, tick } from "./fakes.ts";
@@ -330,5 +330,54 @@ describe("LateWatch", () => {
     w.start("c", "ref", "m0");
     await w.tick("c");
     expect(w.watching("c")).toBe(false);
+  });
+});
+
+describe("web-brain /compact", () => {
+  test("asks the site for a summary, then the next message opens a fresh conversation with it", async () => {
+    const sent: { text: string; ref?: string }[] = [];
+    let n = 0;
+    const { brain, chats, destroy } = await setup(async (input, t) => {
+      sent.push({ text: input.text, ref: t.ref });
+      if (input.text === COMPACT_PROMPT) return { text: "Goal: arm CAD. Decided: MGN9 rail.", ref: t.ref! };
+      const ref = t.ref ?? `conv-${++n}`;
+      t.started(ref);
+      return { text: "ok", ref };
+    });
+    try {
+      expect(await brain.compact!("chan")).toContain("Nothing to compact");
+      await brain.send(msg("chan", "design the arm"), {} as never);
+      expect(await brain.compact!("chan")).toContain("summarized");
+      // Until the next message, the old conversation is still the bound one.
+      expect(chats.bound("chan", "fakesite")!.backendRef).toBe("conv-1");
+      await brain.send(msg("chan", "now the gripper"), {} as never);
+      const seeded = sent[2];
+      expect(seeded.ref).toBeUndefined();
+      expect(seeded.text).toContain("Goal: arm CAD. Decided: MGN9 rail.");
+      expect(seeded.text).toContain("now the gripper");
+      expect(chats.bound("chan", "fakesite")!.backendRef).toBe("conv-2");
+      // Only once: the message after continues the new conversation.
+      await brain.send(msg("chan", "thanks"), {} as never);
+      expect(sent[3]).toEqual({ text: expect.not.stringContaining("Summary") as never, ref: "conv-2" });
+    } finally {
+      await destroy();
+    }
+  });
+
+  test("/clear drops a pending summary", async () => {
+    const refs: (string | undefined)[] = [];
+    const { brain, destroy } = await setup(async (input, t) => {
+      refs.push(t.ref);
+      return { text: input.text === COMPACT_PROMPT ? "summary" : "ok", ref: t.ref ?? "conv-1" };
+    });
+    try {
+      await brain.send(msg("chan"), {} as never);
+      await brain.compact!("chan");
+      await brain.reset!("chan");
+      await brain.send(msg("chan", "hi"), {} as never);
+      expect(refs.at(-1)).toBe("conv-1");
+    } finally {
+      await destroy();
+    }
   });
 });
