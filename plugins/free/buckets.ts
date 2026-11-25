@@ -6,7 +6,9 @@
  * model. Which models meet a need is worked out from each provider's live
  * model list (`@choomfie/apibrain` models.ts), so nothing here goes stale
  * when a provider renames or retires a model. `brains` are web brains tried
- * first for that kind of work (on a first message) or offered with a button.
+ * first for that kind of work (on a first message) or offered with a button:
+ * Waymond works in its own cloud sandbox, a harness (Antigravity, OpenCode)
+ * on this computer.
  *
  * config.json `free.buckets.<id>` pins a bucket to explicit targets
  * (`member[:model]`; `@bucket` splices another bucket's pins).
@@ -49,9 +51,17 @@ export const BUCKETS: Bucket[] = [
     id: "agentic",
     label: "Do the work",
     description:
-      "asks the assistant to DO or MAKE something with tools, not just answer in text: make, draw or edit an image, picture or art; change a repo; make or edit files; run code; build an app, a website or a 3D/CAD part; browse sites; multi-step tasks",
+      "asks the assistant to DO or MAKE something with tools, not just answer in text: make, draw or edit an image, picture or art; change a GitHub repo; build an app, a website or a 3D/CAD part; browse sites; multi-step tasks",
     need: "strong",
     brains: ["waymond"],
+  },
+  {
+    id: "local",
+    label: "On this computer",
+    description:
+      "work that has to happen on the user's own computer: run commands or scripts here, read or change local files and folders, a project or repo on this machine, installed programs, checking this machine (disk, processes, ports)",
+    need: "strong",
+    brains: ["antigravity", "opencode"],
   },
   {
     id: "research",

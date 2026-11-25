@@ -15,7 +15,7 @@ export type AnyInteraction = ChatInputCommandInteraction | ButtonInteraction;
 
 /** The brain answering here (thread → parent channel → claude). */
 export function brainAt(interaction: AnyInteraction | AutocompleteInteraction, ctx: AppContext): string {
-  return resolveBrainId(interaction.channelId!, parentChannelId(interaction.channel), (c) => ctx.config.getChannelBrain(c));
+  return resolveBrainId(interaction.channelId!, parentChannelId(interaction.channel), (c) => ctx.config.getChannelBrain(c), ctx.config.getDefaultBrain());
 }
 
 /**

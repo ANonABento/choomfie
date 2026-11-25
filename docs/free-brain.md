@@ -99,7 +99,8 @@ message → a member mode, or a web member holding the chat?  → that member (l
   - on its **first** message (nothing to lose yet);
   - through one of its modes (`/mode cad`);
   - when you click **Hand this to Waymond**, offered under an API answer when the classifier is sure (≥ `suggestAt`, default 0.75) that the message is a job for it. The click resends that message to Waymond, with a recap of what it missed.
-- **Once a web member has answered, it holds the chat.** `/model` shows it, and every message goes to it, with no classifier call, until `/model auto`.
+- **Once a web member has answered, it holds the chat.** `/model` shows it, and every message goes to it, with no classifier call, until you hand it back.
+- **Handing back:** every reply from a holding member carries a **Hand back to free models** button (an older reply's button works too). It clears the hold and the member mode, and says so; nothing is resent. The member's replies are already in the chat's transcript, so the free models pick up from there, and the member gets a recap of what it missed if it's handed the chat again. `/model auto` does the same without the note.
 - **A holding member that fails never moves silently.** The reply says what went wrong and offers **Retry** and **Answer with free models**; the second answers that message with an API model and releases the chat.
 - **`/model` pins** a member (`groq`), a model (`groq:openai/gpt-oss-120b`) or a web member (`waymond`). A pinned API model that can't answer falls back to the other API models, and the reply says who answered. An image the pinned model can't see goes to a vision model for that one message.
 
@@ -110,7 +111,8 @@ message → a member mode, or a web member holding the chat?  → that member (l
   | `chat` | small talk and quick questions | fast | |
   | `quality` | analysis and writing | strong | |
   | `code` | code answered in the reply | strong | |
-  | `agentic` | real work: make an image, repos, files, CAD, browsing | strong | waymond |
+  | `agentic` | real work in Waymond's cloud sandbox: make an image, GitHub repos, CAD, browsing | strong | waymond |
+  | `local` | work on this computer: commands, local files and repos, installed programs | strong | antigravity, opencode (harnesses) |
   | `research` | current or sourced information | strong | waymond |
   | `vision` | an attached image | vision | |
   | `long` | a very long input | long | |
@@ -177,7 +179,7 @@ Name-based ranking is a starting point. Next: a probe benchmark and implicit sig
 
 ## Modes
 
-Modes are kinds of work, so `/mode` in a free chat lists each web member's own modes, labelled `Waymond: …`. `/mode cad` sends the chat to Waymond in cad mode; `/mode off` goes back to plain chat (Waymond still holds the chat until `/model auto`). Because mode flags carry over, plan boards work with `/brain free` too: each task's mode routes to the brain that owns it.
+Modes are kinds of work, so `/mode` in a free chat lists each web member's own modes, labelled `Waymond: …` (a mode id two members share, like the harnesses' `work`, belongs to the first one listed). `/mode cad` sends the chat to Waymond in cad mode; `/mode off` goes back to plain chat (Waymond still holds the chat until `/model auto`). Because mode flags carry over, plan boards work with `/brain free` too: each task's mode routes to the brain that owns it.
 
 To choose a model instead, use `/model`.
 

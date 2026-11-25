@@ -80,6 +80,8 @@ const LOGIN_COOLDOWN_MS = 3_600_000;
 
 export const RETRY_CHOICE = "Retry";
 export const RELEASE_CHOICE = "Answer with free models";
+/** Under a member's reply while it holds the chat: give the chat back to the free models. */
+export const HAND_BACK_CHOICE = "Hand back to free models";
 export const handChoice = (label: string) => `Hand this to ${label}`;
 
 export interface FreeBrainDeps {
@@ -117,7 +119,7 @@ interface Answer {
 }
 
 /** What a quick-reply button this brain offered does when clicked. */
-type OfferKind = { kind: "retry" } | { kind: "release" } | { kind: "hand"; to: string };
+type OfferKind = { kind: "retry" } | { kind: "release" } | { kind: "hand"; to: string } | { kind: "handback"; from: string };
 
 /** Buttons under the last reply, and the message they act on. */
 interface Offer {
@@ -319,7 +321,11 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
 
     // Read by core on each `/mode`: brain members can load after this one.
     get modes(): BrainMode[] {
-      return brainMembers().flatMap((b) => (b.modes ?? []).map((m) => ({ ...m, description: `${b.label}: ${m.description}` })));
+      // Two members with the same mode id (both harnesses have `work`): the first one listed owns it.
+      const seen = new Set<string>();
+      return brainMembers().flatMap((b) =>
+        (b.modes ?? []).filter((m) => !seen.has(m.id) && seen.add(m.id)).map((m) => ({ ...m, description: `${b.label}: ${m.description}` }))
+      );
     },
 
     models(): BrainModel[] {
@@ -339,8 +345,20 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
       // A click on one of our own buttons acts on the message it was offered for.
       const offer = offers.get(incoming.chatKey);
       offers.delete(incoming.chatKey);
-      const force = offer && !incoming.filePaths.length ? offer.choices.get(incoming.content.trim()) : undefined;
+      const typed = incoming.content.trim();
+      const held = holderOf(chat) ?? (chat.mode ? memberMode(chat.mode)?.brain.id : undefined);
+      // An older reply's Hand back button still works: its offer is gone, but the chat is still held.
+      const force: OfferKind | undefined = incoming.filePaths.length
+        ? undefined
+        : (offer?.choices.get(typed) ?? (typed === HAND_BACK_CHOICE && held ? { kind: "handback", from: held } : undefined));
       const message = force ? { ...offer!.message, meta: incoming.meta } : incoming;
+      if (force?.kind === "handback") {
+        // The member's replies are already in this chat's transcript, so the free models pick up from there.
+        if (chat.model) chats.setModel?.(chat.id, null);
+        if (chat.mode && memberMode(chat.mode)) chats.setMode?.(chat.id, null);
+        lastRoute.delete(incoming.chatKey);
+        return { text: `↩️ Back to free models. They have ${label(force.from)}'s replies in this chat's history; \`/model ${force.from}\` to hand it back.` };
+      }
       if (force?.kind === "release" && holderOf(chat)) {
         chats.setModel?.(chat.id, null);
         chat.model = null;
@@ -405,9 +423,13 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         if (skipped && !reply.stopped) text += `\n-# ${label(skipped)} couldn't take this${skippedWhy ? ` (${clipNote(skippedWhy.slice(skipped.length + 1))})` : ""} — answered by ${label(member)}, which has no tools.`;
         else if (decision.pin && member !== decision.pin.member && !reply.stopped) text += `\n-# ${label(decision.pin.member)} couldn't answer — ${label(member)} did.`;
         else if (config.footer && !reply.stopped) text += footer(r);
-        const suggested: [string, OfferKind][] =
-          decision.suggest && !reply.stopped ? [[handChoice(label(decision.suggest)), { kind: "hand", to: decision.suggest }]] : [];
-        return withOffer({ ...reply, text }, message, suggested);
+        const offered: [string, OfferKind][] =
+          reply.stopped ? []
+          : decision.suggest ? [[handChoice(label(decision.suggest)), { kind: "hand", to: decision.suggest }]]
+          // A member now holds this chat: one click gives it back when the work is done.
+          : !members.has(member) ? [[HAND_BACK_CHOICE, { kind: "handback", from: member }]]
+          : [];
+        return withOffer({ ...reply, text }, message, offered);
       } catch (e) {
         if (abort.signal.aborted) return { text: "⏹️ Stopped.", stopped: true };
         routeLog?.({ passed: e instanceof AllUnavailableError ? e.attempts : [], error: e instanceof Error ? e.message : String(e) });

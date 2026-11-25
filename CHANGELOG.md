@@ -4,6 +4,8 @@
 
 ### Added
 
+- **`defaultBrain` (`/config`): who answers where `/brain` set nothing.** `free` makes every new channel, thread and DM start on the free brain; `/brain claude` still pins one back. Unloaded → Claude.
+- **OpenCode harness; free hands work on this computer to a harness and takes it back.** `/brain opencode` (no account: Zen's free models). Free's new `local` bucket sends work that has to happen on this machine to Antigravity, then OpenCode, the way `agentic` goes to Waymond; a holding member's replies now carry **Hand back to free models**, which returns the chat to the API models with the member's replies in their history. Harness runs get `PWD` set to their folder (OpenCode wrote into Choomfie's checkout without it). `/config defaultBrain` autocompletes from the same live brain list as `/brain` (shared `brainChoices`, `brainLabel`, `isBrainId`).
 - **Harness brains: coding-agent CLIs answer in Discord.** New kit `@choomfie/harness` and plugin `harnesses`: `/brain antigravity` runs Google's Antigravity CLI (`agy`, free on a weekly quota) once per message, resuming its own conversation per chat, in a folder per chat; attachments go in, files it makes come back, `/stop` kills the run. Anyone but the owner gets its read-only mode. Adding a CLI is one spec file. See `docs/harness.md`.
 - **`/compact` for web brains.** The site is asked for a summary in its conversation; the next message opens a fresh site conversation that starts with it.
 - **`bun run webbrain sites` and `webbrain setup`.** Every web brain, logged in or not (checked headless, nothing sent), then the login window for each one that isn't — the web-brain counterpart of `apibrain keys`.

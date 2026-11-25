@@ -7,7 +7,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { writeJsonAtomicSync, type SocialsPlatformConfig } from "@choomfie/shared";
+import { CLAUDE_BRAIN, writeJsonAtomicSync, type SocialsPlatformConfig } from "@choomfie/shared";
 import { parsePipelines, type PipelineConfig } from "./pipelines/config.ts";
 
 export interface Persona {
@@ -149,6 +149,8 @@ export interface Config {
    * Only routing — who may use Choomfie at all stays in access.json.
    */
   brainChannels?: Record<string, string>;
+  /** Who answers where `/brain` set nothing: every new channel, thread and DM. Absent = claude. */
+  defaultBrain?: string;
   /**
    * Server channels where an @mention is answered inline instead of in a new
    * thread (`/brain threads:false`). Absent = every text channel threads.
@@ -503,6 +505,18 @@ export class ConfigManager {
     if (!on) list.push(channelId);
     if (list.length) this.config.inlineChannels = list;
     else delete this.config.inlineChannels;
+    this.save();
+  }
+
+  /** The configured default brain id (`claude` when unset). Whether it's loaded is the router's call. */
+  getDefaultBrain(): string {
+    const b = this.config.defaultBrain;
+    return typeof b === "string" && b.trim() ? b.trim().toLowerCase() : CLAUDE_BRAIN;
+  }
+
+  setDefaultBrain(id: string) {
+    if (id === CLAUDE_BRAIN) delete this.config.defaultBrain;
+    else this.config.defaultBrain = id;
     this.save();
   }
 

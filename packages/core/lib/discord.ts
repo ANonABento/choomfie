@@ -326,6 +326,7 @@ export function createDiscordClient(ctx: AppContext): Client {
       isConversationMode,
       access: ctx.config.getBrainAccess(),
       channelBrain: (id) => ctx.config.getChannelBrain(id),
+    defaultBrain: ctx.config.getDefaultBrain(),
     });
     if (route.kind === "ignore") return;
     if (route.kind === "unavailable") {

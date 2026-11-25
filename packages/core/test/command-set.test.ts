@@ -99,6 +99,7 @@ const baseCtx = (brainMap: Record<string, string> = {}) => ({
   DATA_DIR: "/nonexistent-choomfie-test",
   config: {
     getChannelBrain: (id: string) => brainMap[id],
+    getDefaultBrain: () => "claude",
     getBrainAccess: () => "owner",
     setChannelBrain: (id: string, b: string | undefined) => {
       if (b) brainMap[id] = b;

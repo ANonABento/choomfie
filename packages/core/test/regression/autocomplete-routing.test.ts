@@ -49,7 +49,7 @@ function fakeAutocomplete(
   return { interaction, recorded };
 }
 
-const ctx = { plugins: [], config: { getChannelBrain: () => undefined } } as unknown as AppContext;
+const ctx = { plugins: [], config: { getChannelBrain: () => undefined, getDefaultBrain: () => "claude" } } as unknown as AppContext;
 
 describe("autocomplete routing", () => {
   test("reaches the command's suggester and never the reply path", async () => {

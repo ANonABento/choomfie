@@ -81,6 +81,16 @@ describe("decideRoute", () => {
     expect(resolveBrainId("own", "parent", (id) => map[id])).toBe("other");
     expect(resolveBrainId("thread", null, (id) => map[id])).toBe("claude");
   });
+
+  test("unset channels go to the default brain; an explicit claude override still wins", () => {
+    expect(route({ channelId: "plain", defaultBrain: "waymond" }).kind).toBe("brain");
+    const map: Record<string, string> = { brainchan: "claude" };
+    expect(route({ channelBrain: (id) => map[id], defaultBrain: "waymond" }).kind).toBe("claude");
+  });
+
+  test("a default brain that isn't loaded falls back to claude", () => {
+    expect(route({ channelId: "plain", defaultBrain: "gone" }).kind).toBe("claude");
+  });
 });
 
 describe("chunkForDiscord", () => {
@@ -158,6 +168,15 @@ describe("brain config", () => {
     reloaded.setChannelBrain("c1", undefined);
     expect(reloaded.getConfig().brainChannels).toBeUndefined();
     expect(setting.write(reloaded, "default")).toEqual({ ok: true, value: "owner" });
+  });
+
+  test("defaultBrain takes claude or a loaded brain, and claude clears it", () => {
+    const cfg = new ConfigManager(mkdtempSync(join(tmpdir(), "brain-cfg-")));
+    const setting = findSetting("defaultBrain")!;
+    expect(cfg.getDefaultBrain()).toBe("claude");
+    expect(setting.write(cfg, "nope").ok).toBe(false);
+    expect(setting.write(cfg, "claude")).toEqual({ ok: true, value: "claude" });
+    expect(cfg.getConfig().defaultBrain).toBeUndefined();
   });
 });
 
@@ -494,7 +513,7 @@ describe("/clear and /compact follow the channel's brain", () => {
       ownerUserId: "owner",
       DATA_DIR: "/nonexistent-choomfie-test",
       chats,
-      config: { getChannelBrain: (id: string) => (id === "chan1" ? channelBrain : undefined) },
+      config: { getChannelBrain: (id: string) => (id === "chan1" ? channelBrain : undefined), getDefaultBrain: () => "claude" },
     };
     try {
       await commands.get(command)!.handler(interaction as never, ctx as never);

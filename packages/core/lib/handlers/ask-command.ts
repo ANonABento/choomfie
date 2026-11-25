@@ -91,6 +91,7 @@ export async function runAsk(interaction: AskInteraction, ctx: AppContext, input
     isConversationMode: false,
     access: ctx.config.getBrainAccess(),
     channelBrain: (id) => ctx.config.getChannelBrain(id),
+    defaultBrain: ctx.config.getDefaultBrain(),
   });
   if (route.kind === "unavailable") {
     await refuse(`The \`${route.brainId}\` brain isn't loaded right now. \`/brain claude\` to switch back.`);

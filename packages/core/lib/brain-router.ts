@@ -13,6 +13,7 @@
 
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from "discord.js";
 import {
+  brainLabel,
   CLAUDE_BRAIN,
   errorMessage,
   fileBatches,
@@ -59,20 +60,31 @@ export interface RouteInput {
   isConversationMode: boolean;
   access: BrainAccess;
   channelBrain: (channelId: string) => string | undefined;
+  /** `defaultBrain` from config: who answers where nothing was set. */
+  defaultBrain?: string;
   lookup?: (id: string) => Brain | undefined;
 }
 
-/** The brain id configured for a channel, falling back to its parent, then claude. */
+/** The configured default brain, or claude while it isn't loaded (plugin off). */
+export function defaultBrainId(configured: string | undefined, lookup: (id: string) => Brain | undefined = getBrain): string {
+  return configured && configured !== CLAUDE_BRAIN && lookup(configured) ? configured : CLAUDE_BRAIN;
+}
+
+/** The brain id configured for a channel, falling back to its parent, then the default (claude unless set). */
 export function resolveBrainId(
   channelId: string,
   parentId: string | null | undefined,
-  channelBrain: (channelId: string) => string | undefined
+  channelBrain: (channelId: string) => string | undefined,
+  defaultBrain?: string
 ): string {
-  return channelBrain(channelId) ?? (parentId ? channelBrain(parentId) : undefined) ?? CLAUDE_BRAIN;
+  return channelBrain(channelId) ?? (parentId ? channelBrain(parentId) : undefined) ?? defaultBrainId(defaultBrain);
 }
 
 export function decideRoute(input: RouteInput): RouteDecision {
-  const brainId = resolveBrainId(input.channelId, input.parentId, input.channelBrain);
+  const brainId =
+    input.channelBrain(input.channelId) ??
+    (input.parentId ? input.channelBrain(input.parentId) : undefined) ??
+    defaultBrainId(input.defaultBrain, input.lookup ?? getBrain);
   if (brainId === CLAUDE_BRAIN) return { kind: "claude" };
 
   // Upstream already required the allowlist; this only narrows further.
@@ -595,7 +607,7 @@ export async function postBrainReply(
     if (typeof id === "string") offerPatch(id, patch);
   }
   // One message per approval, so each card is resolved on its own.
-  const label = getBrain(brainId)?.label ?? brainId;
+  const label = brainLabel(brainId);
   for (const approval of reply.approvals ?? []) {
     const sent = await channel.send({ ...approvalMessage(label, approval), allowedMentions: NO_MENTIONS });
     const id = (sent as { id?: unknown } | undefined)?.id;

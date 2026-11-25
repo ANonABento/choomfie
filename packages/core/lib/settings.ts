@@ -20,7 +20,7 @@
  *   nothing is worse than not having one.
  */
 
-import { AUTOCOMPLETE_LIMIT } from "@choomfie/shared";
+import { AUTOCOMPLETE_LIMIT, brainChoices, isBrainId, unknownBrainText } from "@choomfie/shared";
 import { DEFAULT_EFFORT, EFFORT_LEVELS, type ConfigManager } from "./config.ts";
 
 /** When a change takes effect. */
@@ -56,6 +56,8 @@ export type Setting = {
    * response for an autocomplete, so there is no room for a lookup.
    */
   suggestions: string[];
+  /** Live choices instead of `suggestions` (in memory only: the 3-second rule above still holds). */
+  suggest?: (typed: string) => { name: string; value: string }[];
   scope: SettingScope;
   /** Current value, formatted for display. */
   read(config: ConfigManager): string;
@@ -275,6 +277,23 @@ export const SETTINGS: Setting[] = [
         return { ok: false, error: `Must be one of ${EFFORT_LEVELS.join(", ")}.` };
       }
       config.setEffort(value);
+      return { ok: true, value };
+    },
+  },
+  {
+    key: "defaultBrain",
+    description: "Who answers in channels, threads and DMs that /brain hasn't set (claude, free, waymond, …)",
+    example: "free or claude",
+    suggestions: [],
+    suggest: brainChoices,
+    scope: "immediately",
+    read: (config) => config.getDefaultBrain(),
+    write: (config, raw) => {
+      const value = isReset(raw) ? "claude" : raw.trim().toLowerCase();
+      if (!isBrainId(value)) {
+        return { ok: false, error: unknownBrainText(value) };
+      }
+      config.setDefaultBrain(value);
       return { ok: true, value };
     },
   },

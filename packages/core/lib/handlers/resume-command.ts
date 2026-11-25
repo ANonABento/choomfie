@@ -31,12 +31,13 @@ import {
   AUTOCOMPLETE_LIMIT,
   CHAT_TITLE_MAX,
   CLAUDE_BRAIN,
+  brainLabel,
   getBrain,
   relativeTime,
   type ChatRecord,
 } from "@choomfie/shared";
 import { registerButtonHandler, registerCommand, registerModalHandler } from "../register.ts";
-import { parentChannelId, resolveBrainId } from "../brain-router.ts";
+import { defaultBrainId, parentChannelId, resolveBrainId } from "../brain-router.ts";
 import { isDaemonMode, requestDaemonControl } from "../daemon-status.ts";
 import { isOwner } from "../access.ts";
 import { brainAt, cwdLabel, liveChat, type AnyInteraction } from "../chats/here.ts";
@@ -50,9 +51,6 @@ export const FOREGROUND_CHAT_NOTICE =
   "Claude chats need the daemon: in **foreground mode** the session belongs to the `claude` CLI in " +
   "your terminal. Use `claude --resume` there, or run `choomfie --daemon` to swap chats from Discord.";
 
-function brainLabel(id: string): string {
-  return id === CLAUDE_BRAIN ? "Claude" : (getBrain(id)?.label ?? id);
-}
 
 function chatLine(chat: ChatRecord, ctx: AppContext): string {
   const bits = [`**${chat.title}**`, relativeTime(chat.lastActiveAt)];
@@ -131,7 +129,9 @@ export async function resumeChat(interaction: AnyInteraction, ctx: AppContext, c
   // Point this channel at the chat's brain if it isn't already.
   if (brainAt(interaction, ctx) !== chat.brain) {
     const parentId = parentChannelId(interaction.channel);
-    const inherited = parentId ? resolveBrainId(parentId, null, (c) => ctx.config.getChannelBrain(c)) : CLAUDE_BRAIN;
+    const inherited = parentId
+      ? resolveBrainId(parentId, null, (c) => ctx.config.getChannelBrain(c), ctx.config.getDefaultBrain())
+      : defaultBrainId(ctx.config.getDefaultBrain());
     ctx.config.setChannelBrain(location, inherited === chat.brain ? undefined : chat.brain);
   }
   if (ctx.chats.bound(location, chat.brain)?.id === chat.id) return reply(interaction, `**${chat.title}** is already live here.`);

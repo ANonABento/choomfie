@@ -1,4 +1,8 @@
-/** One harness run: spawn the CLI, no shell, stdin closed, killed on stop or timeout. */
+/**
+ * One harness run: spawn the CLI, no shell, stdin closed, killed on stop or timeout.
+ * PWD is set to the folder too: OpenCode takes its working folder from PWD, not
+ * the process's cwd, and wrote into Choomfie's own checkout without it.
+ */
 
 export interface RunOutput {
   stdout: string;
@@ -11,7 +15,7 @@ export interface RunOutput {
 export type Spawner = (cmd: string[], opts: { cwd: string; signal: AbortSignal; timeoutMs: number }) => Promise<RunOutput>;
 
 export const spawnCli: Spawner = async (cmd, { cwd, signal, timeoutMs }) => {
-  const proc = Bun.spawn(cmd, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env, NO_COLOR: "1" } });
+  const proc = Bun.spawn(cmd, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env, NO_COLOR: "1", PWD: cwd } });
   let killed: RunOutput["killed"];
   const kill = (why: "stopped" | "timeout") => {
     killed ??= why;

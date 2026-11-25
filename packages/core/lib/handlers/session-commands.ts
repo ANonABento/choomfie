@@ -22,7 +22,7 @@
  */
 
 import { EmbedBuilder, MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction } from "discord.js";
-import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, type BrainMode } from "@choomfie/shared";
+import { ANYWHERE, AUTOCOMPLETE_LIMIT, brainLabel, CLAUDE_BRAIN, getBrain, type BrainMode } from "@choomfie/shared";
 import { registerCommand } from "../register.ts";
 import { isDaemonMode, requestDaemonControl } from "../daemon-status.ts";
 import { brainAt, resolveChatCwd, shortPath } from "../chats/here.ts";
@@ -39,10 +39,9 @@ async function ephemeral(interaction: ChatInputCommandInteraction, content: stri
   await interaction.reply({ content, flags: MessageFlags.Ephemeral });
 }
 
-const brainName = (id: string) => (id === CLAUDE_BRAIN ? "Claude" : (getBrain(id)?.label ?? id));
 
 const MODE_OFF = "off";
-const modesOf = (brain: string): BrainMode[] => (brain === CLAUDE_BRAIN ? [] : (getBrain(brain)?.modes ?? []));
+const modesOf = (brain: string): BrainMode[] => getBrain(brain)?.modes ?? [];
 
 /** A brain's modes matching what's typed, plus `off`. In memory — well inside 3s. */
 function modeChoices(brain: string, typed: string, withOff: boolean) {
@@ -61,8 +60,8 @@ function resolveMode(brain: string, requested: string): { mode: string | null } 
   if (modes.some((m) => m.id === wanted)) return { mode: wanted };
   return {
     error: modes.length
-      ? `**${brainName(brain)}** has no \`${wanted}\` mode. Modes: ${modes.map((m) => `\`${m.id}\``).join(", ")}, or \`off\`.`
-      : `**${brainName(brain)}** has no modes.`,
+      ? `**${brainLabel(brain)}** has no \`${wanted}\` mode. Modes: ${modes.map((m) => `\`${m.id}\``).join(", ")}, or \`off\`.`
+      : `**${brainLabel(brain)}** has no modes.`,
   };
 }
 
@@ -79,7 +78,7 @@ registerCommand("compact", {
       if (!own?.compact) {
         return ephemeral(
           interaction,
-          `This channel is answered by **${brainName(brain)}**, which manages its own context — nothing to compact. ` +
+          `This channel is answered by **${brainLabel(brain)}**, which manages its own context — nothing to compact. ` +
             "`/clear` starts a fresh conversation with it here."
         );
       }
@@ -172,7 +171,7 @@ registerCommand("clear", {
       }
       if (requestedMode) return ephemeral(interaction, "Claude has no modes — `mode` is for other brains (`/brain`).");
     } else if (requested || requestedModel) {
-      return ephemeral(interaction, `\`cwd\` and \`model\` only apply to Claude chats; **${brainName(brain)}** runs in its own app.`);
+      return ephemeral(interaction, `\`cwd\` and \`model\` only apply to Claude chats; **${brainLabel(brain)}** runs in its own app.`);
     }
     let mode: string | null = null;
     if (requestedMode) {
@@ -196,7 +195,7 @@ registerCommand("clear", {
       embeds: [
         new EmbedBuilder()
           .setColor(0x57f287)
-          .setTitle(`New ${brainName(brain)} chat`)
+          .setTitle(`New ${brainLabel(brain)} chat`)
           .setDescription(
             `Your next message here starts a new chat${cwd ? `, working in \`${shortPath(cwd)}\`` : ""}` +
               `${model ? ` on **${model}**` : ""}${mode ? ` in **${mode}** mode` : ""}. ` +
@@ -228,7 +227,7 @@ registerCommand("mode", {
     if (!modes.length) {
       return ephemeral(
         interaction,
-        `**${brainName(brain)}** answers here and has no modes. Modes belong to web brains like Waymond — \`/brain\` to switch.`
+        `**${brainLabel(brain)}** answers here and has no modes. Modes belong to web brains like Waymond — \`/brain\` to switch.`
       );
     }
     const requested = interaction.options.getString("name");
@@ -238,7 +237,7 @@ registerCommand("mode", {
       return ephemeral(
         interaction,
         [
-          `This **${brainName(brain)}** chat is ${
+          `This **${brainLabel(brain)}** chat is ${
             current ? `in **${current}** mode` : fallback ? `in **${fallback}** mode (the default)` : "a plain chat (no mode)"
           }.`,
           ...modes.map((m) => `\`${m.id}\` — ${m.description}`),
@@ -254,8 +253,8 @@ registerCommand("mode", {
     const label = modes.find((m) => m.id === resolved.mode)?.label;
     await interaction.reply(
       label
-        ? `This **${brainName(brain)}** chat is now in **${label}** mode, from your next message. \`/mode off\` to leave it.`
-        : `This **${brainName(brain)}** chat is back to ${fallback ? `**${fallback}** mode (the default)` : "plain chat"}.`
+        ? `This **${brainLabel(brain)}** chat is now in **${label}** mode, from your next message. \`/mode off\` to leave it.`
+        : `This **${brainLabel(brain)}** chat is back to ${fallback ? `**${fallback}** mode (the default)` : "plain chat"}.`
     );
   },
 });

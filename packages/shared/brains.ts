@@ -11,6 +11,7 @@
  */
 
 import type { PluginContext } from "./plugin-context.ts";
+import { AUTOCOMPLETE_LIMIT } from "./interactions.ts";
 
 export const CLAUDE_BRAIN = "claude";
 
@@ -283,4 +284,28 @@ export function getBrain(id: string): Brain | undefined {
 /** Registered brain ids, plus the built-in "claude" first. */
 export function listBrainIds(): string[] {
   return [CLAUDE_BRAIN, ...brains.keys()];
+}
+
+/** `claude` or a loaded brain: what `/brain <name>` and `defaultBrain` accept. */
+export function isBrainId(id: string): boolean {
+  return id === CLAUDE_BRAIN || brains.has(id);
+}
+
+/** The refusal for a brain name that isn't loaded, listing what is. */
+export function unknownBrainText(id: string): string {
+  return `No brain called \`${id}\` is loaded. Loaded: ${listBrainIds().map((b) => `\`${b}\``).join(", ")}.`;
+}
+
+/** A brain's display name: "Claude", its label, or the bare id when it isn't loaded. */
+export function brainLabel(id: string): string {
+  return id === CLAUDE_BRAIN ? "Claude" : (brains.get(id)?.label ?? id);
+}
+
+/** Autocomplete choices for a brain name (`/brain`, `/config defaultBrain`): loaded brains matching what's typed. In memory. */
+export function brainChoices(typed: string): { name: string; value: string }[] {
+  const q = typed.trim().toLowerCase();
+  return listBrainIds()
+    .filter((id) => id.includes(q) || brainLabel(id).toLowerCase().includes(q))
+    .slice(0, AUTOCOMPLETE_LIMIT)
+    .map((id) => ({ name: `${brainLabel(id)} (${id})`.slice(0, 100), value: id }));
 }

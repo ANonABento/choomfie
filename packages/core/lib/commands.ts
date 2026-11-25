@@ -396,7 +396,7 @@ registerCommand("github", {
 /** Who answers in this channel, and for whom — the old `/brain status`. */
 function brainHere(interaction: ChatInputCommandInteraction, ctx: AppContext): string {
   const parentId = parentChannelId(interaction.channel);
-  const id = resolveBrainId(interaction.channelId, parentId, (c) => ctx.config.getChannelBrain(c));
+  const id = resolveBrainId(interaction.channelId, parentId, (c) => ctx.config.getChannelBrain(c), ctx.config.getDefaultBrain());
   if (id === CLAUDE_BRAIN) return "**Claude**";
   const brain = getBrain(id);
   const own = ctx.config.getChannelBrain(interaction.channelId) || !parentId ? "" : " (from parent channel)";
@@ -467,8 +467,8 @@ registerCommand("status", {
       );
 
     // The brain answering here reports on itself (providers, health, quota for API brains).
-    const hereId = resolveBrainId(interaction.channelId, parentChannelId(interaction.channel), (c) => ctx.config.getChannelBrain(c));
-    const hereBrain = hereId === CLAUDE_BRAIN ? undefined : getBrain(hereId);
+    const hereId = resolveBrainId(interaction.channelId, parentChannelId(interaction.channel), (c) => ctx.config.getChannelBrain(c), ctx.config.getDefaultBrain());
+    const hereBrain = getBrain(hereId);
     const hereLines = hereBrain ? await brainStatus(hereBrain) : [];
     if (hereLines.length) embed.addFields({ name: `${hereBrain!.label} brain`, value: fieldText(hereLines) });
 
@@ -637,7 +637,7 @@ registerCommand("config", {
     }
     const typed = interaction.options.getFocused();
     await interaction.respond(
-      suggestValues(setting, typed).map((value) => ({ name: value, value })),
+      setting.suggest ? setting.suggest(typed) : suggestValues(setting, typed).map((value) => ({ name: value, value })),
     );
   },
   handler: async (interaction, ctx) => {
@@ -731,7 +731,7 @@ registerCommand("model", {
     .toJSON(),
   autocomplete: async (interaction, ctx) => {
     const here = brainAt(interaction, ctx);
-    const brain = here === CLAUDE_BRAIN ? undefined : getBrain(here);
+    const brain = getBrain(here);
     if (brain) {
       const q = interaction.options.getFocused().toLowerCase();
       const models = (brain.models?.() ?? []).filter((m) => m.id.toLowerCase().includes(q)).slice(0, AUTOCOMPLETE_LIMIT);

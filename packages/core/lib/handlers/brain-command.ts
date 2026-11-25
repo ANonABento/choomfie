@@ -31,7 +31,7 @@ import {
   type ButtonInteraction,
   type ChatInputCommandInteraction,
 } from "discord.js";
-import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, listBrainIds } from "@choomfie/shared";
+import { ANYWHERE, brainChoices, brainLabel, CLAUDE_BRAIN, getBrain, isBrainId, listBrainIds, unknownBrainText } from "@choomfie/shared";
 import { join } from "node:path";
 import { botIsAbsent, interactionChannel, rememberBrainRelay, settleAskRelays } from "../ask-relay.ts";
 import { registerButtonHandler, registerCommand } from "../register.ts";
@@ -54,6 +54,7 @@ import {
   taskPrompt,
   type Landing,
   type TaskBoard,
+  defaultBrainId,
   parentChannelId,
   resolveBrainId,
   takeChoices,
@@ -74,12 +75,12 @@ import { requireOwner } from "./shared.ts";
 import { carryContext } from "../handoff.ts";
 
 function label(id: string): string {
-  return id === CLAUDE_BRAIN ? "Claude" : (getBrain(id)?.label ?? `${id} (not loaded)`);
+  return isBrainId(id) ? brainLabel(id) : `${id} (not loaded)`;
 }
 
 /** The brain's own status lines for `/brain`, or none. Bounded: the interaction has 3 seconds. */
 export async function brainStatus(id: string, timeoutMs = 1_500): Promise<string[]> {
-  const brain = id === CLAUDE_BRAIN ? undefined : getBrain(id);
+  const brain = getBrain(id);
   if (!brain?.status) return [];
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -122,19 +123,13 @@ registerCommand("brain", {
   },
   // Lists only brains actually loaded right now — in-memory, well inside 3s.
   autocomplete: async (interaction) => {
-    const typed = interaction.options.getFocused().toLowerCase();
-    await interaction.respond(
-      listBrainIds()
-        .filter((id) => id.includes(typed))
-        .slice(0, AUTOCOMPLETE_LIMIT)
-        .map((id) => ({ name: `${label(id)} (${id})`.slice(0, 100), value: id }))
-    );
+    await interaction.respond(brainChoices(interaction.options.getFocused()));
   },
   handler: async (interaction, ctx) => {
     if (await requireOwner(interaction, ctx)) return;
     const channelId = interaction.channelId;
     const parentId = parentChannelId(interaction.channel);
-    const current = resolveBrainId(channelId, parentId, (id) => ctx.config.getChannelBrain(id));
+    const current = resolveBrainId(channelId, parentId, (id) => ctx.config.getChannelBrain(id), ctx.config.getDefaultBrain());
     const reply = (content: string) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
     const wantedRaw = interaction.options.getString("name");
     const threads = interaction.options.getBoolean("threads");
@@ -161,7 +156,7 @@ registerCommand("brain", {
         ? "set on this channel"
         : parentId && ctx.config.getChannelBrain(parentId)
           ? "inherited from the parent channel"
-          : "default";
+          : "the default, `/config setting:defaultBrain`";
       const threadNote =
         interaction.guildId && interaction.channel?.type === ChannelType.GuildText
           ? ctx.config.getAutoThread(channelId)
@@ -185,13 +180,16 @@ registerCommand("brain", {
     }
 
     const wanted = wantedRaw.trim().toLowerCase();
-    if (wanted !== CLAUDE_BRAIN && !getBrain(wanted)) {
-      await reply(`No brain called \`${wanted}\` is loaded. Available: ${listBrainIds().map((b) => `\`${b}\``).join(", ")}.`);
+    if (!isBrainId(wanted)) {
+      await reply(unknownBrainText(wanted));
       return;
     }
-    // `claude` clears the override, so a thread falls back to its parent again.
-    ctx.config.setChannelBrain(channelId, wanted === CLAUDE_BRAIN ? undefined : wanted);
-    const now = resolveBrainId(channelId, parentId, (id) => ctx.config.getChannelBrain(id));
+    // Picking what it would inherit anyway (parent, then default) clears the override, so it keeps following that.
+    const inherited = parentId
+      ? resolveBrainId(parentId, null, (id) => ctx.config.getChannelBrain(id), ctx.config.getDefaultBrain())
+      : defaultBrainId(ctx.config.getDefaultBrain());
+    ctx.config.setChannelBrain(channelId, wanted === inherited ? undefined : wanted);
+    const now = resolveBrainId(channelId, parentId, (id) => ctx.config.getChannelBrain(id), ctx.config.getDefaultBrain());
     const name = label(now);
     // Mid-conversation, the new brain gets what was said so far (read after replying: the interaction has 3s).
     const carry = now !== current && interaction.options.getBoolean("carry") !== false;
@@ -223,7 +221,7 @@ registerCommand("stop", {
     if (await requireOwner(interaction, ctx)) return;
     const channelId = interaction.channelId;
     const current = resolveBrainId(channelId, parentChannelId(interaction.channel), (id) =>
-      ctx.config.getChannelBrain(id)
+      ctx.config.getChannelBrain(id), ctx.config.getDefaultBrain()
     );
     if (current === CLAUDE_BRAIN) {
       // Only the daemon owns a Claude session it can interrupt. In foreground

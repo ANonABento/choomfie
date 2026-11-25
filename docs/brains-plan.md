@@ -187,13 +187,37 @@ Different from routing: routing picks **who answers the user**; delegation is **
 **Stage 2 — Web brains.** Exit: adding a site and keeping it logged in is as easy as `apibrain keys`, and Waymond answers.
 - [x] Waymond: "the message box never appeared" was a signed-out profile. Signed out, Ambition's `/chat` shows a public landing at the same URL instead of redirecting, so the URL check passed. The adapter now spots the landing (`loggedIn`, under a second) and says to log in; the composer selector also follows Ambition's redesign. Verified by the owner Nov 24.
 - [x] `webbrain sites` / `webbrain setup`: every site, logged in or not (headless check, sends nothing), then `login` for the ones that aren't.
-- [ ] More web members (Claude.ai, ChatGPT, …) via the `new-web-brain` skill; multi-profile web brains.
+- [ ] Multi-profile web brains (several logged-in profiles per site, each its own capacity unit).
+
+**Stage 2b — Groundwork for media and more sites** (before the second web brain, so each new site is one adapter and a bucket line):
+- [ ] A `media` bucket (make an image, music, a video, a voice clip) beside `agentic`, its members the sites and Spaces that generate them; a reply's files come back as attachments (Waymond's path already does this).
+- [ ] Out-of-quota is a state, not a failure: an adapter reports "daily/weekly limit reached" (`QuotaReachedError`, with the reset time when the site says it), and free cools that member until then instead of retrying or marking it broken. Same for harness quotas (agy's weekly cap).
+- [ ] Account hygiene, written down once: a spare account per site, human pace, low volume; a site whose terms forbid automation is marked as such in `webbrain sites`.
+
+**Ranked: what to add** (set Nov 25; value for what free can't already do, then effort). Each web site via the `new-web-brain` skill: record one message, write the adapter, `doctor`, then one line in its bucket.
+
+| # | What | Kind | Why | Free allowance (as researched; verify on adding) |
+|---|---|---|---|---|
+| 1 | **Gemini** (gemini.google.com) | web brain → `media`, `research`, `quality` | Image, music and video generation, Deep Research, Google-grade chat: the most free capability in one login | Daily caps per feature; unpublished counts |
+| 2 | **Hugging Face Inference Providers** | API provider (one file: `router.huggingface.co/v1`, OpenAI-compatible, `HF_TOKEN`) | Hundreds of open models behind one key | Monthly credit for free accounts was documented as under $0.10 and reportedly removed Oct 15, 2026: check with `apibrain keys add huggingface` before relying on it |
+| 3 | **Hugging Face Spaces** | new kind: a Space as a tool member (Gradio API: `@gradio/client`, call a Space's endpoint, files back) | Image, music, TTS, video, upscaling, odd one-off models; pick a few good Spaces per need, swap them in config | ZeroGPU: 5 min of GPU a day on a free account (resets 24h after first use); anonymous calls get less |
+| 4 | **ChatGPT** | web brain → `media`, `quality` | Free image generation, the most-used free chat | Limited free messages and images per day |
+| 5 | **Meta AI / Muse Spark** (meta.ai) | web brain → `quality`, `research` | Muse Spark reasoning, free on meta.ai; the separate Muse agent has a free weekly token cap (a card may be required) | Free, rate limits unpublished |
+| 6 | **Perplexity** | web brain → `research` | Sourced answers; takes research off Waymond | Limited Pro searches a day, unlimited basic |
+| 7 | **Claude.ai** | web brain → `quality`, `code` | Real Claude models without spending the subscription's Claude Code quota | Small free message cap |
+| 8 | **DeepSeek** | web brain → `quality`, `code` | Strong free reasoning | Generous, unpublished |
+| 9 | **Grok** (grok.com) | web brain → `research`, `media` (Grok Imagine) | Real-time X data, images. **xAI's Acceptable Use Policy (Aug 14, 2026) forbids driving grok.com with bots**: added anyway at the owner's call (the rules change often); spare account only, marked in `webbrain sites`, re-check the policy before enabling | Limited, unpublished |
+| 10 | Le Chat, Copilot, Poe, DuckDuckGo AI Chat, Venice, HuggingChat | web brains, lower | Mostly models free already has via API; Venice and DuckDuckGo need no login | — |
+| — | LM Studio, GitHub Models | API providers (stage 6) | Local server; GitHub's catalog | — |
+
+**Stage 7 — Compare with other free-LLM projects and lists.** Exit: nothing on a maintained list is missing without a written reason. Check against cheahjs/free-llm-api-resources and similar lists, other "free router" projects (how they rank, rotate keys, detect quota), and the handoff's `free-providers.md`; every provider or site gets added, skipped with a reason, or parked here.
 - [x] Web-brain compact: ask the site for a summary, open a new site conversation seeded with it on the next message.
 
 **Stage 3 — Harness brains.** Exit: the free CLIs (Antigravity, OpenCode) each answer as a brain (`/brain antigravity`) and can be an `agentic` member of free. (Codex and Gemini CLI have no free tier now.)
 - [x] Harness kit (`@choomfie/harness`, plugin `harnesses`, Nov 24): one print-mode run per message, the CLI's conversation id resumed per chat, a folder per chat, attachments in, changed files back, `/stop`, read-only mode for anyone but the owner. First harness: Antigravity `agy` (free, weekly quota). See [harness.md](harness.md).
-- [ ] OpenCode as the second harness (free with Zen's free models or the free brain's keys); install it, record its `run --format json` output, one spec file.
-- [ ] Harness as an `agentic` member of free (offered / locked like Waymond).
+- [x] OpenCode as the second harness (Nov 25): Zen's free models, no account; `run --format json` events, `--session` resumes, `plan` agent read-only.
+- [x] Harnesses as free members (Nov 25): a `local` bucket (work on this computer) → antigravity, opencode; offered / held like Waymond, and a **Hand back to free models** button under every holding member's reply.
+- [ ] Harness reports what changed (files, commands) into free's transcript on handback, not only its replies.
 - [ ] ACP (Agent Client Protocol) driver instead of print mode: streaming progress, tool approvals as Discord buttons, one protocol for agy, OpenCode, Gemini CLI, Goose.
 - Researched Nov 24: Cursor CLI's free plan runs out almost at once; Gemini CLI's free serving ended (June 2026) and Qwen Code's free tier ended (April 2026); Codex needs a paid plan or key.
 
@@ -217,4 +241,4 @@ Different from routing: routing picks **who answers the user**; delegation is **
 - [ ] **Reinvestigate probing.** Today: every new candidate gets one "Reply with the word: ok" at worker start and every 24h; answers are kept for good, refusals for 7 days, but busy / rate-limited / timed-out results aren't recorded, so every restart probes those again (Gemini's gemma-4 503'd four times in one day). Cheap in tokens (104 probes ≈ 1.6k tokens by Nov 24) but it spends daily request caps and fills the log. Questions: remember a transient failure for hours across restarts; probe lazily (only when a bucket would pick the model) instead of sweeping everything; merge with the probe benchmark above so one call both checks a model answers and scores it; skip non-chat models (PII, safety, embedding) by listing traits before spending a call.
 - [ ] Compaction: big-context models get the original turns instead of the summary; structured summary (goals, decisions, facts, open questions, code and numbers verbatim); a real token count.
 
-**Later (roadmap only):** always-on / ambient mode, per-channel free defaults, opt-in fallback to Claude when every free provider is limited, non-LLM freemium.
+**Later (roadmap only):** always-on / ambient mode, opt-in fallback to Claude when every free provider is limited, non-LLM freemium beyond what Gemini, ChatGPT and Spaces cover (TTS like Edge TTS, search APIs like Tavily or Exa, embeddings).

@@ -179,6 +179,25 @@ describe("free brain routing", () => {
     expect((await t.brain.send(msg("thanks, explain it"), t.ctx)).text).toStartWith("fast answer");
   });
 
+  test("a holding member's reply offers Hand back; clicking it returns the chat to the free models, who have its replies", async () => {
+    const t = setup();
+    t.classifier.next = { bucket: "agentic", confidence: 1 };
+    const held = await t.brain.send(msg("make me a website"), t.ctx);
+    expect(held.choices).toEqual(["Hand back to free models"]);
+    await t.brain.send(msg("add a footer"), t.ctx);
+    expect(t.web.got.length).toBe(2);
+
+    // An older reply's button still works after another message.
+    const back = await t.brain.send(msg("Hand back to free models"), t.ctx);
+    expect(back.text).toStartWith("↩️ Back to free models");
+    expect(t.web.got.length).toBe(2);
+    expect(t.chats.bound("chan", "free")!.model).toBeNull();
+
+    t.classifier.next = { bucket: "chat", confidence: 1 };
+    expect((await t.brain.send(msg("what did it make?"), t.ctx)).text).toStartWith("fast answer");
+    expect(JSON.stringify(t.fast.calls.at(-1))).toContain("web did: add a footer");
+  });
+
   test("a weak guess offers nothing; a first message may go straight to the web member", async () => {
     const t = setup();
     t.classifier.next = { bucket: "agentic", confidence: 0.9 };

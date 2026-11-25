@@ -50,9 +50,9 @@ Editing `config.json` by hand still works. `ConfigManager`'s setters are what `/
 
 `autoSummarize` exists in `Config` and is read by nothing. It is deliberately absent from `/config` — a switch that does nothing is worse than no switch.
 
-## Brains (`brainChannels`, `brainAccess`)
+## Brains (`brainChannels`, `defaultBrain`, `brainAccess`)
 
-`brainChannels` maps a channel or thread id to the brain that answers there, written by `/brain set` (absent = `claude`). Threads inherit their parent's entry unless set directly; each thread is its own backend conversation. `brainAccess` (`/config`, default `owner`) decides who a non-Claude brain answers: `owner`, or everyone on the allowlist. Anyone it turns away is answered by Claude as usual. `/config` also has `free.providersOff` and `free.footer` for the free brain (see [free-brain.md](free-brain.md)). Neither key is ever an access list: whether someone may talk to Choomfie at all is still access.json, checked first.
+`brainChannels` maps a channel or thread id to the brain that answers there, written by `/brain <name>`. Threads inherit their parent's entry unless set directly; anything with no entry gets `defaultBrain` (`/config`, default `claude`): set it to `free` and every new channel, thread and DM starts on the free brain. A default that isn't loaded (its plugin off) falls back to Claude. `/brain claude` under a non-Claude default stores an explicit `claude` entry; picking what a channel would inherit anyway clears its entry. each thread is its own backend conversation. `brainAccess` (`/config`, default `owner`) decides who a non-Claude brain answers: `owner`, or everyone on the allowlist. Anyone it turns away is answered by Claude as usual. `/config` also has `free.providersOff` and `free.footer` for the free brain (see [free-brain.md](free-brain.md)). Neither key is ever an access list: whether someone may talk to Choomfie at all is still access.json, checked first.
 
 A brain channel only answers messages addressed to it (DM, @mention, reply). Ambient conversation-mode messages are dropped there, because a web-UI driver can't decide to stay quiet the way Claude does.
 

@@ -237,15 +237,19 @@
 - [x] `ask_brain` renamed `delegate`
 - [ ] Agents talking to agents: `Brain.capabilities` listed by `delegate`; `delegate` from any brain, not only Claude; Claude delegating cheap work to `free` with a model; "Hand off to…" any capable brain; "Try a bigger model" button
 - [x] Web-brain compact (ask the site for a summary, open a new conversation seeded with it)
-- [x] Harness kit: coding-agent CLIs as brains — Antigravity (`agy`) first ([harness.md](harness.md))
-- [ ] More harnesses (OpenCode next), harnesses as `agentic` members of free, an ACP driver
-- [ ] More web members — Claude.ai, ChatGPT, Gemini web, Grok, Perplexity, DeepSeek (record each with the `new-web-brain` skill)
+- [x] Harness kit: coding-agent CLIs as brains — Antigravity (`agy`), OpenCode ([harness.md](harness.md))
+- [x] Harnesses as free members for work on this computer, with a hand-back button
+- [ ] An ACP driver for harnesses
+- [ ] Media and site groundwork: a `media` bucket, out-of-quota as a cooldown until reset (web brains and harnesses), account hygiene — see brains-plan stage 2b
+- [ ] More members, ranked in brains-plan: Gemini web, Hugging Face (Inference Providers API; Spaces as tool members), ChatGPT, Meta AI / Muse Spark, Perplexity, Claude.ai, DeepSeek, Grok (spare account; its policy forbids bots today), then the rest
+- [ ] Compare against other free-LLM lists and router projects (brains-plan stage 7)
 - [ ] Multi-profile web brains — several logged-in profiles per site, each with its own sticky proxy, as separate capacity units
 - [ ] Always-on / ambient mode — opt-in per channel: debounce bursts, reply / react / ignore gate (rules first), per-channel reply caps
 - [ ] Classifier from evidence: a labelled set of real messages (`apibrain eval`); a Jev-style classifier (Simple Jev endpoint — keyless public demo or the same server run locally) scoring labels from token probabilities, the zero-shot LLM only below its threshold; embeddings as the fully local alternative
 - [x] `webbrain sites` / `setup` (login state per site); Waymond reports a signed-out profile instead of "layout changed"
 - [ ] Reinvestigate model probing (transient failures re-probed every restart; lazy probing; fold into the ranking benchmark) — see brains-plan stage 6
-- [ ] Persistent cooldowns; per-channel free defaults; opt-in fallback to Claude when every free provider is limited
+- [x] Default brain for unset channels and DMs (`/config defaultBrain`)
+- [ ] Persistent cooldowns; opt-in fallback to Claude when every free provider is limited
 - [ ] Non-LLM freemium — image generation, TTS/STT, search, embeddings behind the same router pattern
 
 ## Phase 16: Extended Autonomy

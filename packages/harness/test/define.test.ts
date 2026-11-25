@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChatRecord, ChatsApi, PluginContext } from "@choomfie/shared";
@@ -112,4 +112,11 @@ describe("harness brain", () => {
     expect(await pending).toMatchObject({ stopped: true });
     expect(await t.brain.stop!("chan")).toBe(false);
   });
+});
+
+test("a run's PWD is its folder (OpenCode works where PWD says, not where it was started)", async () => {
+  const { spawnCli } = await import("../run.ts");
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "harness-pwd-")));
+  const out = await spawnCli(["/bin/sh", "-c", 'printf %s "$PWD"'], { cwd: dir, signal: new AbortController().signal, timeoutMs: 5_000 });
+  expect(out.stdout).toBe(dir);
 });
