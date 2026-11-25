@@ -53,7 +53,12 @@ export interface HarnessSpec {
   listModels?: { args: string[]; parse(stdout: string): string[] };
   /** One turn's limit. Default 20 minutes. */
   timeoutMs?: number;
+  /** A failed run whose output matches this is out of quota, not broken. Default `QUOTA_PATTERN`. */
+  quota?: RegExp;
 }
+
+/** What CLIs print when an allowance is spent (agy: `RESOURCE_EXHAUSTED`, "Quota exhausted"). */
+export const QUOTA_PATTERN = /RESOURCE_EXHAUSTED|quota (?:exhausted|exceeded|reached)|out of (?:quota|credits)|usage limit|exhausted your capacity|rate.?limit(?:ed| exceeded| reached)|\b429\b/i;
 
 export function defineHarness(spec: HarnessSpec): HarnessSpec {
   if (!spec.modes.some((m) => m.id === spec.defaultMode) || !spec.modes.some((m) => m.id === spec.readOnlyMode)) {

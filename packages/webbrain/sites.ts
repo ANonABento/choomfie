@@ -10,7 +10,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { SiteAdapter } from "./adapter.ts";
+import type { SiteAdapter, SiteTerms } from "./adapter.ts";
 import { engineFor, launchContext, profileName } from "./engine/launch.ts";
 import { profileInUse } from "./paths.ts";
 
@@ -21,6 +21,7 @@ export interface SiteStatus {
   label: string;
   state: SiteState;
   detail?: string;
+  terms?: SiteTerms;
 }
 
 /**
@@ -63,7 +64,7 @@ export function landedInChat(adapter: Pick<SiteAdapter, "chatUrl">, url: string)
 }
 
 export async function siteStatus(dataDir: string, adapter: SiteAdapter, opts: { check?: boolean } = {}): Promise<SiteStatus> {
-  const base = { id: adapter.id, label: adapter.label };
+  const base = { id: adapter.id, label: adapter.label, ...(adapter.terms ? { terms: adapter.terms } : {}) };
   const dir = profilePath(dataDir, adapter);
   if (!existsSync(join(dir, "Default"))) return { ...base, state: "never" };
   if (profileInUse(dir)) return { ...base, state: "busy", detail: "the bot has it open (closes after ~10 min idle)" };
@@ -93,7 +94,14 @@ const SAID: Record<SiteState, string> = {
 };
 
 export function formatStatus(s: SiteStatus): string {
-  return `${MARK[s.state]} ${s.id.padEnd(11)} ${SAID[s.state]}${s.detail ? ` · ${s.detail}` : ""}`;
+  const line = `${MARK[s.state]} ${s.id.padEnd(11)} ${SAID[s.state]}${s.detail ? ` · ${s.detail}` : ""}`;
+  return s.terms && s.terms.automation !== "allowed" ? `${line}\n${" ".repeat(14)}${termsWarning(s.terms)}` : line;
+}
+
+/** One line for a site whose terms ban (or may ban) automation. */
+export function termsWarning(t: SiteTerms): string {
+  const what = t.automation === "forbidden" ? "⚠️ its terms forbid bots" : "⚠️ its terms may not allow bots";
+  return `${what} (checked ${t.checked}): spare account only, human pace${t.note ? ` · ${t.note}` : ""}`;
 }
 
 /** Sites that need a login, in order. A busy profile is skipped (it's in use, so it was working). */

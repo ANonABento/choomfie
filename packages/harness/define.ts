@@ -15,13 +15,15 @@ import {
   DISCORD_MESSAGE_BYTES,
   DISCORD_MESSAGE_FILES,
   framePrompt,
+  parseResetAt,
+  QuotaReachedError,
   type Brain,
   type BrainFile,
   type BrainMessage,
   type PluginContext,
 } from "@choomfie/shared";
 import { spawnCli, type Spawner } from "./run.ts";
-import type { HarnessSpec } from "./spec.ts";
+import { lastLine, QUOTA_PATTERN, type HarnessSpec } from "./spec.ts";
 
 export interface HarnessDeps {
   /** The executable's full path (from `Bun.which`). */
@@ -124,7 +126,12 @@ export function createHarnessBrain(spec: HarnessSpec, ctx: PluginContext, deps: 
     const r = spec.parse(out);
     if (r.ref && r.ref !== chat.backendRef) chats!.setBackendRef(chat.id, r.ref);
     chats!.touch(chat.id);
-    if (r.failed) throw new Error(`${spec.label}: ${r.failed}`);
+    if (r.failed) {
+      // Out of quota is a state, not a failure: say when it's back (free benches it until then).
+      const said = `${r.failed}\n${out.stderr}`;
+      if ((spec.quota ?? QUOTA_PATTERN).test(said)) throw new QuotaReachedError(spec.label, parseResetAt(said), lastLine(r.failed) || lastLine(out.stderr));
+      throw new Error(`${spec.label}: ${r.failed}`);
+    }
     const { files, skipped } = changedFiles(cwd, before);
     const more = skipped.length ? `\n-# also changed (too many or too big to attach): ${skipped.slice(0, 10).join(", ")}${skipped.length > 10 ? ", …" : ""}` : "";
     return { text: (r.text.trim() || `(${spec.label} sent an empty reply)`) + more, ...(files.length ? { files } : {}) };

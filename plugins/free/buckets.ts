@@ -8,7 +8,8 @@
  * when a provider renames or retires a model. `brains` are web brains tried
  * first for that kind of work (on a first message) or offered with a button:
  * Waymond works in its own cloud sandbox, a harness (Antigravity, OpenCode)
- * on this computer.
+ * on this computer, a media site makes images, music or video (its files come
+ * back as attachments).
  *
  * config.json `free.buckets.<id>` pins a bucket to explicit targets
  * (`member[:model]`; `@bucket` splices another bucket's pins).
@@ -48,10 +49,19 @@ export const BUCKETS: Bucket[] = [
     brains: [],
   },
   {
+    id: "media",
+    label: "Make media",
+    description:
+      "asks to MAKE or EDIT media, not talk about it: generate or edit an image, picture, drawing, logo or sticker; make music, a song or a sound; a video or animation; a voice clip or text read aloud",
+    need: "strong",
+    // Sites that generate media (Gemini, ChatGPT, Hugging Face Spaces) go first as they're added.
+    brains: ["waymond"],
+  },
+  {
     id: "agentic",
     label: "Do the work",
     description:
-      "asks the assistant to DO or MAKE something with tools, not just answer in text: make, draw or edit an image, picture or art; change a GitHub repo; build an app, a website or a 3D/CAD part; browse sites; multi-step tasks",
+      "asks the assistant to DO something with tools in the cloud, not just answer in text: change a GitHub repo; build an app or a website; a 3D/CAD part; browse sites; multi-step tasks",
     need: "strong",
     brains: ["waymond"],
   },

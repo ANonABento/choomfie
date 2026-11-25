@@ -120,3 +120,13 @@ test("a run's PWD is its folder (OpenCode works where PWD says, not where it was
   const out = await spawnCli(["/bin/sh", "-c", 'printf %s "$PWD"'], { cwd: dir, signal: new AbortController().signal, timeoutMs: 5_000 });
   expect(out.stdout).toBe(dir);
 });
+
+test("a run that says its quota is spent throws QuotaReachedError with the reset time", async () => {
+  const t = setup(() => ({ stdout: JSON.stringify({ text: "", failed: "RESOURCE_EXHAUSTED: Quota exhausted, resets in 2 days" }) }));
+  const e = await t.brain.send(msg("hi"), t.ctx).catch((x) => x);
+  expect(e.name).toBe("QuotaReachedError");
+  expect(e.resetAt).toBeGreaterThan(Date.now() + 47 * 3_600_000);
+  // Any other failure is an ordinary error.
+  const u = setup(() => ({ stdout: JSON.stringify({ text: "", failed: "network down" }) }));
+  expect((await u.brain.send(msg("hi"), u.ctx).catch((x) => x)).message).toBe("Fake: network down");
+});

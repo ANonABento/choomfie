@@ -11,6 +11,7 @@ export {
   LoginRequiredError,
   LayoutChangedError,
   type SiteAdapter,
+  type SiteTerms,
   type SiteMode,
   type TurnInput,
   type TurnContext,
@@ -20,6 +21,7 @@ export {
   type Locator,
   type Page,
 } from "./adapter.ts";
+export { QuotaReachedError, parseResetAt } from "@choomfie/shared";
 export { pageFetch, pageFetchBytes, pageFetchOk, type PageFetchResult } from "./page-fetch.ts";
 export { waitForSettledText, type SettleOptions } from "./settle.ts";
 export { launchContext, type EngineName } from "./engine/launch.ts";

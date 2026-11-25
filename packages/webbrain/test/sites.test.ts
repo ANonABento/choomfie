@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { discoverAdapters, landedInChat, needsLogin, siteStatus } from "../sites.ts";
+import { discoverAdapters, formatStatus, landedInChat, needsLogin, siteStatus } from "../sites.ts";
 
 const dirs: string[] = [];
 const tmp = () => {
@@ -44,4 +44,11 @@ describe("webbrain sites", () => {
     expect(s.state).toBe("never");
     expect(needsLogin(s)).toBe(true);
   });
+});
+
+test("a site whose terms forbid bots says so under its status line", () => {
+  const line = formatStatus({ id: "grok", label: "Grok", state: "logged-in", terms: { automation: "forbidden", checked: "2026-11-25", note: "xAI AUP" } });
+  expect(line).toContain("✅ grok");
+  expect(line.split("\n")[1]).toContain("⚠️ its terms forbid bots (checked 2026-11-25): spare account only, human pace · xAI AUP");
+  expect(formatStatus({ id: "ok", label: "Ok", state: "never", terms: { automation: "allowed", checked: "2026-11-25" } })).not.toContain("\n");
 });

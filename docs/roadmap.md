@@ -240,7 +240,7 @@
 - [x] Harness kit: coding-agent CLIs as brains — Antigravity (`agy`), OpenCode ([harness.md](harness.md))
 - [x] Harnesses as free members for work on this computer, with a hand-back button
 - [ ] An ACP driver for harnesses
-- [ ] Media and site groundwork: a `media` bucket, out-of-quota as a cooldown until reset (web brains and harnesses), account hygiene — see brains-plan stage 2b
+- [x] Media and site groundwork: a `media` bucket, out-of-quota as a cooldown until reset (web brains and harnesses), account hygiene — see brains-plan stage 2b
 - [ ] More members, ranked in brains-plan: Gemini web, Hugging Face (Inference Providers API; Spaces as tool members), ChatGPT, Meta AI / Muse Spark, Perplexity, Claude.ai, DeepSeek, Grok (spare account; its policy forbids bots today), then the rest
 - [ ] Compare against other free-LLM lists and router projects (brains-plan stage 7)
 - [ ] Multi-profile web brains — several logged-in profiles per site, each with its own sticky proxy, as separate capacity units

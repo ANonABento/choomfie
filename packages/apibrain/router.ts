@@ -5,6 +5,7 @@
  * each member keeps its own keys, models and health.
  */
 
+import { isQuotaReached } from "@choomfie/shared";
 import { AllUnavailableError, ProviderError } from "./errors.ts";
 
 export interface Target {
@@ -67,6 +68,7 @@ export async function route<T>(targets: Target[], opts: RouteOptions<T>): Promis
     } catch (e) {
       if (opts.signal?.aborted) throw e;
       if (e instanceof ProviderError && e.retryAfterMs) soonest = Math.min(soonest, e.retryAfterMs);
+      else if (isQuotaReached(e) && e.resetAt) soonest = Math.min(soonest, Math.max(0, e.resetAt - Date.now()));
       passed.push(`${key}: ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`);
     }
   }

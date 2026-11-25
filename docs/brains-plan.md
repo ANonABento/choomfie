@@ -190,9 +190,9 @@ Different from routing: routing picks **who answers the user**; delegation is **
 - [ ] Multi-profile web brains (several logged-in profiles per site, each its own capacity unit).
 
 **Stage 2b — Groundwork for media and more sites** (before the second web brain, so each new site is one adapter and a bucket line):
-- [ ] A `media` bucket (make an image, music, a video, a voice clip) beside `agentic`, its members the sites and Spaces that generate them; a reply's files come back as attachments (Waymond's path already does this).
-- [ ] Out-of-quota is a state, not a failure: an adapter reports "daily/weekly limit reached" (`QuotaReachedError`, with the reset time when the site says it), and free cools that member until then instead of retrying or marking it broken. Same for harness quotas (agy's weekly cap).
-- [ ] Account hygiene, written down once: a spare account per site, human pace, low volume; a site whose terms forbid automation is marked as such in `webbrain sites`.
+- [x] A `media` bucket (make an image, music, a video, a voice clip) beside `agentic`, its members the sites and Spaces that generate them; a reply's files come back as attachments (Waymond's path already does this). Nov 25: Waymond is its member until Gemini lands; a keyword rule backs the classifier.
+- [x] Out-of-quota is a state, not a failure: an adapter reports "daily/weekly limit reached" (`QuotaReachedError`, with the reset time when the site says it), and free cools that member until then instead of retrying or marking it broken. Same for harness quotas (agy's weekly cap). Nov 25: shared error + `parseResetAt`; harnesses match a quota pattern on failed runs; a held chat is offered to a sibling member, no Retry.
+- [x] Account hygiene, written down once: a spare account per site, human pace, low volume; a site whose terms forbid automation is marked as such in `webbrain sites`. Nov 25: `docs/webbrain.md` "Accounts and terms"; adapter `terms`; the new-web-brain skill fills both.
 
 **Ranked: what to add** (set Nov 25; value for what free can't already do, then effort). Each web site via the `new-web-brain` skill: record one message, write the adapter, `doctor`, then one line in its bucket.
 

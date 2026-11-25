@@ -49,6 +49,7 @@ import {
 import {
   framePrompt,
   getBrain,
+  isQuotaReached,
   type Brain,
   type BrainMessage,
   type BrainMode,
@@ -77,6 +78,8 @@ export const AUTO_MODEL = "auto";
 const brainUnit = (id: string) => `brain:${id}`;
 /** A web brain that wants a login sits out this long. */
 const LOGIN_COOLDOWN_MS = 3_600_000;
+/** Out of quota and it didn't say until when: look again after this (one failed call finds out). */
+const QUOTA_COOLDOWN_MS = 3_600_000;
 
 export const RETRY_CHOICE = "Retry";
 export const RELEASE_CHOICE = "Answer with free models";
@@ -152,6 +155,8 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
   const recent: (Route & { text: string })[] = [];
   const running = new Map<string, { abort: AbortController; member?: string }>();
   const offers = new Map<string, Offer>();
+  /** Brain members whose last call said their allowance is spent. */
+  const spent = new Set<string>();
   const bucket = (id: string) => config.buckets.find((b) => b.id === id);
   const isApi = (t: Target) => members.has(t.member);
 
@@ -183,6 +188,12 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
     if (config.providers[t.member] || PROVIDER_IDS.has(t.member)) return Infinity; // a provider with no key, or disabled
     return lookup(t.member) && t.member !== FREE_BRAIN ? health.waitMs(brainUnit(t.member)) : Infinity;
   };
+
+  /** Brain members that share a bucket with `id` and can take a call now (where its work can go when it's out). */
+  function siblingsOf(id: string): string[] {
+    const ids = config.buckets.filter((b) => b.brains.includes(id)).flatMap((b) => b.brains);
+    return [...new Set(ids)].filter((x) => x !== id && isBrainMember(x) && waitMs({ member: x }, 0) === 0).slice(0, 2);
+  }
 
   function targetsFor(bucketId: string): Target[] {
     if (config.strategy === "priority") return config.priority.map(parseTarget);
@@ -284,9 +295,15 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
     try {
       const reply = await brain.send(context ? { ...message, content: `${context}\n\n${message.content}` } : message, ctx);
       health.ok(brainUnit(brain.id));
+      spent.delete(brain.id);
       return { reply, record: framed };
     } catch (e) {
-      if ((e as { name?: string })?.name === "LoginRequiredError") health.cool(brainUnit(brain.id), LOGIN_COOLDOWN_MS, "needs a login");
+      if (isQuotaReached(e)) {
+        // Not broken, just done until the reset: bench it that long, no exponential failures.
+        spent.add(brain.id);
+        const ms = e.resetAt ? Math.max(60_000, e.resetAt - Date.now()) : QUOTA_COOLDOWN_MS;
+        health.cool(brainUnit(brain.id), ms, e.resetAt ? "out of quota" : "out of quota (reset time unknown)");
+      } else if ((e as { name?: string })?.name === "LoginRequiredError") health.cool(brainUnit(brain.id), LOGIN_COOLDOWN_MS, "needs a login");
       else health.fail(brainUnit(brain.id), e instanceof Error ? e.message : String(e));
       throw e;
     }
@@ -437,10 +454,18 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         console.error(`[free] nothing answered: ${e.attempts.join("; ")}`);
         if (d?.locked) {
           // A web member holds this chat: don't move it behind your back.
-          const who = label(d.targets[0].member);
+          const holder = d.targets[0].member;
           const why = e.attempts[0]?.replace(/^[^:]+:\s*/, "") ?? "unavailable";
-          return withOffer({ text: `⚠️ ${who} couldn't answer: ${why.slice(0, 200)}` }, message, [
-            [RETRY_CHOICE, { kind: "retry" }],
+          // Out of quota: retrying won't help, but a member that does the same kind of work might.
+          const out = spent.has(holder);
+          const others = out ? siblingsOf(holder) : [];
+          const back = health.waitMs(brainUnit(holder));
+          const text = out
+            ? `⚠️ ${label(holder)} is out of its free allowance${back ? ` (back in ~${shortDuration(back)})` : ""}.${others.length ? "" : " Nothing else that does this kind of work is free right now."}`
+            : `⚠️ ${label(holder)} couldn't answer: ${why.slice(0, 200)}`;
+          return withOffer({ text }, message, [
+            ...(out ? [] : [[RETRY_CHOICE, { kind: "retry" }] as [string, OfferKind]]),
+            ...others.map((id): [string, OfferKind] => [handChoice(label(id)), { kind: "hand", to: id }]),
             [RELEASE_CHOICE, { kind: "release" }],
           ]);
         }

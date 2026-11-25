@@ -93,6 +93,16 @@ export interface LateResult {
   more: boolean;
 }
 
+/** What a site's terms of use say about automation, as last checked. */
+export interface SiteTerms {
+  /** `forbidden`: the terms ban bots or automated access (run on a spare account, if at all). */
+  automation: "forbidden" | "unclear" | "allowed";
+  /** When the terms were last read (YYYY-MM-DD). */
+  checked: string;
+  /** The clause or a link, one line. */
+  note?: string;
+}
+
 export interface SiteAdapter {
   /** Brain id: `/brain <id>`, plugin name, profile directory. Lowercase, no spaces. */
   id: string;
@@ -114,7 +124,15 @@ export interface SiteAdapter {
    * site that shows a logged-out page at the chat URL instead of redirecting.
    */
   loggedIn?(page: Page): Promise<boolean>;
+  /** What the site's terms say about driving it with a bot; `webbrain sites` shows it. */
+  terms?: SiteTerms;
 
+  /**
+   * One message and its answer. Throw `LoginRequiredError` when the site
+   * wants a login, and `QuotaReachedError` (from `@choomfie/shared`, with
+   * `parseResetAt` on the site's words) when it says the daily or weekly
+   * allowance is spent: free then benches this brain until the reset.
+   */
   turn(page: Page, input: TurnInput, ctx: TurnContext): Promise<TurnResult>;
   /**
    * The answer stopped short (a per-turn tool-call cap, or a work mode's

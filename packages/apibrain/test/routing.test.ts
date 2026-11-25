@@ -50,7 +50,7 @@ describe("route", () => {
   });
 });
 
-const BUCKETS: BucketDef[] = ["chat", "quality", "code", "agentic", "research", "vision", "long"].map((id) => ({ id, label: id, description: `${id} things` }));
+const BUCKETS: BucketDef[] = ["chat", "quality", "code", "media", "agentic", "research", "vision", "long"].map((id) => ({ id, label: id, description: `${id} things` }));
 const IDS = new Set(BUCKETS.map((b) => b.id));
 const input = (text: string, over = {}) => ({ text, hasImages: false, tokens: 10, recent: [], ...over });
 
@@ -68,6 +68,9 @@ describe("classifier", () => {
     const k = keywordClassifier(IDS);
     expect((await k.classify(input("why does this function throw an error"))).bucket).toBe("code");
     expect((await k.classify(input("build me a landing page in my repo"))).bucket).toBe("agentic");
+    expect((await k.classify(input("draw me a cute cat picture"))).bucket).toBe("media");
+    expect((await k.classify(input("make a lofi song for studying"))).bucket).toBe("media");
+    expect((await k.classify(input("what makes a good logo"))).bucket).not.toBe("media");
     expect((await k.classify(input("what's the latest news on the election"))).bucket).toBe("research");
     expect((await k.classify(input("tell me a joke about cats please"))).bucket).toBe("chat");
   });

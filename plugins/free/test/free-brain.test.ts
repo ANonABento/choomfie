@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ApiMember, defineProvider, Health, Quota, Transcript, type Classification, type Classifier } from "@choomfie/apibrain";
-import type { Brain, BrainMessage, ChatRecord, ChatsApi, PluginContext } from "@choomfie/shared";
+import { QuotaReachedError, type Brain, type BrainMessage, type ChatRecord, type ChatsApi, type PluginContext } from "@choomfie/shared";
 import { createFreeBrain } from "../brain.ts";
 import { expandTargets, parseFreeConfig } from "../config.ts";
 import { setupFree } from "../index.ts";
@@ -80,7 +80,7 @@ function scripted(): Classifier & { next: Partial<Classification> } {
   return c;
 }
 
-function setup(over: Record<string, unknown> = {}) {
+function setup(over: Record<string, unknown> = {}, extra: Brain[] = []) {
   const health = new Health();
   const quota = new Quota();
   const transcript = new Transcript(":memory:");
@@ -104,7 +104,7 @@ function setup(over: Record<string, unknown> = {}) {
     ["smart", smart.member],
   ]);
   const brain = createFreeBrain(
-    { config, members, unconfigured: [{ id: "nvidia", label: "NVIDIA NIM" }], classifier, transcript, health, lookupBrain: (id) => (id === "waymond" ? web : undefined) },
+    { config, members, unconfigured: [{ id: "nvidia", label: "NVIDIA NIM" }], classifier, transcript, health, lookupBrain: (id) => (id === "waymond" ? web : extra.find((b) => b.id === id)) },
     ctx
   );
   return { brain, fast, smart, web, classifier, transcript, chats, ctx, health };
@@ -234,6 +234,27 @@ describe("free brain routing", () => {
     expect(released.text).toStartWith("smart answer");
     expect(t.smart.calls[0].messages.at(-1)!.content).toBe("now add tests");
     expect(t.chats.bound("chan", "free")!.model).toBeNull();
+  });
+
+  test("a holding member out of quota is benched until its reset, and the chat is offered to one that does the same work", async () => {
+    const agy = fakeWeb("antigravity");
+    const oc = fakeWeb("opencode");
+    const t = setup({}, [agy, oc]);
+    t.classifier.next = { bucket: "local", confidence: 1 };
+    expect((await t.brain.send(msg("check my disk space"), t.ctx)).text).toStartWith("web did:");
+    agy.send = async () => {
+      throw new QuotaReachedError("Antigravity", Date.now() + 3 * 3_600_000);
+    };
+    const r = await t.brain.send(msg("and the biggest folders?"), t.ctx);
+    expect(r.text).toStartWith("⚠️ Antigravity is out of its free allowance (back in ~3h)");
+    // Retrying won't help: no Retry button.
+    expect(r.choices).toEqual(["Hand this to Opencode", "Answer with free models"]);
+    expect((await t.brain.status!()).join("\n")).toMatch(/Antigravity\*\* — cooling 3h \(out of quota\)/);
+
+    const handed = await t.brain.send(msg("Hand this to Opencode"), t.ctx);
+    expect(handed.text).toStartWith("web did:");
+    expect(oc.got.at(-1)!.content).toEndWith("and the biggest folders?");
+    expect(t.chats.bound("chan", "free")!.model).toBe("opencode");
   });
 
   test("/model pins an API model; if it can't answer, another does and the reply says so", async () => {

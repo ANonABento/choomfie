@@ -12,6 +12,7 @@ import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
   errorMessage,
+  isQuotaReached,
   framePrompt,
   parseTaskList,
   pushBrainReply,
@@ -141,7 +142,7 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
         try {
           return await fn(page);
         } catch (e) {
-          if (!(e instanceof LoginRequiredError)) await page.goto("about:blank").catch(() => {});
+          if (!(e instanceof LoginRequiredError) && !isQuotaReached(e)) await page.goto("about:blank").catch(() => {});
           throw e instanceof Error ? e : new Error(errorMessage(e));
         }
       });

@@ -35,7 +35,7 @@ The active persona and the owner's core memories (the same "Current Memories" Cl
 Fixed on our side, for every brain, not by rules in the prompt (a rule costs tokens on every call and still gets ignored):
 - **Tables:** Discord doesn't render markdown tables. A narrow one becomes an aligned code block, a wide one a bullet per row (`packages/core/lib/discord-markdown.ts`).
 - **Speaker labels:** some models open with `**Mahiro**:` when given a character. It's cut before the reply is posted or stored, so the next turn doesn't copy it.
-- **Tool work answered in text:** when Waymond couldn't take an `agentic` or `research` message, the text model is told (that turn only) it can't make images or run things, and the reply says who couldn't take it.
+- **Tool work answered in text:** when Waymond couldn't take a `media`, `agentic` or `research` message, the text model is told (that turn only) it can't make images or run things, and the reply says who couldn't take it.
 
 ## Seeing what was sent
 
@@ -111,7 +111,8 @@ message → a member mode, or a web member holding the chat?  → that member (l
   | `chat` | small talk and quick questions | fast | |
   | `quality` | analysis and writing | strong | |
   | `code` | code answered in the reply | strong | |
-  | `agentic` | real work in Waymond's cloud sandbox: make an image, GitHub repos, CAD, browsing | strong | waymond |
+  | `media` | make or edit an image, music, a video, a voice clip; the files come back as attachments | strong | waymond (media sites go first as they're added) |
+  | `agentic` | real work in Waymond's cloud sandbox: GitHub repos, apps, CAD, browsing | strong | waymond |
   | `local` | work on this computer: commands, local files and repos, installed programs | strong | antigravity, opencode (harnesses) |
   | `research` | current or sourced information | strong | waymond |
   | `vision` | an attached image | vision | |
@@ -141,8 +142,11 @@ message → a member mode, or a web member holding the chat?  → that member (l
   | 5xx or timeout | that model, exponential after the second |
   | web brain failing | that brain, exponential |
   | web brain wants a login | that brain, 1h |
+  | web brain or harness out of quota (`QuotaReachedError`) | that brain, until the reset it reported, else 1h; not counted as a failure |
 
   If nothing answers, the reply says when to try again, or suggests `/brain claude`.
+
+  A member that holds the chat and runs out of quota doesn't get a Retry button (it won't help): the reply says when it's back and offers **Hand this to …** for another member that does the same kind of work (OpenCode when Antigravity is out), plus **Answer with free models**.
 
 ## Which models
 

@@ -41,6 +41,9 @@ Fill every `TODO` in `adapter.ts`. Rules:
 - Use `t.human.type` / `t.human.submit` for input, never `fill` + `press` directly — that pacing is the anti-detection layer.
 - Call `t.started(ref)` as soon as the conversation id is known.
 - Throw `LoginRequiredError` for a logged-out page and `LayoutChangedError` for a missing control, so the owner gets an actionable message.
+- Throw `QuotaReachedError(label, parseResetAt(text))` (from `@choomfie/webbrain`) when the site says its free allowance is spent ("You've reached your limit… resets in 3 hours"): free benches the brain until then. If the recording doesn't show that message, leave a `TODO` naming it.
+- Set `terms: { automation, checked, note }` from the site's terms of use (read them; `forbidden` if they ban bots or automated access).
+- If it generates images, music or video, return them as `files` and add the id to the `media` bucket's `brains` in `plugins/free/buckets.ts`.
 - If the site has a stop button, implement `stop(page, ref)`; if answers can carry follow-up options, return them as `choices`.
 - Keep it to what the recording shows. Don't guess endpoints.
 

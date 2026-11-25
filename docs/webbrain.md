@@ -14,7 +14,7 @@ export default defineWebBrain(myAdapter);
 
 `SiteAdapter` (`packages/webbrain/adapter.ts`) has one required method:
 
-- **`turn(page, { text, files }, t)`** — send one message in conversation `t.ref` (undefined → start a new one) and return `{ text, ref, files?, choices?, approvals?, stopped?, background?, lastMessageId?, messageIds? }`. `files` (`{ name, data }`) are posted as attachments: use them for images or documents the answer links inside the site, since those links are dead in Discord (`pageFetchBytes` fetches one through the logged-in page). Call `t.started(ref)` as soon as the conversation id is known. Use `t.human.type()` / `t.human.submit()` for input, `t.progress(line)` for long turns, `t.notice(line)` for something the owner must act on, and check `t.stopRequested()` while waiting. Throw `LoginRequiredError` when the site wants a login, `LayoutChangedError` when a control is missing.
+- **`turn(page, { text, files }, t)`** — send one message in conversation `t.ref` (undefined → start a new one) and return `{ text, ref, files?, choices?, approvals?, stopped?, background?, lastMessageId?, messageIds? }`. `files` (`{ name, data }`) are posted as attachments: use them for images or documents the answer links inside the site, since those links are dead in Discord (`pageFetchBytes` fetches one through the logged-in page). Call `t.started(ref)` as soon as the conversation id is known. Use `t.human.type()` / `t.human.submit()` for input, `t.progress(line)` for long turns, `t.notice(line)` for something the owner must act on, and check `t.stopRequested()` while waiting. Throw `LoginRequiredError` when the site wants a login, `LayoutChangedError` when a control is missing, and `QuotaReachedError` (re-exported from `@choomfie/shared`) when the site says the daily or weekly allowance is spent: pass `parseResetAt(theSitesWords)` as the reset time so free benches the brain until then instead of counting failures.
 
 Optional: `stop(page, ref)` (called on the same tab while `turn` runs), `readLate(page, ref, afterId, posted)` for background results, `resolveApproval(page, ref, id, approve)`, `framePrompt(content, meta)`, and `modes` — `SiteMode[]` (`id`, `label`, `description`, `frame`) for `/mode`. The chat's mode frame is put in front of every message (sites keep no instructions of ours), and `turn` gets `input.mode` so it can tidy mode replies. A mode with `tasks: true` ends its replies with a task list (`parseTaskList` format); the kit attaches it as `BrainReply.tasks` (plus `taskContext(answer)`, if the adapter has one), and core posts it as run-this-task buttons.
 
@@ -38,7 +38,7 @@ The `new-web-brain` skill (`.claude/skills/new-web-brain/`) walks a Claude Code 
 ## Owner commands
 
 - **`/compact`** (kit-level, every web brain): asks the site, in its current conversation, for a summary (goal, decisions, facts, open items, code and numbers verbatim); the next message opens a fresh site conversation that starts with it. Until then the old conversation stays bound, so a restart loses nothing. `/clear` drops a pending summary.
-- `bun run webbrain sites` — every web brain the plugins provide (any plugin whose `index.ts` exports `adapter`), and whether its profile is logged in: opened headless at `chatUrl()`, logged in if the site keeps it in the chat rather than sending it to sign in (an adapter can override with `loggedIn(page)`). Sends nothing. A profile the bot has open shows as in use.
+- `bun run webbrain sites` — every web brain the plugins provide (any plugin whose `index.ts` exports `adapter`), what its terms say about bots when the adapter records it, and whether its profile is logged in: opened headless at `chatUrl()`, logged in if the site keeps it in the chat rather than sending it to sign in (an adapter can override with `loggedIn(page)`). Sends nothing. A profile the bot has open shows as in use.
 - `bun run webbrain setup` — the same list, then the login window for each site that isn't logged in, one at a time.
 - `bun run webbrain login <id>` — opens the site headed on its profile; sign in, close the window. Refuses while the profile is open elsewhere (Chrome's `SingletonLock`).
 - `bun run webbrain record <id> <url>` — headed, on `<id>`'s profile (so signing in here is the login). You send `Reply with exactly: pong` by hand; it writes `network.jsonl` (fetch/XHR/stream entries with clipped request and response bodies, **no headers**), `controls-*.json` and `aria-*.txt` (selector material, before and after), `urls.txt` and `meta.json` to `<data>/webbrain/<id>/recording/`. That holds account data: it stays in the data dir, never the repo.
@@ -52,6 +52,11 @@ A site that kept state in `<data>/<id>/` before the kit (Waymond) has it moved t
 
 A web brain can also be one of the free brain's members: name its id in a bucket's targets (`free.buckets.agentic: ["<id>", "@code"]`) and `/brain free` hands it the messages that bucket gets, with a recap of turns other models answered. See [free-brain.md](free-brain.md).
 
-## Caveat
+## Accounts and terms
 
-Automating a site's web UI is usually against its terms, and an account can be flagged whatever the tooling. Patchright and CloakBrowser lower detection, they don't remove it. Where a site has an official API, use that instead.
+Automating a site's web UI is usually against its terms, and an account can be flagged whatever the tooling. Patchright and CloakBrowser lower detection, they don't remove it. Where a site has an official API, use that instead. For every web brain:
+
+- **A spare account**, never one you'd mind losing: not your main Google, OpenAI or X login.
+- **Human pace, low volume.** The kit spaces submits and types like a person; don't raise `maxTabs` or loop a site with scripts. `doctor` sends a real message: run it when something changed, not on a timer.
+- **Write down what the terms say.** An adapter's `terms: { automation: "forbidden" | "unclear" | "allowed", checked: "YYYY-MM-DD", note }` is shown by `webbrain sites` under the site's line (`⚠️ its terms forbid bots …`). Re-read the terms before enabling a site marked `forbidden`; they change often.
+- **Out of quota is normal.** When a site says its free allowance is spent, the adapter throws `QuotaReachedError` and free uses something else until the reset, instead of hammering the site.
