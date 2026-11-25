@@ -111,10 +111,10 @@ message → a member mode, or a web member holding the chat?  → that member (l
   | `chat` | small talk and quick questions | fast | |
   | `quality` | analysis and writing | strong | |
   | `code` | code answered in the reply | strong | |
-  | `media` | make or edit an image, music, a video, a voice clip; the files come back as attachments | strong | waymond (media sites go first as they're added) |
+  | `media` | make or edit an image, music, a video, a voice clip; the files come back as attachments | strong | gemini-web, waymond |
   | `agentic` | real work in Waymond's cloud sandbox: GitHub repos, apps, CAD, browsing | strong | waymond |
   | `local` | work on this computer: commands, local files and repos, installed programs | strong | antigravity, opencode (harnesses) |
-  | `research` | current or sourced information | strong | waymond |
+  | `research` | current or sourced information | strong | gemini-web, waymond |
   | `vision` | an attached image | vision | |
   | `long` | a very long input | long | |
 

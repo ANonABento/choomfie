@@ -6,7 +6,7 @@
  * See docs/webbrain.md.
  */
 
-export { defineWebBrain, framePrompt, modePrompt, originalName, answerText, type WebBrainOptions } from "./define.ts";
+export { defineWebBrain, defineWebBrains, framePrompt, modePrompt, originalName, answerText, type WebBrainOptions } from "./define.ts";
 export {
   LoginRequiredError,
   LayoutChangedError,
@@ -22,6 +22,7 @@ export {
   type Page,
 } from "./adapter.ts";
 export { QuotaReachedError, parseResetAt } from "@choomfie/shared";
+export { isLookOnly, runCalls, toolGuide, type CodeBlock } from "./local-tools.ts";
 export { pageFetch, pageFetchBytes, pageFetchOk, type PageFetchResult } from "./page-fetch.ts";
 export { waitForSettledText, type SettleOptions } from "./settle.ts";
 export { launchContext, type EngineName } from "./engine/launch.ts";

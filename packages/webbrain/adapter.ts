@@ -80,6 +80,12 @@ export interface TurnResult {
   lastMessageId?: string;
   /** Messages this answer already delivered, so a late-result watch never re-posts them. */
   messageIds?: string[];
+  /**
+   * The answer's code blocks with their language, read from the page. Text
+   * read with `innerText` loses its ``` fences, so a site with `localTools`
+   * returns these for the kit to find ```run blocks in.
+   */
+  codeBlocks?: { lang?: string; code: string }[];
 }
 
 export interface LateResult {
@@ -126,6 +132,11 @@ export interface SiteAdapter {
   loggedIn?(page: Page): Promise<boolean>;
   /** What the site's terms say about driving it with a bot; `webbrain sites` shows it. */
   terms?: SiteTerms;
+  /**
+   * The site's model may run commands on this Mac (```run blocks, owner
+   * only; see local-tools.ts). Off for a site with tools of its own (Waymond).
+   */
+  localTools?: boolean;
 
   /**
    * One message and its answer. Throw `LoginRequiredError` when the site

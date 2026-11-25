@@ -21,7 +21,7 @@
 import { join } from "node:path";
 import { resolveDataDir } from "@choomfie/shared";
 import type { SiteAdapter } from "./adapter.ts";
-import { doctor, PONG_PROMPT } from "./doctor.ts";
+import { doctor, PONG_PROMPT, TOOLS_PROMPT } from "./doctor.ts";
 import { ENGINES, engineFor, isEngine, launchContext, type EngineName } from "./engine/launch.ts";
 import { detect, formatReport } from "./detect.ts";
 import { profileDir, profileInUse } from "./paths.ts";
@@ -35,20 +35,17 @@ const USAGE = [
   "  bun run webbrain login <id>",
   "  bun run webbrain record <id> <url>",
   "  bun run webbrain doctor <id> [--headed]",
+  "  bun run webbrain doctor <id> --tools [--headed]   (does it ask for ```run commands? nothing is run)",
   "  bun run webbrain doctor <id> --detect [--engine patchright|cloak|all] [--headed]",
 ].join("\n");
 
 const ID_RE = /^[a-z0-9-]+$/;
 
+/** The site with this id: a plugin of its own (`@choomfie/<id>`), or one of the `webbrains` plugin's sites. */
 async function loadAdapter(id: string): Promise<SiteAdapter> {
-  let mod: { adapter?: SiteAdapter };
-  try {
-    mod = await import(`@choomfie/${id}`);
-  } catch (e) {
-    throw new Error(`no plugin @choomfie/${id} (${e instanceof Error ? e.message : String(e)})`);
-  }
-  if (!mod.adapter?.turn) throw new Error(`@choomfie/${id} doesn't export a web-brain \`adapter\``);
-  return mod.adapter;
+  const found = (await discoverAdapters(PLUGINS_DIR)).find((a) => a.id === id);
+  if (!found) throw new Error(`no web brain called ${id} (\`bun run webbrain sites\` lists them)`);
+  return found;
 }
 
 async function login(dataDir: string, adapter: SiteAdapter) {
@@ -159,6 +156,14 @@ try {
       }
     }
     process.exit(bad ? 1 : 0);
+  } else if (command === "doctor" && rest.includes("--tools")) {
+    const adapter = await loadAdapter(id);
+    if (!adapter.localTools) throw new Error(`${adapter.label} doesn't have local tools on (adapter \`localTools\`).`);
+    console.error(`${adapter.label}: asking "${TOOLS_PROMPT}" with the local-tools guide, in a new chat (nothing is run)…`);
+    const report = await doctor(dataDir, adapter, { headless: !rest.includes("--headed"), tools: true });
+    if (report.ok) console.error(`✅ asked to run: ${report.calls!.map((c) => JSON.stringify(c)).join(", ")} (${(report.ms / 1000).toFixed(1)}s, conversation ${report.ref})`);
+    else console.error(`❌ ${report.error ?? `no \`\`\`run block found in: ${JSON.stringify(report.text?.slice(0, 400))}`}`);
+    process.exit(report.ok ? 0 : 1);
   } else if (command === "doctor") {
     const adapter = await loadAdapter(id);
     console.error(`${adapter.label}: sending "${PONG_PROMPT}" in a new chat…`);

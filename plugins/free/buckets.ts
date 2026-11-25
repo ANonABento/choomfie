@@ -54,8 +54,8 @@ export const BUCKETS: Bucket[] = [
     description:
       "asks to MAKE or EDIT media, not talk about it: generate or edit an image, picture, drawing, logo or sticker; make music, a song or a sound; a video or animation; a voice clip or text read aloud",
     need: "strong",
-    // Sites that generate media (Gemini, ChatGPT, Hugging Face Spaces) go first as they're added.
-    brains: ["waymond"],
+    // Sites that generate media first (ChatGPT, Hugging Face Spaces next); Waymond's sandbox after.
+    brains: ["gemini-web", "waymond"],
   },
   {
     id: "agentic",
@@ -78,7 +78,8 @@ export const BUCKETS: Bucket[] = [
     label: "Research",
     description: "needs current or sourced information from the web: news, today's prices, recent releases, looking something up, citations",
     need: "strong",
-    brains: ["waymond"],
+    // Gemini searches Google for free; Waymond (paid credits) after it.
+    brains: ["gemini-web", "waymond"],
   },
   {
     id: "vision",

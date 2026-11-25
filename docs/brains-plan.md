@@ -198,7 +198,7 @@ Different from routing: routing picks **who answers the user**; delegation is **
 
 | # | What | Kind | Why | Free allowance (as researched; verify on adding) |
 |---|---|---|---|---|
-| 1 | **Gemini** (gemini.google.com) | web brain → `media`, `research`, `quality` | Image, music and video generation, Deep Research, Google-grade chat: the most free capability in one login | Daily caps per feature; unpublished counts |
+| 1 | ✅ **Gemini** (gemini.google.com, `/brain gemini-web`; Nov 25: chat, attachments in, images back, local tools, `media` and `research` first member. Free accounts get only Auto in the model picker. Not yet: Deep Research, music/video, Task mode) | web brain → `media`, `research`, `quality` | Image, music and video generation, Deep Research, Google-grade chat: the most free capability in one login | Daily caps per feature; unpublished counts |
 | 2 | **Hugging Face Inference Providers** | API provider (one file: `router.huggingface.co/v1`, OpenAI-compatible, `HF_TOKEN`) | Hundreds of open models behind one key | Monthly credit for free accounts was documented as under $0.10 and reportedly removed Oct 15, 2026: check with `apibrain keys add huggingface` before relying on it |
 | 3 | **Hugging Face Spaces** | new kind: a Space as a tool member (Gradio API: `@gradio/client`, call a Space's endpoint, files back) | Image, music, TTS, video, upscaling, odd one-off models; pick a few good Spaces per need, swap them in config | ZeroGPU: 5 min of GPU a day on a free account (resets 24h after first use); anonymous calls get less |
 | 4 | **ChatGPT** | web brain → `media`, `quality` | Free image generation, the most-used free chat | Limited free messages and images per day |
@@ -212,6 +212,8 @@ Different from routing: routing picks **who answers the user**; delegation is **
 
 **Stage 7 — Compare with other free-LLM projects and lists.** Exit: nothing on a maintained list is missing without a written reason. Check against cheahjs/free-llm-api-resources and similar lists, other "free router" projects (how they rank, rotate keys, detect quota), and the handoff's `free-providers.md`; every provider or site gets added, skipped with a reason, or parked here.
 - [x] Web-brain compact: ask the site for a summary, open a new site conversation seeded with it on the next message.
+
+**Web brains run commands here** (Nov 25): local tools in the kit, owner only: a `#!run` code block, look-only commands at once, anything else behind a Run button. Covers "check my laptop" and commit/push without a harness's quota. Next: the same for free's API models (one shared tool loop), and git helpers that know the repo.
 
 **Stage 3 — Harness brains.** Exit: the free CLIs (Antigravity, OpenCode) each answer as a brain (`/brain antigravity`) and can be an `agentic` member of free. (Codex and Gemini CLI have no free tier now.)
 - [x] Harness kit (`@choomfie/harness`, plugin `harnesses`, Nov 24): one print-mode run per message, the CLI's conversation id resumed per chat, a folder per chat, attachments in, changed files back, `/stop`, read-only mode for anyone but the owner. First harness: Antigravity `agy` (free, weekly quota). See [harness.md](harness.md).

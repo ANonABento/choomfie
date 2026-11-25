@@ -17,6 +17,7 @@
         "@choomfie/voice": "workspace:*",
         "@choomfie/waymond": "workspace:*",
         "@choomfie/webbrain": "workspace:*",
+        "@choomfie/webbrains": "workspace:*",
         "@discordjs/opus": "^0.10.0",
         "@discordjs/voice": "^0.19.2",
         "@modelcontextprotocol/sdk": "^1.0.0",
@@ -166,6 +167,14 @@
         "@choomfie/webbrain": "workspace:*",
       },
     },
+    "plugins/webbrains": {
+      "name": "@choomfie/webbrains",
+      "version": "0.1.0",
+      "dependencies": {
+        "@choomfie/shared": "workspace:*",
+        "@choomfie/webbrain": "workspace:*",
+      },
+    },
   },
   "trustedDependencies": [
     "onnxruntime-node",
@@ -226,6 +235,8 @@
     "@choomfie/waymond": ["@choomfie/waymond@workspace:plugins/waymond"],
 
     "@choomfie/webbrain": ["@choomfie/webbrain@workspace:packages/webbrain"],
+
+    "@choomfie/webbrains": ["@choomfie/webbrains@workspace:plugins/webbrains"],
 
     "@csstools/color-helpers": ["@csstools/color-helpers@6.0.2", "", {}, "sha512-LMGQLS9EuADloEFkcTBR3BwV/CGHV7zyDxVRtVDTwdI2Ca4it0CCVTT9wCkxSgokjE5Ho41hEPgb8OEUwoXr6Q=="],
 

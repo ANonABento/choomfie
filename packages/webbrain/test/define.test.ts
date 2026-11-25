@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getBrain, type Brain, type BrainMessage, type PluginContext } from "@choomfie/shared";
+import { getBrain, setBrainPoster, type Brain, type BrainMessage, type PluginContext } from "@choomfie/shared";
 import { ChatStore } from "../../core/lib/chats/store.ts";
 import { answerText, COMPACT_PROMPT, defineWebBrain, modePrompt } from "../define.ts";
 import { LoginRequiredError, type SiteAdapter, type TurnContext, type TurnInput } from "../adapter.ts";
@@ -379,5 +379,62 @@ describe("web-brain /compact", () => {
     } finally {
       await destroy();
     }
+  });
+});
+
+describe("local tools", () => {
+  const ask = (cmd: string) => ({ text: `Let me check.\nCode snippet\n${cmd}`, ref: "r", codeBlocks: [{ lang: "code", code: `#!run\n${cmd}` }] });
+
+  test("a look-only command runs at once, its output goes back to the site, and the reply says what ran", async () => {
+    const turns: string[] = [];
+    const { brain, ctx, destroy } = await setup(
+      async (input) => {
+        turns.push(input.text);
+        return turns.length === 1 ? ask("pwd") : { text: "You're in your home folder.", ref: "r" };
+      },
+      { localTools: true }
+    );
+    const reply = await brain.send(msg("t1", "where am i"), ctx);
+    expect(turns[0]).toContain("#!run"); // the guide opens the conversation
+    expect(turns[0]).toEndWith("where am i");
+    expect(turns[1]).toStartWith("[Output from the owner's Mac:]\n$ pwd\n");
+    expect(reply.text).toStartWith("You're in your home folder.");
+    expect(reply.text).toContain("-# 🔧 ran on this Mac: `pwd`");
+    await destroy();
+  });
+
+  test("anything else waits for the owner's approval, then runs and the site's answer is posted", async () => {
+    const pushed: string[] = [];
+    setBrainPoster(async (_id, _key, reply) => void pushed.push(reply.text ?? ""));
+    const turns: string[] = [];
+    const { brain, ctx, destroy } = await setup(
+      async (input) => {
+        turns.push(input.text);
+        return turns.length === 1 ? ask("echo committed") : { text: "Done: committed.", ref: "r" };
+      },
+      { localTools: true }
+    );
+    const reply = await brain.send(msg("t1", "commit it"), ctx);
+    expect(turns.length).toBe(1);
+    expect(reply.approvals?.[0]).toMatchObject({ title: "FakeSite wants to run this on your Mac", approveLabel: "Run" });
+    expect(reply.approvals![0].detail).toContain("echo committed");
+
+    expect(await brain.resolveApproval!("t1", reply.approvals![0].id, true)).toBe("Running it…");
+    for (let i = 0; i < 50 && !pushed.length; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(turns[1]).toContain("$ echo committed\ncommitted");
+    expect(turns[1]).not.toContain("#!run"); // no guide on the output message
+    expect(pushed[0]).toStartWith("Done: committed.");
+    expect(pushed[0]).toContain("ran on this Mac: `echo committed`");
+    await destroy();
+  });
+
+  test("someone other than the owner gets no guide, and a run block is just text", async () => {
+    const turns: string[] = [];
+    const { brain, ctx, destroy } = await setup(async (input) => (turns.push(input.text), ask("pwd")), { localTools: true });
+    const reply = await brain.send(msg("t1", "hi", { meta: { role: "user", user: "sam" } }), ctx);
+    expect(turns.length).toBe(1);
+    expect(turns[0]).not.toContain("#!run");
+    expect(reply.approvals ?? []).toEqual([]);
+    await destroy();
   });
 });

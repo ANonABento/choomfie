@@ -8,12 +8,15 @@
  * It sends a real message and leaves a new conversation on the site.
  */
 
+import { runCalls, toolGuide } from "./local-tools.ts";
 import type { SiteAdapter, TurnContext } from "./adapter.ts";
 import { engineFor, launchContext } from "./engine/launch.ts";
 import { createHuman, Pacer } from "./engine/human.ts";
 import { profileDir, profileInUse } from "./paths.ts";
 
 export const PONG_PROMPT = "Reply with exactly: pong";
+/** `doctor --tools`: does the site ask for a command the way local tools need? Nothing is run. */
+export const TOOLS_PROMPT = "How much free disk space does this Mac have?";
 
 export interface DoctorReport {
   ok: boolean;
@@ -21,13 +24,15 @@ export interface DoctorReport {
   ref?: string;
   text?: string;
   error?: string;
+  /** `--tools`: the ```run commands the answer asked for (not run). */
+  calls?: string[];
 }
 
 export function looksLikePong(text: string): boolean {
   return /\bpong\b/i.test(text);
 }
 
-export async function doctor(dataDir: string, adapter: SiteAdapter, opts: { headless?: boolean; timeoutMs?: number } = {}): Promise<DoctorReport> {
+export async function doctor(dataDir: string, adapter: SiteAdapter, opts: { headless?: boolean; timeoutMs?: number; tools?: boolean } = {}): Promise<DoctorReport> {
   const engine = engineFor(dataDir, adapter);
   const profile = profileDir(dataDir, adapter.id, engine);
   if (profileInUse(profile)) {
@@ -50,6 +55,11 @@ export async function doctor(dataDir: string, adapter: SiteAdapter, opts: { head
       human: createHuman(new Pacer(0)),
       timeoutMs: opts.timeoutMs ?? 90_000,
     };
+    if (opts.tools) {
+      const result = await adapter.turn(page, { text: `${toolGuide()}\n\n${TOOLS_PROMPT}`, files: [] }, t);
+      const calls = runCalls(result.text, result.codeBlocks);
+      return { ok: calls.length > 0, ms: Date.now() - started, ref: result.ref ?? ref, text: result.text, calls };
+    }
     const result = await adapter.turn(page, { text: PONG_PROMPT, files: [] }, t);
     return { ok: looksLikePong(result.text), ms: Date.now() - started, ref: result.ref ?? ref, text: result.text };
   } catch (e) {

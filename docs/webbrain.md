@@ -4,13 +4,16 @@ A web brain answers Discord messages by driving a chat website in a headless bro
 
 ## Writing one
 
+A site is one adapter file in the `webbrains` plugin:
+
 ```ts
-// plugins/<id>/index.ts
-import { defineWebBrain } from "@choomfie/webbrain";
-import { myAdapter } from "./adapter.ts";
-export { myAdapter as adapter };          // `webbrain login <id>` finds it here
-export default defineWebBrain(myAdapter);
+// plugins/webbrains/sites/<id>.ts → export const myAdapter: SiteAdapter = { … }
+// plugins/webbrains/index.ts
+export const adapters: SiteAdapter[] = [geminiAdapter, myAdapter];   // `webbrain login <id>` finds them here
+export default defineWebBrains("webbrains", adapters);
 ```
+
+`defineWebBrains` registers each site whose profile has been logged in (`bun run webbrain login <id>`); one never logged in is skipped, and config.json `"webbrain": { "<id>": { "enabled": false } }` turns one off. A site with much more than an adapter (Waymond: tools, approval cards, plan boards) is its own plugin with `defineWebBrain(adapter)` and `export { adapter }`.
 
 `SiteAdapter` (`packages/webbrain/adapter.ts`) has one required method:
 
@@ -18,7 +21,19 @@ export default defineWebBrain(myAdapter);
 
 Optional: `stop(page, ref)` (called on the same tab while `turn` runs), `readLate(page, ref, afterId, posted)` for background results, `resolveApproval(page, ref, id, approve)`, `framePrompt(content, meta)`, and `modes` — `SiteMode[]` (`id`, `label`, `description`, `frame`) for `/mode`. The chat's mode frame is put in front of every message (sites keep no instructions of ours), and `turn` gets `input.mode` so it can tidy mode replies. A mode with `tasks: true` ends its replies with a task list (`parseTaskList` format); the kit attaches it as `BrainReply.tasks` (plus `taskContext(answer)`, if the adapter has one), and core posts it as run-this-task buttons.
 
-Prefer the site's own JSON endpoints for reading answers (`pageFetch(page, url)` fetches from inside the logged-in page) over scraping rendered text. Then add the package to `PLUGIN_PACKAGES` in `packages/core/lib/plugins.ts` and the root `package.json` dependencies, run `bun install`, `bun run webbrain login <id>`, enable it with `/plugins`, and `/brain <id>` in a channel.
+Prefer the site's own JSON endpoints for reading answers (`pageFetch(page, url)` fetches from inside the logged-in page) over scraping rendered text. Then `bun run webbrain login <id>`, `/plugins enable webbrains` (or `/restart` if it's on), and `/brain <id>` in a channel.
+
+## Local tools: running commands on this Mac
+
+A site's model can't run anything here, so an adapter with `localTools: true` lets it ask in text (`packages/webbrain/local-tools.ts`):
+
+- **Owner only.** The guide goes in front of the first owner message of each site conversation (a one-line reminder after that); anyone else's messages get no guide, and a block in the answer is just text.
+- **The ask:** a code block whose first line is `#!run`, then the command. The marker is inside the code because sites render markdown and drop a block's language (Gemini shows any unknown one as "Code snippet"). An adapter returns the answer's code blocks read from the page (`TurnResult.codeBlocks`), since `innerText` loses the fences; otherwise the kit reads fences in the text.
+- **Look-only commands run at once:** `df`, `du`, `ls`, `ps`, `top -l 1`, `pmset -g`, `diskutil list`, `git status|log|diff|show|branch`, `gh pr list`, … chained only with `&&` or `|` (`head`, `grep`, `wc`, `sort` only after a pipe), no redirects or `$(…)`, nothing naming secrets (`.ssh`, `.env`, tokens, keychain).
+- **Anything else waits for you:** a commit, a push, a write, an unknown program. The reply carries a "<Site> wants to run this on your Mac" card with **Run** / **Don't run** (owner-only buttons). On Run the kit runs it, gives the site the output, and posts the site's answer when it comes.
+- Commands run in zsh (login shell, so `git` and `gh` are on PATH) from the home folder, 60s each, output clipped to 6,000 characters; up to 3 per answer and 6 rounds per message. The reply ends with `-# 🔧 ran on this Mac: …`.
+- Whatever a command prints goes to the site. That's why secrets are never auto-run; approve with that in mind.
+- `bun run webbrain doctor <id> --tools` checks a site asks the right way (one real message; nothing is run).
 
 ## What the kit does
 
@@ -43,6 +58,7 @@ The `new-web-brain` skill (`.claude/skills/new-web-brain/`) walks a Claude Code 
 - `bun run webbrain login <id>` — opens the site headed on its profile; sign in, close the window. Refuses while the profile is open elsewhere (Chrome's `SingletonLock`).
 - `bun run webbrain record <id> <url>` — headed, on `<id>`'s profile (so signing in here is the login). You send `Reply with exactly: pong` by hand; it writes `network.jsonl` (fetch/XHR/stream entries with clipped request and response bodies, **no headers**), `controls-*.json` and `aria-*.txt` (selector material, before and after), `urls.txt` and `meta.json` to `<data>/webbrain/<id>/recording/`. That holds account data: it stays in the data dir, never the repo.
 - `bun run webbrain doctor <id> [--headed]` — one real round trip through the adapter in a new chat; passes when the answer contains `pong`. Exit code 0/1. Sends a real message.
+- `bun run webbrain doctor <id> --tools` — asks "how much free disk space does this Mac have?" with the local-tools guide and passes when the answer asks for a `#!run` command. Nothing is run.
 - `bun run webbrain doctor <id> --detect [--engine patchright|cloak|all] [--headed]` — how botty the engine looks, on a throwaway profile (never the logged-in one): our probes (`navigator.webdriver`, Headless in the user agent or client hints, software GPU, plugins, zero-size window, UA vs client-hint platform, contradictory notification permission, `window.chrome`) plus bot.sannysoft.com's failed rows. Exit 1 on any tell.
 - `CHOOMFIE_<ID>_HEADED=1` — run that site's browser visibly, for debugging.
 

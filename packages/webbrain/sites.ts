@@ -25,7 +25,7 @@ export interface SiteStatus {
 }
 
 /**
- * Plugins that export a web-brain `adapter`. Read from the source first (an
+ * Plugins that export a web-brain `adapter` (or a list, `adapters`: the `webbrains` plugin). Read from the source first (an
  * `adapter` export), so plugins that aren't web brains are never imported
  * (importing one can start things: voice, socials).
  */
@@ -35,10 +35,11 @@ export async function discoverAdapters(pluginsDir: string, load: (id: string) =>
     const index = join(pluginsDir, id, "index.ts");
     if (!existsSync(index)) continue;
     const source = readFileSync(index, "utf8");
-    if (!/export\s*\{[^}]*\bas\s+adapter\b|export\s*\{[^}]*\badapter\b|export\s+(const|let)\s+adapter\b/.test(source)) continue;
+    if (!/export\s*\{[^}]*\bas\s+adapters?\b|export\s*\{[^}]*\badapters?\b|export\s+(const|let)\s+adapters?\b/.test(source)) continue;
     try {
-      const mod = (await load(id)) as { adapter?: SiteAdapter };
+      const mod = (await load(id)) as { adapter?: SiteAdapter; adapters?: SiteAdapter[] };
       if (mod.adapter?.turn) found.push(mod.adapter);
+      for (const a of mod.adapters ?? []) if (a?.turn) found.push(a);
     } catch (e) {
       console.error(`  (couldn't load @choomfie/${id}: ${e instanceof Error ? e.message : String(e)})`);
     }
@@ -49,6 +50,11 @@ export async function discoverAdapters(pluginsDir: string, load: (id: string) =>
 /** The profile folder, without creating it (unlike `profileDir`). */
 function profilePath(dataDir: string, adapter: SiteAdapter): string {
   return join(dataDir, "webbrain", adapter.id, profileName(engineFor(dataDir, adapter)));
+}
+
+/** Has this site's profile ever been opened (a login, a recording)? No launch, nothing sent. */
+export function hasProfile(dataDir: string, adapter: SiteAdapter): boolean {
+  return existsSync(join(profilePath(dataDir, adapter), "Default"));
 }
 
 /** Where a logged-in profile lands: the chat URL's origin and first path segment. */

@@ -43,7 +43,7 @@ packages/
                #   (keys, cooldowns, quota, router, classifier); see docs/free-brain.md
   harness/     # @choomfie/harness — kit that turns coding-agent CLIs (agy, …) into brains;
                #   see docs/harness.md
-plugins/       # voice, browser, tutor, socials, waymond, free, harnesses — workspace packages, each an
+plugins/       # voice, browser, tutor, socials, waymond, webbrains, free, harnesses — workspace packages, each an
                #   index.ts exporting a Plugin
 docs/, .claude-plugin/, .mcp.json
 ```
@@ -186,4 +186,4 @@ Shapes and constraints that don't announce themselves. Getting one wrong compile
 
 This file is loaded into every daemon session's context and re-read from cache on every turn, as is `docs/` content you open. Measured: at 31.7KB it was ~7,900 tokens — roughly a quarter of the session's entire resident context, for documentation a Discord persona never needs. Keep it to rules and architecture; put inventories, walkthroughs and examples in `docs/`.
 
-The same applies to plugins: their tool schemas and instructions are resident too (voice ~511, browser ~844, tutor ~2,211, socials ~4,232 tokens; waymond, free and harnesses 0 — they are brains, not tools). Enable only what's in use.
+The same applies to plugins: their tool schemas and instructions are resident too (voice ~511, browser ~844, tutor ~2,211, socials ~4,232 tokens; waymond, webbrains, free and harnesses 0 — they are brains, not tools). Enable only what's in use.

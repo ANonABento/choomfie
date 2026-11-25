@@ -1,0 +1,11 @@
+{
+  "name": "@choomfie/webbrains",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "index.ts",
+  "license": "MIT",
+  "dependencies": {
+    "@choomfie/shared": "workspace:*",
+    "@choomfie/webbrain": "workspace:*"
+  }
+}

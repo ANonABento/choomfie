@@ -19,6 +19,7 @@ import {
   registerBrain,
   unregisterBrain,
   type Brain,
+  type BrainApproval,
   type Plugin,
   type PluginContext,
 } from "@choomfie/shared";
@@ -27,8 +28,10 @@ import { LoginRequiredError, type SiteAdapter, type TurnContext, type TurnResult
 import { engineFor, launchContext } from "./engine/launch.ts";
 import { createHuman, Pacer } from "./engine/human.ts";
 import { outboxDir, profileDir } from "./paths.ts";
+import { hasProfile } from "./sites.ts";
 import { TabPool, type ContextLike } from "./tabs.ts";
 import { LateWatch } from "./watch.ts";
+import { isLookOnly, MAX_CALLS, MAX_STEPS, ranNote, resultsPrompt, runCalls, runCommand, TOOL_REMINDER, toolGuide, type RunResult } from "./local-tools.ts";
 
 export interface WebBrainOptions {
   /** Tabs open at once (chats answering side by side). Default 3. */
@@ -86,9 +89,17 @@ export const MAX_CONTINUES = 3;
 
 /** Meta flag on a continue the kit sends itself for a late answer (it doesn't reset the count). */
 const LATE_CONTINUE = "webbrain_continue";
+/** Meta flag on the message carrying approved commands' output back to the site. */
+const TOOL_RESULT = "webbrain_tool_result";
 
-/** Headed for debugging: `CHOOMFIE_<ID>_HEADED=1`. */
-const headedFor = (id: string) => process.env[`CHOOMFIE_${id.toUpperCase()}_HEADED`] === "1";
+const runAll = async (cmds: string[]) => {
+  const out: RunResult[] = [];
+  for (const c of cmds) out.push(await runCommand(c));
+  return out;
+};
+
+/** Headed for debugging: `CHOOMFIE_<ID>_HEADED=1` (dashes as underscores: `CHOOMFIE_GEMINI_WEB_HEADED`). */
+const headedFor = (id: string) => process.env[`CHOOMFIE_${id.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_HEADED`] === "1";
 
 interface ActiveTurn {
   ref?: string;
@@ -105,7 +116,13 @@ export function seededPrompt(summary: string, message: string): string {
   return `[Summary of our earlier conversation, which we're continuing here:]\n${summary.trim()}\n\n[New message:]\n${message}`;
 }
 
-export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {}): Plugin {
+/** One site's brain and what it holds open (its browser, its late-result watch). */
+interface WebBrainRuntime {
+  create(ctx: PluginContext): Brain;
+  close(): Promise<void>;
+}
+
+function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebBrainRuntime {
   let pool: TabPool<Page> | null = null;
   let watch: LateWatch | null = null;
 
@@ -129,6 +146,8 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
      * then leaves the old conversation bound, so nothing is lost.
      */
     const compacted = new Map<string, string>();
+    /** Commands waiting for the owner's Approve button, by approval id. */
+    const pendingRuns = new Map<string, { chatKey: string; cmds: string[] }>();
     const tabs = (pool = new TabPool<Page>({
       launch: () => (opts.launch ? opts.launch(profile) : launchContext(profile, { headless: !headedFor(adapter.id), engine })),
       maxTabs: opts.maxTabs,
@@ -210,6 +229,18 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
       },
 
       async resolveApproval(chatKey, approvalId, approve) {
+        const run = pendingRuns.get(approvalId);
+        if (run) {
+          pendingRuns.delete(approvalId);
+          // Run (or not), hand the outcome to the site, and post its answer when it comes.
+          void (async () => {
+            const results = approve ? await runAll(run.cmds) : [];
+            const content = approve ? resultsPrompt(results) : "[The owner declined to run that. Answer without it, or suggest another way.]";
+            const reply = await brain.send({ chatKey, content, filePaths: [], meta: { chat_id: chatKey, role: "owner", [TOOL_RESULT]: "1" } }, ctx);
+            await pushBrainReply(adapter.id, chatKey, results.length ? { ...reply, text: `${reply.text}\n${ranNote(results)}` } : reply);
+          })().catch((e) => pushBrainReply(adapter.id, chatKey, { text: `⚠️ ${errorMessage(e)}` }));
+          return approve ? `Running ${run.cmds.length === 1 ? "it" : `${run.cmds.length} commands`}…` : "Declined.";
+        }
         const ref = refAt(chatKey);
         if (!ref || !adapter.resolveApproval) throw new Error(`no ${adapter.label} conversation for this channel`);
         return onTab(chatKey, (page) => adapter.resolveApproval!(page, ref, approvalId, approve));
@@ -268,17 +299,21 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
         // After /compact: a fresh site conversation, opened with the summary.
         const seed = message.meta?.[LATE_CONTINUE] ? undefined : compacted.get(message.chatKey);
         const turn: ActiveTurn = { ref: seed ? undefined : (chat.backendRef ?? undefined), stop: false };
+        // Local tools: the owner's messages only, on a site that opts in.
+        const tools = !!adapter.localTools && message.meta?.role === "owner";
+        const toolResult = !!message.meta?.[TOOL_RESULT];
         try {
           // A thread on a pipeline (`/pipeline`) gets no default frame: its
           // note says how to work there, and a default like "do it in your
           // sandbox" pulls the brain away from the pipeline tool. `/mode` still wins.
           const onPipeline = !!chats.pipelineAt?.(message.chatKey);
+          const framed = (adapter.framePrompt ?? framePrompt)(message.content, message.meta);
+          // The guide opens each site conversation; later messages get a one-line reminder.
+          const withTools = tools && !toolResult ? `${turn.ref ? TOOL_REMINDER : toolGuide()}\n\n${framed}` : framed;
           const { text, mode } = modePrompt(
             adapter,
-            chat.mode ?? (onPipeline ? null : adapter.defaultMode) ?? null,
-            seed
-              ? seededPrompt(seed, (adapter.framePrompt ?? framePrompt)(message.content, message.meta))
-              : (adapter.framePrompt ?? framePrompt)(message.content, message.meta)
+            toolResult ? null : (chat.mode ?? (onPipeline ? null : adapter.defaultMode) ?? null),
+            seed ? seededPrompt(seed, withTools) : withTools
           );
           const runTurn = (prompt: string, attach: string[]) =>
             onTab(message.chatKey, (page) => {
@@ -315,6 +350,42 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
             const kept = earlier.filter((f) => !names.has(f.name));
             if (kept.length) result = { ...result, files: [...kept, ...(result.files ?? [])] };
           }
+          // The site asked to run commands here: look-only ones run now, anything else waits for the owner.
+          const ran: RunResult[] = [];
+          let waiting: BrainApproval | undefined;
+          for (let step = 0; tools; step++) {
+            if (result.stopped || turn.stop || result.background || result.approvals?.length) break;
+            const asked = runCalls(result.text, result.codeBlocks);
+            if (!asked.length) break;
+            if (step >= MAX_STEPS) {
+              result = { ...result, text: `${result.text}\n\n-# Stopped after ${MAX_STEPS} rounds of commands; say "go on" to continue.` };
+              break;
+            }
+            const cmds = asked.slice(0, MAX_CALLS);
+            if (!cmds.every(isLookOnly)) {
+              const id = `run-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+              pendingRuns.set(id, { chatKey: message.chatKey, cmds });
+              waiting = {
+                id,
+                title: `${adapter.label} wants to run this on your Mac`,
+                detail: `\`\`\`sh\n${cmds.join("\n").slice(0, 1_800)}\n\`\`\``,
+                approveLabel: "Run",
+                declineLabel: "Don't run",
+              };
+              break;
+            }
+            progress(`🔧 running ${cmds.map((c) => `\`${c.slice(0, 60)}\``).join(", ")}`);
+            const results = await runAll(cmds);
+            ran.push(...results);
+            turn.ref = result.ref;
+            chats.setBackendRef(chat.id, result.ref);
+            lateWatch.delivered(message.chatKey, result.messageIds ?? []);
+            const skipped = asked.length > cmds.length ? `[Only the first ${MAX_CALLS} commands ran.]` : undefined;
+            result = await runTurn(resultsPrompt(results, skipped), []);
+          }
+          if (ran.length) result = { ...result, text: `${result.text}\n${ranNote(ran)}` };
+          if (waiting) result = { ...result, approvals: [...(result.approvals ?? []), waiting] };
+
           chats.setBackendRef(chat.id, result.ref);
           if (seed) {
             compacted.delete(message.chatKey);
@@ -347,19 +418,65 @@ export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {})
   }
 
   return {
+    create: createBrain,
+    async close() {
+      watch?.stopAll();
+      watch = null;
+      await pool?.close();
+      pool = null;
+    },
+  };
+}
+
+/** One site as its own plugin (Waymond). */
+export function defineWebBrain(adapter: SiteAdapter, opts: WebBrainOptions = {}): Plugin {
+  const runtime = webBrainRuntime(adapter, opts);
+  return {
     name: adapter.id,
 
     async init(ctx) {
-      registerBrain(createBrain(ctx));
+      registerBrain(runtime.create(ctx));
       console.error(`${adapter.label} initialized — brain \`${adapter.id}\` registered`);
     },
 
     async destroy() {
       unregisterBrain(adapter.id);
-      watch?.stopAll();
-      watch = null;
-      await pool?.close();
-      pool = null;
+      await runtime.close();
+    },
+  };
+}
+
+/**
+ * Many sites in one plugin (`webbrains`): each site whose profile has been
+ * logged in (`bun run webbrain login <id>`) becomes a brain; one never logged
+ * in is skipped, and config.json `webbrain.<id>.enabled: false` turns one off.
+ */
+export function defineWebBrains(name: string, adapters: SiteAdapter[], opts: WebBrainOptions = {}): Plugin {
+  const running = new Map<string, WebBrainRuntime>();
+  return {
+    name,
+
+    async init(ctx) {
+      const cfg = (ctx.config.getConfig() as { webbrain?: Record<string, { enabled?: boolean }> }).webbrain ?? {};
+      for (const adapter of adapters) {
+        if (cfg[adapter.id]?.enabled === false) continue;
+        if (!hasProfile(ctx.DATA_DIR, adapter)) {
+          console.error(`${name}: ${adapter.label} skipped — not logged in (bun run webbrain login ${adapter.id})`);
+          continue;
+        }
+        const runtime = webBrainRuntime(adapter, opts);
+        registerBrain(runtime.create(ctx));
+        running.set(adapter.id, runtime);
+      }
+      console.error(`${name} initialized — ${running.size ? [...running.keys()].map((id) => `\`${id}\``).join(", ") : "no sites logged in"}`);
+    },
+
+    async destroy() {
+      for (const [id, runtime] of running) {
+        unregisterBrain(id);
+        await runtime.close();
+      }
+      running.clear();
     },
   };
 }

@@ -5,7 +5,7 @@ description: Add a chat website (Gemini, a freemium AI app, …) as a Choomfie b
 
 # Add a web brain
 
-Goal: `plugins/<id>/` with a small `adapter.ts`, passing `bun run webbrain doctor <id>`. Read `docs/webbrain.md` first; `plugins/waymond/adapter.ts` is the reference adapter (JSON-endpoint style).
+Goal: `plugins/webbrains/sites/<id>.ts`, a small adapter in the `webbrains` plugin, passing `bun run webbrain doctor <id>`. Read `docs/webbrain.md` first; `plugins/waymond/adapter.ts` is the reference adapter (JSON-endpoint style).
 
 Pick `<id>`: lowercase, digits, dashes (`gemini`). It is the brain id, plugin name and profile directory.
 
@@ -29,10 +29,9 @@ The capture lands in `~/.claude/plugins/data/choomfie-inline/webbrain/<id>/recor
 
 ## 3. Scaffold
 
-Copy `packages/webbrain/template/*.tmpl` to `plugins/<id>/` without the `.tmpl` suffix, replacing `__ID__` (id), `__ID_CAMEL__` (camelCase id), `__LABEL__` (display name), `__ORIGIN__` (https origin). Then:
+Copy `packages/webbrain/template/adapter.ts.tmpl` to `plugins/webbrains/sites/<id>.ts`, replacing `__ID__` (id), `__ID_CAMEL__` (camelCase id), `__LABEL__` (display name), `__ORIGIN__` (https origin), and add it to the `adapters` list in `plugins/webbrains/index.ts`. The id must not clash with a free API provider (`gemini` is one: Gemini's site is `gemini-web`).
 
-- `packages/core/lib/plugins.ts`: add `<id>: "@choomfie/<id>"` to `PLUGIN_PACKAGES`.
-- Root `package.json` dependencies: `"@choomfie/<id>": "workspace:*"`; run `bun install`.
+(A site that needs much more than an adapter, like Waymond, is its own plugin: the other two templates, an entry in `PLUGIN_PACKAGES` in `packages/core/lib/plugins.ts`, and a root `package.json` dependency.)
 
 ## 4. Write the adapter
 
@@ -45,6 +44,7 @@ Fill every `TODO` in `adapter.ts`. Rules:
 - Set `terms: { automation, checked, note }` from the site's terms of use (read them; `forbidden` if they ban bots or automated access).
 - If it generates images, music or video, return them as `files` and add the id to the `media` bucket's `brains` in `plugins/free/buckets.ts`.
 - If the site has a stop button, implement `stop(page, ref)`; if answers can carry follow-up options, return them as `choices`.
+- Set `localTools: true` (the owner can have it run commands on this Mac) unless the site has tools of its own. If answers are read with `innerText`, also return `codeBlocks` read from the page (see `plugins/webbrains/sites/gemini.ts`), and check with `bun run webbrain doctor <id> --tools`.
 - Keep it to what the recording shows. Don't guess endpoints.
 
 `bun run type-check` must pass.
@@ -59,4 +59,4 @@ It sends a real message in a new chat and expects `pong`. Iterate on the adapter
 
 ## 6. Enable
 
-Tell the user: `/plugins` → enable `<id>` (restarts the worker), then `/brain <id>` in a channel. Add a row for it to `docs/plugins.md`. Remind them, once, that driving a site's web UI is usually against its terms.
+Tell the user: `/plugins enable webbrains` (or `/restart` if it's already on), then `/brain <id>` in a channel. Add the site to the `webbrains` row in `docs/plugins.md`. Remind them, once, that driving a site's web UI is usually against its terms.
