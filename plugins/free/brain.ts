@@ -96,10 +96,15 @@ export interface FreeBrainDeps {
   lookupBrain?: (id: string) => Brain | undefined;
 }
 
+/** A rule guess below this, mid-chat, continues the previous turn's bucket and model. */
+const FOLLOW_UP_BELOW = 0.6;
+
 interface Route {
   member: string;
   model?: string;
   bucket: string;
+  /** The model asked for (the provider may name its answer differently). */
+  asked?: string;
   by: Classification["by"] | "mode" | "pin" | "you";
   latencyMs: number;
   at: number;
@@ -230,7 +235,17 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
       confidence = decision.confidence;
       reason = decision.reason;
     }
-    const targets = targetsFor(chosen);
+    // A weak guess mid-chat ("5090 ones", "table please") continues the last
+    // turn: same bucket, and the model that answered it first.
+    const prev = lastRoute.get(message.chatKey);
+    const follow = !first && !released && by === "rule" && confidence < FOLLOW_UP_BELOW && prev && bucket(prev.bucket) ? prev : undefined;
+    if (follow) {
+      chosen = follow.bucket;
+      reason = `follow-up, stays on ${follow.bucket}`;
+    }
+    const planned = targetsFor(chosen);
+    const again = follow && members.has(follow.member) ? { member: follow.member, ...(follow.asked ? { model: follow.asked } : {}) } : undefined;
+    const targets = again ? [again, ...planned.filter((t) => t.member !== again.member || t.model !== again.model)] : planned;
     // A first message may go anywhere: nothing is lost if a web brain takes it.
     const why = { confidence, ...(reason ? { reason } : {}) };
     if (first && !released) return { bucket: chosen, by, targets, locked: false, ...why };
@@ -371,7 +386,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         });
         const { reply, record, model } = routed.value;
         const member = routed.target.member;
-        const r: Route = { member, model, bucket: decision.bucket, by: decision.by, latencyMs: routed.latencyMs, at: Date.now() };
+        const r: Route = { member, model, ...(routed.target.model ? { asked: routed.target.model } : {}), bucket: decision.bucket, by: decision.by, latencyMs: routed.latencyMs, at: Date.now() };
         transcript.add(chat.id, "user", record);
         if (reply.text) transcript.add(chat.id, "assistant", reply.text, member, model);
         // A web member that answered now holds the chat (until `/model auto`).

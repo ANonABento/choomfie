@@ -334,12 +334,14 @@ export class ApiMember {
     // Per-model limits: models don't share a budget, so only a polite second between them.
     const gap = this.limits.rpm && this.spec.limitScope !== "model" ? Math.ceil(60_000 / this.limits.rpm) : 1_000;
     const todo = this.catalog.candidates(this.spec, this.deps.overrides?.models).filter((m) => av.untested(this.modelUnit(m.id)));
+    let limited = 0;
     for (const [i, m] of todo.entries()) {
       if (opts.signal?.aborted) return;
       if (i) await new Promise((r) => setTimeout(r, gap));
       try {
         await this.complete(PROBE, { model: m.id, maxTokens: 200, temperature: 0, timeoutMs: 15_000, briefThinking: true, purpose: "probe", signal: opts.signal });
         opts.onResult?.(m.id, true, "answers");
+        limited = 0;
       } catch (e) {
         const kind = e instanceof ProviderError ? e.kind : String(e);
         // Refusing a plain "say ok" means it isn't a chat model we can use (an agent, a special endpoint).
@@ -347,6 +349,10 @@ export class ApiMember {
         opts.onResult?.(m.id, false, kind);
         // The key itself is out (bad, or its shared allowance spent): the rest would fail the same way.
         if (kind === "auth" || kind === "no_credit" || (this.spec.limitScope !== "model" && (kind === "rate_limit" || kind === "quota"))) return;
+        // Per-model limits on paper, but two fresh models refused in a row means
+        // a shared one (OVH's anonymous tier, by IP): stop; the rest stay untested.
+        limited = kind === "rate_limit" || kind === "quota" ? limited + 1 : 0;
+        if (limited >= 2) return;
       }
     }
   }

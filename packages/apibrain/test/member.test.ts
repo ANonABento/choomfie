@@ -181,3 +181,18 @@ describe("benched keys across a restart", () => {
     expect((await again.complete(msgs, { model: "big" })).text).toBe("hi");
   });
 });
+
+describe("probe sweep", () => {
+  test("two fresh models refused for limits in a row: stop, and leave the rest untested", async () => {
+    const f = fakeFetch(() => fail(429, "API rate limit exceeded"));
+    const av = new Availability(null);
+    const m = new ApiMember(
+      { ...spec, id: "anon", noKey: true, limitScope: "model", fallbackModels: ["a", "b", "c"], limits: {} },
+      { env: {}, health: new Health(), quota: new Quota(), fetch: f, availability: av }
+    );
+    const seen: string[] = [];
+    await m.probe({ onResult: (model, _ok, why) => seen.push(`${model} ${why}`) });
+    expect(seen).toEqual(["a rate_limit", "b rate_limit"]);
+    expect(["a", "b", "c"].map((x) => av.untested(`anon:${x}`))).toEqual([true, true, true]);
+  });
+});

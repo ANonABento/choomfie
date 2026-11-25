@@ -26,6 +26,9 @@
 
 ### Fixed
 
+- **A signed-out Waymond looked like a broken page.** Ambition's `/chat` now shows its public landing (a "Sign in" button) instead of redirecting, so a signed-out profile waited 30s and said "the message box never appeared", and `webbrain sites` called it logged in. Waymond now spots the landing in under a second and says to log in; `webbrain sites` asks the adapter (`loggedIn`).
+- **Short follow-ups changed model mid-chat.** "5090 ones" after a `quality` answer was guessed `chat` by the short-message rule and went to a different model. A weak rule guess mid-chat now continues the last turn's bucket and model; a confident classification still moves.
+- **Probes hammered a shared limit.** OVHcloud's anonymous tier is said to be per model but refuses fresh models together; a probe sweep now stops after two limit refusals in a row and leaves the rest for the next sweep.
 - **API brains never saw core memories.** The free brain and provider brains now get the same "Current Memories" Claude does (capped at 2,000 characters) on answer calls. `/config` gains `free.providersOff` and `free.footer`.
 - **A dead key cost a call after every restart.** Keys benched for "wants a card" (7 days) or "rejected" (6h) are saved by a fingerprint of the key (never the key) in `meta/apibrain-models.json` and stay benched across restarts; `apibrain doctor` re-checks them, and an answer clears the bench.
 - **Free brain's classifier spent ~100 hidden reasoning tokens per one-line answer.** Models seen thinking first are remembered and ranked below plain ones for tiny jobs (the classifier moved from gpt-oss-20b to qwen3.8-27b: 13 tokens, ~200 ms); a known thinker on a one-line job gets `reasoning_effort: low`, dropped for providers that refuse it. A reply that was all thinking fails over instead of posting nothing; stray `<think>` fragments are stripped before a turn is stored; probes time out after 15s, not 30s.

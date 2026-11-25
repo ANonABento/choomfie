@@ -191,6 +191,16 @@ describe("free brain routing", () => {
     expect((await u.brain.send(msg("maybe build something"), u.ctx)).choices).toBeUndefined();
   });
 
+  test("a weak rule guess mid-chat continues the last turn's bucket and model; a sure one moves", async () => {
+    const t = setup();
+    t.classifier.next = { bucket: "quality", confidence: 0.9 };
+    expect((await t.brain.send(msg("compare 3 laptops in a table"), t.ctx)).text).toEndWith("· quality");
+    t.classifier.next = { bucket: "chat", confidence: 0.5, by: "rule" };
+    expect((await t.brain.send(msg("5090 ones"), t.ctx)).text).toBe("smart answer\n-# via SMART · smart-m · quality");
+    t.classifier.next = { bucket: "chat", confidence: 0.9, by: "zero-shot" };
+    expect((await t.brain.send(msg("thanks, unrelated: how are you doing"), t.ctx)).text).toStartWith("fast answer");
+  });
+
   test("a holding web member that fails doesn't move silently: Retry, or Answer with free models", async () => {
     const t = setup();
     t.classifier.next = { bucket: "agentic", confidence: 1 };
