@@ -26,6 +26,10 @@ No tools and no instructions, so it costs the Claude session nothing.
 3. Turn it on with `/plugins enable free`, then run `/brain free` in a channel. `/brain` with no name (or `/status` there) shows each provider's state, today's use, and the last few routes; `/usage` shows today's use too.
 4. To see exactly what was sent: `bun run apibrain log` (below).
 
+## What API models know
+
+The active persona and the owner's core memories (the same "Current Memories" Claude gets, capped at 2,000 characters) go into every answer's system prompt; classifier calls get neither. API models have no tools, so they can't save or change memories.
+
 ## Replies on Discord
 
 Fixed on our side, for every brain, not by rules in the prompt (a rule costs tokens on every call and still gets ignored):
@@ -73,7 +77,7 @@ None of these needs a card. Limits change without notice: `bun run apibrain keys
 | OVHcloud | no key | 2 RPM per model, EU | A key here would be pay-as-you-go, so none is used |
 | Ollama | — | your machine | Opt-in: `free.providers.ollama.enabled: true` |
 
-A provider with credit on the account (AxForge, Runcrate, Gonka, Aion) bills past its free allowance. The free brain can't tell a free-tier key from a funded one, so keep those accounts unfunded. A keyless provider can be turned off with `free.providers.<id>.enabled: false`.
+A provider with credit on the account (AxForge, Runcrate, Gonka, Aion) bills past its free allowance. The free brain can't tell a free-tier key from a funded one, so keep those accounts unfunded. Any provider can be turned off with `/config setting:free.providersOff value:kilo,ovh` (it writes `free.providers.<id>.enabled: false`; `/restart` to apply). `/config setting:free.footer` shows which provider and model answered.
 
 Web brains sign in, not key in: `bun run webbrain login <id>` opens the site on its own profile; sign in and close the window ([webbrain.md](webbrain.md)).
 
@@ -191,7 +195,7 @@ To choose a model instead, use `/model`.
     "ollama": { "enabled": true, "baseURL": "http://127.0.0.1:11434/v1" },
     "nvidia": { "enabled": false }
   },
-  "footer": false,                        // add "-# via Groq · gpt-oss-120b · code" under answers
+  "footer": false,                        // add "-# via Groq · gpt-oss-120b · code" under answers (/config free.footer)
   "contextTokens": 8000                   // cap on every model's input budget
 }
 ```

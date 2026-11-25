@@ -294,6 +294,36 @@ export const SETTINGS: Setting[] = [
       return { ok: true, value };
     },
   },
+  {
+    key: "free.providersOff",
+    description: "Free-brain providers turned off, comma-separated (e.g. kilo,ovh: free models there may log prompts)",
+    example: "kilo,ovh or none",
+    suggestions: ["none", "kilo", "ovh", "kilo,ovh", "kilo,ovh,llm7"],
+    scope: "next worker restart",
+    read: (config) => config.getFreeProvidersOff().join(", ") || "none",
+    write: (config, raw) => {
+      const ids = isReset(raw) ? [] : [...new Set(raw.split(/[\s,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean))];
+      const bad = ids.filter((id) => !/^[a-z0-9][a-z0-9_-]{0,30}$/.test(id));
+      if (bad.length) return { ok: false, error: `Not a provider id: ${bad.join(", ")}. Run \`bun run apibrain keys\` for the list.` };
+      config.setFreeProvidersOff(ids);
+      return { ok: true, value: ids.join(", ") || "none" };
+    },
+  },
+  {
+    key: "free.footer",
+    description: "Show which provider and model answered, under each free-brain reply",
+    example: "on or off",
+    suggestions: ["on", "off"],
+    scope: "next worker restart",
+    read: (config) => (config.getFreeFooter() ? "on" : "off"),
+    write: (config, raw) => {
+      const v = isReset(raw) ? "off" : raw.trim().toLowerCase();
+      if (!["on", "off", "true", "false", "yes", "no"].includes(v)) return { ok: false, error: "Must be `on` or `off`." };
+      const on = ["on", "true", "yes"].includes(v);
+      config.setFreeFooter(on);
+      return { ok: true, value: on ? "on" : "off" };
+    },
+  },
   countSetting({
     key: "daemon.tokenThreshold",
     description: "Cycle the daemon session past this much context",

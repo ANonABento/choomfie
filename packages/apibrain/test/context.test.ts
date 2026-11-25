@@ -63,6 +63,13 @@ test("systemPrompt carries the persona and the mode frame", () => {
   expect(s).toEndWith("Work in code mode.");
 });
 
+test("systemPrompt carries the owner's core memories, capped", () => {
+  const s = systemPrompt({ name: "Choomfie", personality: "Be fun." }, undefined, "## Current Memories\n- name: Ben");
+  expect(s).toContain("- name: Ben");
+  expect(systemPrompt(undefined, undefined, "x".repeat(5_000)).length).toBeLessThan(2_300);
+  expect(systemPrompt(undefined, undefined, "")).not.toContain("\n\n\n");
+});
+
 test("recap lists what a brain missed", () => {
   const r = recap(null, [
     { id: 3, role: "user", content: "what's 2+2", member: null, model: null },

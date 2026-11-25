@@ -516,6 +516,56 @@ export class ConfigManager {
     this.save();
   }
 
+  // --- Free brain (the `free` section belongs to the free plugin; only these two are adjustable from /config) ---
+
+  private freeSection(): Record<string, unknown> {
+    const f = this.config.free;
+    return f && typeof f === "object" && !Array.isArray(f) ? (f as Record<string, unknown>) : {};
+  }
+
+  /** Providers turned off with `free.providers.<id>.enabled: false`. */
+  getFreeProvidersOff(): string[] {
+    const providers = this.freeSection().providers;
+    if (!providers || typeof providers !== "object") return [];
+    return Object.entries(providers as Record<string, unknown>)
+      .filter(([, v]) => !!v && typeof v === "object" && (v as { enabled?: unknown }).enabled === false)
+      .map(([id]) => id)
+      .sort();
+  }
+
+  /** Turn exactly these providers off; others lose only their `enabled: false` (their other settings stay). */
+  setFreeProvidersOff(ids: string[]) {
+    const free = { ...this.freeSection() };
+    const providers: Record<string, Record<string, unknown>> = {};
+    for (const [id, v] of Object.entries((free.providers as Record<string, unknown>) ?? {})) {
+      if (v && typeof v === "object") providers[id] = { ...(v as Record<string, unknown>) };
+    }
+    for (const [id, v] of Object.entries(providers)) {
+      if (v.enabled === false && !ids.includes(id)) delete v.enabled;
+      if (!Object.keys(v).length) delete providers[id];
+    }
+    for (const id of ids) providers[id] = { ...providers[id], enabled: false };
+    if (Object.keys(providers).length) free.providers = providers;
+    else delete free.providers;
+    if (Object.keys(free).length) this.config.free = free;
+    else delete this.config.free;
+    this.save();
+  }
+
+  /** The `-# via <provider> · <model>` line under free answers. */
+  getFreeFooter(): boolean {
+    return this.freeSection().footer === true;
+  }
+
+  setFreeFooter(on: boolean) {
+    const free = { ...this.freeSection() };
+    if (on) free.footer = true;
+    else delete free.footer;
+    if (Object.keys(free).length) this.config.free = free;
+    else delete this.config.free;
+    this.save();
+  }
+
   // --- Full config ---
 
   getConfig(): Config {

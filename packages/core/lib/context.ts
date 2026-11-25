@@ -80,6 +80,7 @@ export async function createContext(): Promise<{
     mcp: null as unknown as AppContext["mcp"],
     memory,
     chats: memory.chats,
+    memoryContext: () => memory.buildMemoryContext(),
     config,
     plugins: [],
     allowedUsers,

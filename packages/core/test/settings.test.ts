@@ -295,3 +295,31 @@ describe("autocomplete suggestions", () => {
     expect(findSetting(MODEL_SETTING_KEY)).toBeDefined();
   });
 });
+
+describe("free-brain settings", () => {
+  test("providersOff turns exactly those off and keeps other provider settings", () => {
+    const { config, dir } = newConfig();
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ free: { providers: { groq: { models: ["a"] }, ovh: { enabled: false } }, footer: true } }));
+    const c = new ConfigManager(dir);
+    const s = findSetting("free.providersOff")!;
+    expect(s.read(c)).toBe("ovh");
+    expect(s.write(c, "kilo, KILO llm7").ok).toBe(true);
+    const free = JSON.parse(readFileSync(join(dir, "config.json"), "utf8")).free;
+    expect(free.providers).toEqual({ groq: { models: ["a"] }, kilo: { enabled: false }, llm7: { enabled: false } });
+    expect(s.write(c, "none").value).toBe("none");
+    expect(JSON.parse(readFileSync(join(dir, "config.json"), "utf8")).free).toEqual({ providers: { groq: { models: ["a"] } }, footer: true });
+    expect(s.write(c, "../etc").ok).toBe(false);
+    void config;
+  });
+
+  test("footer on/off", () => {
+    const { config, dir } = newConfig();
+    const s = findSetting("free.footer")!;
+    expect(s.read(config)).toBe("off");
+    expect(s.write(config, "on").value).toBe("on");
+    expect(JSON.parse(readFileSync(join(dir, "config.json"), "utf8")).free).toEqual({ footer: true });
+    expect(s.write(config, "off").value).toBe("off");
+    expect(JSON.parse(readFileSync(join(dir, "config.json"), "utf8")).free).toBeUndefined();
+    expect(s.write(config, "maybe").ok).toBe(false);
+  });
+});

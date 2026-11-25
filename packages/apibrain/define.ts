@@ -80,7 +80,7 @@ export function defineApiBrain(member: ApiMember, deps: ApiBrainDeps): (ctx: Plu
         running.set(message.chatKey, abort);
         try {
           const persona = personaOf(ctx);
-          const r = await apiTurn({ member, model, transcript: deps.transcript, chatId: chat.id, system: systemPrompt(persona), persona, current, signal: abort.signal });
+          const r = await apiTurn({ member, model, transcript: deps.transcript, chatId: chat.id, system: systemPrompt(persona, undefined, ctx.memoryContext?.()), persona, current, signal: abort.signal });
           deps.transcript.add(chat.id, "user", current.record);
           deps.transcript.add(chat.id, "assistant", r.text, member.id, r.model);
           void maybeCompact({ transcript: deps.transcript, chatId: chat.id, budget: member.contextTokens, summarize: summarizer(member) });

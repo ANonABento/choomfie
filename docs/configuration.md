@@ -52,7 +52,7 @@ Editing `config.json` by hand still works. `ConfigManager`'s setters are what `/
 
 ## Brains (`brainChannels`, `brainAccess`)
 
-`brainChannels` maps a channel or thread id to the brain that answers there, written by `/brain set` (absent = `claude`). Threads inherit their parent's entry unless set directly; each thread is its own backend conversation. `brainAccess` (`/config`, default `owner`) decides who a non-Claude brain answers: `owner`, or everyone on the allowlist. Anyone it turns away is answered by Claude as usual. Neither key is ever an access list: whether someone may talk to Choomfie at all is still access.json, checked first.
+`brainChannels` maps a channel or thread id to the brain that answers there, written by `/brain set` (absent = `claude`). Threads inherit their parent's entry unless set directly; each thread is its own backend conversation. `brainAccess` (`/config`, default `owner`) decides who a non-Claude brain answers: `owner`, or everyone on the allowlist. Anyone it turns away is answered by Claude as usual. `/config` also has `free.providersOff` and `free.footer` for the free brain (see [free-brain.md](free-brain.md)). Neither key is ever an access list: whether someone may talk to Choomfie at all is still access.json, checked first.
 
 A brain channel only answers messages addressed to it (DM, @mention, reply). Ambient conversation-mode messages are dropped there, because a web-UI driver can't decide to stay quiet the way Claude does.
 

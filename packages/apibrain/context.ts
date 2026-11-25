@@ -79,11 +79,16 @@ export interface Persona {
 }
 
 /** The system prompt: who to be, where you are, and the chat's mode frame. */
-export function systemPrompt(persona: Persona | undefined, modeFrame?: string): string {
+/** Core memories past this many characters are cut (they ride on every answer call). */
+const MEMORY_CHARS = 2_000;
+
+export function systemPrompt(persona: Persona | undefined, modeFrame?: string, memories?: string): string {
   const who = persona ? `You are ${persona.name}. ${persona.personality.trim()}` : "You are a helpful assistant.";
+  const remembered = memories?.trim();
   return [
     who,
     "You're replying in a Discord chat. Use Discord markdown, keep replies concise unless asked for depth, and stay under about 1800 characters when you can.",
+    remembered && remembered.length > MEMORY_CHARS ? `${remembered.slice(0, MEMORY_CHARS)}\n…` : remembered,
     modeFrame?.trim(),
   ]
     .filter(Boolean)

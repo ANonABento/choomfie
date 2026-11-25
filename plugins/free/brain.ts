@@ -250,7 +250,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
     const persona = personaOf(ctx);
     // Only on the turns that need it: work meant for a brain with tools, answered by a text model.
     const frame = bucket(bucketId ?? "")?.brains.length ? NO_TOOLS_FRAME : undefined;
-    const r = await apiTurn({ member, model: t.model, transcript, chatId, system: systemPrompt(persona, frame), persona, current, signal, budget });
+    const r = await apiTurn({ member, model: t.model, transcript, chatId, system: systemPrompt(persona, frame, ctx.memoryContext?.()), persona, current, signal, budget });
     return { reply: { text: r.text || `(${member.label} sent an empty reply)` }, record: current.record, model: r.model };
   }
 

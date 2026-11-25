@@ -64,4 +64,6 @@ export interface PluginContext {
   ownerUserId?: string | null;
   /** Chat bindings (location → conversation). Only inside Choomfie. */
   chats?: ChatsApi;
+  /** The owner's core memories as prompt text (what Claude gets in its instructions); "" when none. Only inside Choomfie. */
+  memoryContext?(): string;
 }

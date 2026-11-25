@@ -24,6 +24,7 @@
 
 ### Fixed
 
+- **API brains never saw core memories.** The free brain and provider brains now get the same "Current Memories" Claude does (capped at 2,000 characters) on answer calls. `/config` gains `free.providersOff` and `free.footer`.
 - **A dead key cost a call after every restart.** Keys benched for "wants a card" (7 days) or "rejected" (6h) are saved by a fingerprint of the key (never the key) in `meta/apibrain-models.json` and stay benched across restarts; `apibrain doctor` re-checks them, and an answer clears the bench.
 - **Free brain's classifier spent ~100 hidden reasoning tokens per one-line answer.** Models seen thinking first are remembered and ranked below plain ones for tiny jobs (the classifier moved from gpt-oss-20b to qwen3.8-27b: 13 tokens, ~200 ms); a known thinker on a one-line job gets `reasoning_effort: low`, dropped for providers that refuse it. A reply that was all thinking fails over instead of posting nothing; stray `<think>` fragments are stripped before a turn is stored; probes time out after 15s, not 30s.
 - **OpenRouter's free models were all skipped.** Its `/models` now lists endpoints as paths (`/api/v1/chat/completions`), and the parser looked for the bare word `chat`.
