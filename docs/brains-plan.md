@@ -185,8 +185,8 @@ Different from routing: routing picks **who answers the user**; delegation is **
 - [x] Persistent benches: `no_credit` and `auth` key benches outlive a restart (by key fingerprint); `not_free` models already did.
 
 **Stage 2 — Web brains.** Exit: adding a site and keeping it logged in is as easy as `apibrain keys`, and Waymond answers.
-- [ ] Waymond: "the message box never appeared" — adapter fix (overlaps the owner's uncommitted `adapter.ts`).
-- [ ] `webbrain setup`: every site, logged in or not, `login` for the ones that aren't (mirrors `apibrain keys`).
+- [ ] Waymond: "the message box never appeared" — Ambition's composer redesign; the owner's uncommitted `adapter.ts` targets it. Profile is logged in (`webbrain sites`, Nov 24); verify with the owner's test, then commit.
+- [x] `webbrain sites` / `webbrain setup`: every site, logged in or not (headless check, sends nothing), then `login` for the ones that aren't.
 - [ ] More web members (Claude.ai, ChatGPT, …) via the `new-web-brain` skill; multi-profile web brains.
 - [ ] Web-brain compact: ask the site for a summary, open a new site conversation seeded with it.
 

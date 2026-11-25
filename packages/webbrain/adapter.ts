@@ -108,6 +108,12 @@ export interface SiteAdapter {
   engine?: EngineName;
   /** Link to a conversation, for messages that point the owner at the site. */
   chatUrl(ref?: string): string;
+  /**
+   * Is this profile signed in? For `webbrain sites`. Default: open `chatUrl()`
+   * and see whether the site keeps us there or sends us to sign in. Only for a
+   * site that shows a logged-out page at the chat URL instead of redirecting.
+   */
+  loggedIn?(page: Page): Promise<boolean>;
 
   turn(page: Page, input: TurnInput, ctx: TurnContext): Promise<TurnResult>;
   /**

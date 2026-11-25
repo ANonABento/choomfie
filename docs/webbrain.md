@@ -37,6 +37,8 @@ The `new-web-brain` skill (`.claude/skills/new-web-brain/`) walks a Claude Code 
 
 ## Owner commands
 
+- `bun run webbrain sites` — every web brain the plugins provide (any plugin whose `index.ts` exports `adapter`), and whether its profile is logged in: opened headless at `chatUrl()`, logged in if the site keeps it in the chat rather than sending it to sign in (an adapter can override with `loggedIn(page)`). Sends nothing. A profile the bot has open shows as in use.
+- `bun run webbrain setup` — the same list, then the login window for each site that isn't logged in, one at a time.
 - `bun run webbrain login <id>` — opens the site headed on its profile; sign in, close the window. Refuses while the profile is open elsewhere (Chrome's `SingletonLock`).
 - `bun run webbrain record <id> <url>` — headed, on `<id>`'s profile (so signing in here is the login). You send `Reply with exactly: pong` by hand; it writes `network.jsonl` (fetch/XHR/stream entries with clipped request and response bodies, **no headers**), `controls-*.json` and `aria-*.txt` (selector material, before and after), `urls.txt` and `meta.json` to `<data>/webbrain/<id>/recording/`. That holds account data: it stays in the data dir, never the repo.
 - `bun run webbrain doctor <id> [--headed]` — one real round trip through the adapter in a new chat; passes when the answer contains `pong`. Exit code 0/1. Sends a real message.

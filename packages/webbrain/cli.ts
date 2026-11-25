@@ -2,6 +2,8 @@
 /**
  * Web-brain tools for the owner, run on the machine hosting Choomfie.
  *
+ *   bun run webbrain sites               every web brain, logged in or not
+ *   bun run webbrain setup               open the login window for each one that isn't
  *   bun run webbrain login <id>          open the site headed on its own profile;
  *                                        sign in, then close the window
  *   bun run webbrain record <id> <url>   capture one hand-sent message, for
@@ -16,6 +18,7 @@
  * `record` needs no adapter yet — it's how you write one.
  */
 
+import { join } from "node:path";
 import { resolveDataDir } from "@choomfie/shared";
 import type { SiteAdapter } from "./adapter.ts";
 import { doctor, PONG_PROMPT } from "./doctor.ts";
@@ -23,9 +26,12 @@ import { ENGINES, engineFor, isEngine, launchContext, type EngineName } from "./
 import { detect, formatReport } from "./detect.ts";
 import { profileDir, profileInUse } from "./paths.ts";
 import { record } from "./record.ts";
+import { discoverAdapters, formatStatus, needsLogin, siteStatus } from "./sites.ts";
 
 const USAGE = [
   "usage:",
+  "  bun run webbrain sites",
+  "  bun run webbrain setup",
   "  bun run webbrain login <id>",
   "  bun run webbrain record <id> <url>",
   "  bun run webbrain doctor <id> [--headed]",
@@ -63,8 +69,67 @@ async function login(dataDir: string, adapter: SiteAdapter) {
   console.error(`Saved. Choomfie's ${adapter.label} brain will use this session.`);
 }
 
+/** One visible line from the terminal (enter alone = empty). */
+function promptLine(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    process.stderr.write(question);
+    let buf = "";
+    const onData = (d: Buffer) => {
+      buf += d.toString();
+      const nl = buf.indexOf("\n");
+      if (nl >= 0) {
+        process.stdin.off("data", onData);
+        process.stdin.pause();
+        resolve(buf.slice(0, nl).trim());
+      }
+    };
+    process.stdin.on("data", onData);
+    process.stdin.resume();
+  });
+}
+
+const PLUGINS_DIR = join(import.meta.dir, "..", "..", "plugins");
+
+/** `sites`: each web brain's login state. `setup`: then log in to each one that needs it. */
+async function sites(dataDir: string, setup: boolean): Promise<number> {
+  const adapters = await discoverAdapters(PLUGINS_DIR);
+  if (!adapters.length) {
+    console.error("No web brains: no plugin exports an `adapter`. Add one with the new-web-brain skill (docs/webbrain.md).");
+    return 0;
+  }
+  console.error("Checking each site's profile (opens it headless, sends nothing)…");
+  const statuses = [];
+  for (const adapter of adapters) {
+    const s = await siteStatus(dataDir, adapter);
+    statuses.push(s);
+    console.error(formatStatus(s));
+  }
+  const todo = adapters.filter((a, i) => needsLogin(statuses[i]));
+  if (!setup) {
+    console.error(
+      todo.length
+        ? "\nLog in: bun run webbrain setup (all of them) or bun run webbrain login <id>."
+        : "\nEvery site is logged in (or in use). Check one end to end: bun run webbrain doctor <id>."
+    );
+    return 0;
+  }
+  if (!todo.length) {
+    console.error("\nNothing to log in to.");
+    return 0;
+  }
+  for (const adapter of todo) {
+    const answer = await promptLine(`\n${adapter.label}: open its login window? [Y/n] `);
+    if (/^n/i.test(answer)) continue;
+    await login(dataDir, adapter);
+    console.error(formatStatus(await siteStatus(dataDir, adapter)));
+  }
+  console.error("\nThe bot picks up a new login on its next message to that site. Check one end to end: bun run webbrain doctor <id>.");
+  return 0;
+}
+
 const [command, id, ...rest] = process.argv.slice(2);
 try {
+  if (command === "sites" || command === "setup") process.exit(await sites(resolveDataDir(), command === "setup"));
   if (!command || !id) throw new Error(USAGE);
   if (!ID_RE.test(id)) throw new Error(`not a plugin id: ${id} (lowercase letters, digits, dashes)`);
   const dataDir = resolveDataDir();
