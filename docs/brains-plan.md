@@ -95,12 +95,13 @@ Instead of "Hand this to Waymond":
 
 ## The classifier
 
-- **Default:** the best models for the need `tiny` from the live lists (today Groq `gpt-oss-20b`, `qwen3.8-27b`, Gemini Flash-Lite). If none answers within 2.5s, local keyword rules.
+- **Default:** the best models for the need `tiny` from the live lists, models seen thinking first ranked lower (today Groq `qwen3.8-27b`). If none answers within 2.5s, local keyword rules.
+- **Next (stage 2):** a Jev-style classifier first — label scores from token probabilities, so its confidence can gate the LLM. See the work list.
 - **Cost:** each call spends the classifier provider's daily requests, once per message (messages of three words or fewer skip it).
 - **Google has no dedicated classifier model.** Options:
   - Flash-Lite as a zero-shot classifier (reported ~500 RPD free);
   - **`gemini-embedding`** (reported ~1,000 RPD free) as an embeddings classifier: embed each bucket's examples once, then per message one embedding and a nearest match. That's cheaper, faster and steadier than asking a model.
-- **Fully local:** the same embeddings classifier on Ollama (`nomic-embed-text` or similar, tens of ms on this Mac). This is the likely default once built. Zero-shot stays as the tie-breaker for low-confidence matches.
+- **Fully local:** the same embeddings classifier on Ollama (`nomic-embed-text` or similar, tens of ms on this Mac). Scored against the Jev classifier on the same labelled set before either becomes the default. Zero-shot stays as the tie-breaker for low-confidence matches.
 
 ## Providers
 
@@ -167,24 +168,44 @@ Different from routing: routing picks **who answers the user**; delegation is **
 - [x] 11 more providers: Cerebras, Mistral, Cohere, Z.ai, Aion, AxForge, Gonka, Runcrate, and keyless Kilo, LLM7, OVHcloud. Model lists parsed in each one's shape; every one probed.
 - [x] Tables rewritten for Discord, and speaker labels cut, on our side for every brain; the "don't sign your name" and "several people" prompt lines removed.
 - [x] Tool work that falls to a text model: told so for that turn only, and the reply says Waymond couldn't take it. The log records when a hand-off button was offered.
-
-**Next (in this order):**
-- [ ] **Commands audit, rest:** check `/stop`, `/clear`, `/resume`, `/config` (no `free` section), `/persona`, `/memory` (API brains don't see memories today) against free, a provider brain and Waymond.
 - [x] **Optimization stage, first pass (Nov 24).** Measured on real calls before cutting anything:
   - Classifier output was the waste: gpt-oss-20b spent 63–136 tokens (mostly hidden reasoning) per one-line JSON. Each model is now remembered as thinking-first or not (from `reasoning_tokens` / a `reasoning` field, kept in `apibrain-models.json`); for the `tiny` need a thinking model ranks below a plain one, so the classifier moved to Groq qwen3.8-27b (13 tokens, ~200 ms). A known thinker still on a one-line job gets `reasoning_effort: low` (gpt-oss-20b: 74 → 32 tokens); a provider that refuses the field (LLM7) is asked again without it and never sent it again.
   - An answer that was all thinking (budget spent before any text) fails over instead of posting nothing; a probe counts it as answering.
   - Probe timeout 30s → 15s (a timeout isn't recorded anyway; it's retried later).
   - `stripThinking` also drops a lone `</think>` prefix and an unclosed `<think>` tail, so stored turns never carry reasoning.
   - Not worth doing yet: the persona system prompt is ~210 tokens and a first answer's whole prompt ~290; per-bucket history would save ~100 tokens a call.
-  - Still open: a local classifier (embeddings or NLI zero-shot) — with the classifier at ~200 ms and ~15 tokens on Groq, it mainly buys independence from Groq; worth it with the embeddings item below.
-- [ ] "Hand off to…" any capable agent, via `Brain.capabilities`; `delegate` lists them too; `delegate` → free with `model:`.
-- [ ] Ranking from evidence (discovery, needs and availability are done): probe benchmark with checkable answers (`doctor --rank`), implicit signals, bandit ordering.
-- [ ] Embeddings classifier (Ollama local, Gemini embedding as the cloud option).
-- [ ] Compaction: big-context models get the original turns instead of the summary; structured summary (goals, decisions, facts, open questions, code and numbers verbatim); a real token count.
-- [ ] More providers: LM Studio (local), GitHub Models (its catalog isn't at `/models`).
-- [ ] `Try a bigger model` button.
-- [ ] Handoff summary by a cheap model (or Claude's compaction summary) instead of the raw excerpt.
-- [ ] Web-brain compact: ask the site for a summary, open a new site conversation seeded with it.
-- [ ] Harness kit (Codex / OpenCode / Gemini CLI as brains; T3 Code's agent wrappers as reference), then as `agentic` members.
+  - Moved to stage 2: a local / probability-scored classifier.
+- [x] OpenRouter's free models back (endpoint paths); SambaNova's "payment method required" benches the key a week (`no_credit`); Z.ai's free GLM flash models via `unlistedModels`; a keyless provider's auth error is about the model, not the provider.
 
-**Already on the roadmap:** more web members, multi-profile web brains, always-on mode, embeddings classifier, persistent cooldowns, non-LLM freemium.
+**Next, by stage.** Each stage has an exit condition; the next starts when it's met.
+
+**Stage 1 — Stabilize what's shipped.** Exit: the test checklist passes on the restarted bot and nothing in `apibrain log` surprises.
+- [ ] Owner's test pass (routing, tables, labels, Waymond fallback note, `/mode`, `/clear`, `/resume`, `/stop`, `/status`, `/usage`, `/brain <provider>`).
+- [ ] Waymond: "the message box never appeared" — adapter fix (overlaps the owner's uncommitted `adapter.ts`).
+- [ ] Commands audit, rest: `/config` (no `free` section), `/persona`, `/memory` (API brains don't see memories today) against free, a provider brain and Waymond.
+- [ ] Persistent benches: `no_credit`, `auth` and `not_free` outlive a restart (today a restart costs one wasted call per dead key).
+
+**Stage 2 — Classifier.** Exit: the labelled set picks the classifier and threshold by numbers, and the confidence it reports means something.
+- [ ] Labelled set: ~60 real messages from `calls.jsonl` with the right bucket; `bun run apibrain eval` scores any classifier on it (accuracy, confusion, latency, tokens).
+- [ ] Jev-style classifier: any Simple Jev endpoint (`POST /v1/classifier`, bucket descriptions as `criteria`), which scores each label from token probabilities instead of writing JSON, so its confidence is real. Default the keyless public demo (`simple-jev-demo-api.featherless.ai`, 2 RPS, 2k context, no guarantee); the same API runs locally (`simple-jev` Python server) by changing the URL. Measured Nov 24 on 12 messages: Qwen 4B 11/12 at ~420 ms (0.52 on the one genuinely ambiguous message), Gemma 12B 11/12 at ~800 ms, Qwen 27B 10/12; Groq zero-shot 11/12 but 0.85–1.00 on everything.
+- [ ] Pipeline: hard rules → Jev → below the threshold, the zero-shot LLM → keywords. Every stage optional; any failure falls through.
+- [ ] Embeddings classifier as the fully local option (Ollama `nomic-embed`, or Gemini embedding), scored on the same set; kept only if it beats or matches Jev.
+
+**Stage 3 — Routing quality.** Exit: a bucket's first pick is the best model that answers, by evidence, not by size.
+- [ ] Ranking from evidence: probe benchmark with checkable answers (`doctor --rank`), implicit signals (retries, hand-offs, rephrasing), bandit ordering.
+- [ ] `Try a bigger model` button.
+- [ ] More providers: LM Studio (local), GitHub Models (its catalog isn't at `/models`).
+
+**Stage 4 — Context and hand-offs.** Exit: switching brain or model mid-chat loses nothing that matters.
+- [ ] "Hand off to…" any capable agent, via `Brain.capabilities`; `delegate` lists them too; `delegate` → free with `model:`.
+- [ ] Handoff summary by a cheap model (or Claude's compaction summary) instead of the raw excerpt.
+- [ ] Compaction: big-context models get the original turns instead of the summary; structured summary (goals, decisions, facts, open questions, code and numbers verbatim); a real token count.
+- [ ] Web-brain compact: ask the site for a summary, open a new site conversation seeded with it.
+
+**Stage 5 — Web brains.** Exit: adding and keeping web brains logged in is as easy as `apibrain keys`.
+- [ ] `webbrain setup`: every site, logged in or not, `login` for the ones that aren't (mirrors `apibrain keys`).
+- [ ] More web members (Claude.ai, ChatGPT, …) via the `new-web-brain` skill; multi-profile web brains.
+
+**Stage 6 — Harness kit.** Codex / OpenCode / Gemini CLI as brains (T3 Code's agent wrappers as reference), then as `agentic` members.
+
+**Later (roadmap only):** always-on / ambient mode, per-channel free defaults, opt-in fallback to Claude when every free provider is limited, non-LLM freemium.

@@ -240,7 +240,7 @@
 - [ ] More web members — Claude.ai, ChatGPT, Gemini web, Grok, Perplexity, DeepSeek (record each with the `new-web-brain` skill)
 - [ ] Multi-profile web brains — several logged-in profiles per site, each with its own sticky proxy, as separate capacity units
 - [ ] Always-on / ambient mode — opt-in per channel: debounce bursts, reply / react / ignore gate (rules first), per-channel reply caps
-- [ ] Embeddings classifier stage (reuse `ollama-embeddings`) if zero-shot latency or accuracy disappoints
+- [ ] Classifier from evidence: a labelled set of real messages (`apibrain eval`); a Jev-style classifier (Simple Jev endpoint — keyless public demo or the same server run locally) scoring labels from token probabilities, the zero-shot LLM only below its threshold; embeddings as the fully local alternative
 - [ ] Persistent cooldowns; per-channel free defaults; opt-in fallback to Claude when every free provider is limited
 - [ ] Non-LLM freemium — image generation, TTS/STT, search, embeddings behind the same router pattern
 
