@@ -9,6 +9,7 @@
 export type { Plugin, ToolDef, ToolResult } from "./types.ts";
 export { text, err } from "./types.ts";
 export { errorMessage, parseResetAt, QuotaReachedError, isQuotaReached } from "./errors.ts";
+export { JsonlLog, readJsonl, nowIso } from "./jsonl-log.ts";
 
 // Plugin context
 export type { PluginContext, PluginConfig, McpTransport, NotificationMessage, SocialsConfig, SocialsPlatformConfig, ChoomfieConfig } from "./plugin-context.ts";

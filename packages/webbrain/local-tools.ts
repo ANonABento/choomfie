@@ -100,6 +100,13 @@ const LOOK_ONLY: Record<string, RegExp | true> = {
   uname: true,
   ps: true,
   vm_stat: true,
+  // Reading kernel values only: never `-w` or `name=value`.
+  sysctl: /^(?!.*(?:-w|=))[\w.\s-]*$/,
+  // Bare or -Q only: `-l`/`-p` simulate memory pressure.
+  memory_pressure: /^(-Q)?\s*$/,
+  nettop: /^-l\s*1\b/,
+  pgrep: true,
+  ioreg: /^-[lrwcp\d\s]+[\w\s-]*$/,
   which: true,
   wc: true,
   sort: true,

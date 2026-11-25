@@ -12,8 +12,7 @@
  * `.1` kept), so it never grows without bound.
  */
 
-import { appendFileSync, existsSync, mkdirSync, renameSync, statSync } from "node:fs";
-import { dirname } from "node:path";
+import { JsonlLog, nowIso } from "@choomfie/shared";
 import type { ChatMessage } from "./client.ts";
 
 export interface CallEntry {
@@ -57,8 +56,6 @@ export interface RouteEntry {
 
 export type LogEntry = CallEntry | RouteEntry;
 
-const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
-
 /** Messages as they went out, minus image bytes. */
 export function redact(messages: ChatMessage[]): ChatMessage[] {
   return messages.map((m) =>
@@ -73,23 +70,11 @@ export function redact(messages: ChatMessage[]): ChatMessage[] {
   );
 }
 
-export class CallLog {
-  constructor(
-    readonly file: string | null,
-    private maxBytes = DEFAULT_MAX_BYTES
-  ) {
-    if (file) mkdirSync(dirname(file), { recursive: true });
-  }
-
-  write(entry: LogEntry): void {
-    if (!this.file) return;
-    try {
-      if (existsSync(this.file) && statSync(this.file).size > this.maxBytes) renameSync(this.file, `${this.file}.1`);
-      appendFileSync(this.file, `${JSON.stringify(entry)}\n`);
-    } catch (e) {
-      console.error(`[apibrain] couldn't write the call log: ${e instanceof Error ? e.message : e}`);
-    }
+/** `<data>/apibrain/calls.jsonl` (the shared rolling JSONL log). */
+export class CallLog extends JsonlLog<LogEntry> {
+  constructor(file: string | null, maxBytes?: number) {
+    super(file, maxBytes, "apibrain");
   }
 }
 
-export const nowIso = () => new Date().toISOString();
+export { nowIso };

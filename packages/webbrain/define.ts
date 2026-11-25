@@ -13,6 +13,8 @@ import { basename, join } from "node:path";
 import {
   errorMessage,
   isQuotaReached,
+  JsonlLog,
+  nowIso,
   framePrompt,
   parseTaskList,
   pushBrainReply,
@@ -27,7 +29,7 @@ import type { Page } from "patchright";
 import { LoginRequiredError, type SiteAdapter, type TurnContext, type TurnResult } from "./adapter.ts";
 import { engineFor, launchContext } from "./engine/launch.ts";
 import { createHuman, Pacer } from "./engine/human.ts";
-import { outboxDir, profileDir } from "./paths.ts";
+import { outboxDir, profileDir, siteDir } from "./paths.ts";
 import { hasProfile } from "./sites.ts";
 import { TabPool, type ContextLike } from "./tabs.ts";
 import { LateWatch } from "./watch.ts";
@@ -72,10 +74,11 @@ export function originalName(inboxPath: string): string {
 }
 
 /** What the Discord answer says beyond the site's own text. */
-export function answerText(result: Pick<TurnResult, "text" | "stopped" | "background">, label: string): string {
+export function answerText(result: Pick<TurnResult, "text" | "stopped" | "background" | "files">, label: string): string {
   if (result.stopped) return `${result.text ? `${result.text}\n\n` : ""}⏹️ Stopped.`;
   if (result.background) return `${result.text}\n\n-# I'll post the results here when ${label} finishes.`;
-  return result.text || `(${label} finished without a text reply)`;
+  // A picture or track alone is the answer.
+  return result.text || (result.files?.length ? "" : `(${label} finished without a text reply)`);
 }
 
 /** The message as the site sees it: the chat's mode frame (if any), then the framed message. */
@@ -133,6 +136,10 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
     const engine = engineFor(ctx.DATA_DIR, adapter);
     const profile = profileDir(ctx.DATA_DIR, adapter.id, engine);
     const outbox = outboxDir(ctx.DATA_DIR, adapter.id);
+    /** What each turn did (`bun run webbrain log <id>`): the daemon's stderr isn't kept anywhere. */
+    const turnLog = new JsonlLog(join(siteDir(ctx.DATA_DIR, adapter.id), "turns.jsonl"), undefined, "webbrain");
+    const logEvent = (chatKey: string, event: string, detail: Record<string, unknown> = {}) =>
+      turnLog.write({ at: nowIso(), chat: chatKey, event, ...detail });
     const human = createHuman(new Pacer());
     const timeoutMs = opts.turnTimeoutMs ?? 15 * 60_000;
     const workTimeoutMs = opts.workTurnTimeoutMs ?? 45 * 60_000;
@@ -235,7 +242,9 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
           // Run (or not), hand the outcome to the site, and post its answer when it comes.
           void (async () => {
             const results = approve ? await runAll(run.cmds) : [];
-            const content = approve ? resultsPrompt(results) : "[The owner declined to run that. Answer without it, or suggest another way.]";
+            if (!approve) logEvent(chatKey, "declined", { cmds: run.cmds });
+            for (const r of results) logEvent(chatKey, "ran", { cmd: r.cmd, exit: r.code, auto: false, ...(r.timedOut ? { timedOut: true } : {}) });
+            const content = approve ? resultsPrompt(results) : "[The owner declined to run that, so it didn't run. Say so in a line and ask what they'd like instead.]";
             const reply = await brain.send({ chatKey, content, filePaths: [], meta: { chat_id: chatKey, role: "owner", [TOOL_RESULT]: "1" } }, ctx);
             await pushBrainReply(adapter.id, chatKey, results.length ? { ...reply, text: `${reply.text}\n${ranNote(results)}` } : reply);
           })().catch((e) => pushBrainReply(adapter.id, chatKey, { text: `⚠️ ${errorMessage(e)}` }));
@@ -284,6 +293,7 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
             .finally(() => (statusBusy = false));
         };
         const notice = (line: string) => {
+          logEvent(message.chatKey, "notice", { line });
           void (relayProgress ? relayProgress(line) : channel?.send(quiet(line)))?.catch(() => {});
         };
 
@@ -331,7 +341,28 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
                 human,
                 timeoutMs: isWorkMode(mode) ? workTimeoutMs : timeoutMs,
               };
-              return adapter.turn(page, { text: prompt, files: attach, mode }, tctx);
+              const t0 = Date.now();
+              logEvent(message.chatKey, "start", { ref: turn.ref ?? null, mode: mode ?? null, said: message.content.slice(0, 200), prompt: prompt.slice(-200), files: attach.map((f) => basename(f)) });
+              tctx.log = (event, detail) => logEvent(message.chatKey, event, { ref: turn.ref ?? null, ...detail });
+              return adapter.turn(page, { text: prompt, files: attach, mode }, tctx).then(
+                (r) => {
+                  logEvent(message.chatKey, "end", {
+                    ref: r.ref,
+                    ms: Date.now() - t0,
+                    text: r.text.slice(0, 500),
+                    chars: r.text.length,
+                    ...(r.files?.length ? { out: r.files.map((f) => `${f.name} (${f.data.length} B)`) } : {}),
+                    ...(r.codeBlocks?.length ? { codeBlocks: r.codeBlocks.length } : {}),
+                    ...(r.stopped ? { stopped: true } : {}),
+                    ...(r.background ? { background: true } : {}),
+                  });
+                  return r;
+                },
+                (e) => {
+                  logEvent(message.chatKey, "error", { ms: Date.now() - t0, error: errorMessage(e), kind: e instanceof Error ? e.name : typeof e });
+                  throw e;
+                }
+              );
             });
           let result = await runTurn(text, files);
           // The site cut the answer short (a tool-call cap): carry on, keeping files from every part.
@@ -365,6 +396,7 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
             if (!cmds.every(isLookOnly)) {
               const id = `run-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
               pendingRuns.set(id, { chatKey: message.chatKey, cmds });
+              logEvent(message.chatKey, "ask", { cmds });
               waiting = {
                 id,
                 title: `${adapter.label} wants to run this on your Mac`,
@@ -376,6 +408,7 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
             }
             progress(`🔧 running ${cmds.map((c) => `\`${c.slice(0, 60)}\``).join(", ")}`);
             const results = await runAll(cmds);
+            for (const r of results) logEvent(message.chatKey, "ran", { cmd: r.cmd, exit: r.code, auto: true, ...(r.timedOut ? { timedOut: true } : {}) });
             ran.push(...results);
             turn.ref = result.ref;
             chats.setBackendRef(chat.id, result.ref);

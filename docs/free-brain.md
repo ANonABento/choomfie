@@ -100,8 +100,8 @@ message → a member mode, or a web member holding the chat?  → that member (l
   - through one of its modes (`/mode cad`);
   - when you click **Hand this to Waymond**, offered under an API answer when the classifier is sure (≥ `suggestAt`, default 0.75) that the message is a job for it. The click resends that message to Waymond, with a recap of what it missed.
 - **Once a web member has answered, it holds the chat.** `/model` shows it, and every message goes to it, with no classifier call, until you hand it back.
-- **Handing back:** every reply from a holding member carries a **Hand back to free models** button (an older reply's button works too). It clears the hold and the member mode, and says so; nothing is resent. The member's replies are already in the chat's transcript, so the free models pick up from there, and the member gets a recap of what it missed if it's handed the chat again. `/model auto` does the same without the note.
-- **A holding member that fails never moves silently.** The reply says what went wrong and offers **Retry** and **Answer with free models**; the second answers that message with an API model and releases the chat.
+- **Handing back:** every reply from a holding member carries a **Back to auto** button (an older reply's button works too). It clears the hold and the member mode, and says so; nothing is resent. The member's replies are already in the chat's transcript, so the free models pick up from there, and the member gets a recap of what it missed if it's handed the chat again. `/model auto` does the same without the note.
+- **A holding member that fails never moves silently.** The reply says what went wrong and offers **Retry** and **Answer with another model**; the second answers that message with an API model and releases the chat.
 - **`/model` pins** a member (`groq`), a model (`groq:openai/gpt-oss-120b`) or a web member (`waymond`). A pinned API model that can't answer falls back to the other API models, and the reply says who answered. An image the pinned model can't see goes to a vision model for that one message.
 
 - **Buckets** (`plugins/free/buckets.ts`) are kinds of message, each naming a **need**, never a model:
@@ -146,7 +146,7 @@ message → a member mode, or a web member holding the chat?  → that member (l
 
   If nothing answers, the reply says when to try again, or suggests `/brain claude`.
 
-  A member that holds the chat and runs out of quota doesn't get a Retry button (it won't help): the reply says when it's back and offers **Hand this to …** for another member that does the same kind of work (OpenCode when Antigravity is out), plus **Answer with free models**.
+  A member that holds the chat and runs out of quota doesn't get a Retry button (it won't help): the reply says when it's back and offers **Hand this to …** for another member that does the same kind of work (OpenCode when Antigravity is out), plus **Answer with another model**.
 
 ## Which models
 

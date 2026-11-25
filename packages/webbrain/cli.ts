@@ -13,18 +13,19 @@
  *   bun run webbrain doctor <id> --detect [--engine patchright|cloak|all]
  *                                        how botty the engine looks (throwaway
  *                                        profile, bot.sannysoft.com + own probes)
+ *   bun run webbrain log <id> [-n 40]    what the last turns did (turns.jsonl)
  *
  * <id> is a plugin that exports `adapter` (e.g. `waymond` → @choomfie/waymond).
  * `record` needs no adapter yet — it's how you write one.
  */
 
 import { join } from "node:path";
-import { resolveDataDir } from "@choomfie/shared";
+import { readJsonl, resolveDataDir } from "@choomfie/shared";
 import type { SiteAdapter } from "./adapter.ts";
 import { doctor, PONG_PROMPT, TOOLS_PROMPT } from "./doctor.ts";
 import { ENGINES, engineFor, isEngine, launchContext, type EngineName } from "./engine/launch.ts";
 import { detect, formatReport } from "./detect.ts";
-import { profileDir, profileInUse } from "./paths.ts";
+import { profileDir, profileInUse, siteDir } from "./paths.ts";
 import { record } from "./record.ts";
 import { discoverAdapters, formatStatus, needsLogin, siteStatus } from "./sites.ts";
 
@@ -37,6 +38,7 @@ const USAGE = [
   "  bun run webbrain doctor <id> [--headed]",
   "  bun run webbrain doctor <id> --tools [--headed]   (does it ask for ```run commands? nothing is run)",
   "  bun run webbrain doctor <id> --detect [--engine patchright|cloak|all] [--headed]",
+  "  bun run webbrain log <id> [-n 40]",
 ].join("\n");
 
 const ID_RE = /^[a-z0-9-]+$/;
@@ -131,7 +133,15 @@ try {
   if (!ID_RE.test(id)) throw new Error(`not a plugin id: ${id} (lowercase letters, digits, dashes)`);
   const dataDir = resolveDataDir();
 
-  if (command === "login") {
+  if (command === "log") {
+    const n = Number(rest[rest.indexOf("-n") + 1]) || 40;
+    const entries = readJsonl<Record<string, unknown>>(join(siteDir(dataDir, id), "turns.jsonl"), n);
+    if (!entries.length) console.error(`No turns logged for ${id} yet.`);
+    for (const { at, chat, event, ...rest } of entries) {
+      const time = String(at).replace("T", " ").slice(0, 19);
+      console.log(`${time}  ${String(chat).slice(-6)}  ${String(event).padEnd(8)} ${JSON.stringify(rest)}`);
+    }
+  } else if (command === "login") {
     await login(dataDir, await loadAdapter(id));
   } else if (command === "record") {
     const url = rest[0];

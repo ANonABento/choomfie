@@ -304,6 +304,7 @@ describe("answerText", () => {
     expect(answerText({ text: "half", stopped: true }, "X")).toBe("half\n\n⏹️ Stopped.");
     expect(answerText({ text: "on it", background: true }, "X")).toContain("when X finishes");
     expect(answerText({ text: "" }, "X")).toBe("(X finished without a text reply)");
+    expect(answerText({ text: "", files: [{ name: "a.png", data: new Uint8Array(1) }] }, "X")).toBe("");
   });
 });
 

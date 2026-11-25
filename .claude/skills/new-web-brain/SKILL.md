@@ -42,7 +42,7 @@ Fill every `TODO` in `adapter.ts`. Rules:
 - Throw `LoginRequiredError` for a logged-out page and `LayoutChangedError` for a missing control, so the owner gets an actionable message.
 - Throw `QuotaReachedError(label, parseResetAt(text))` (from `@choomfie/webbrain`) when the site says its free allowance is spent ("You've reached your limit… resets in 3 hours"): free benches the brain until then. If the recording doesn't show that message, leave a `TODO` naming it.
 - Set `terms: { automation, checked, note }` from the site's terms of use (read them; `forbidden` if they ban bots or automated access).
-- If it generates images, music or video, return them as `files` and add the id to the `media` bucket's `brains` in `plugins/free/buckets.ts`.
+- If it generates images, music or video, return them as `files` (a reply can be files alone: give `waitForSettledText` a `hasContent`, and treat a picture or track still loading as busy; Gemini's pictures are `blob:` URLs to copy through a canvas, its tracks an https `<video>` src for `pageFetchBytes`) and add the id to the `media` bucket's `brains` in `plugins/free/buckets.ts`.
 - If the site has a stop button, implement `stop(page, ref)`; if answers can carry follow-up options, return them as `choices`.
 - Set `localTools: true` (the owner can have it run commands on this Mac) unless the site has tools of its own. If answers are read with `innerText`, also return `codeBlocks` read from the page (see `plugins/webbrains/sites/gemini.ts`), and check with `bun run webbrain doctor <id> --tools`.
 - Keep it to what the recording shows. Don't guess endpoints.
@@ -56,6 +56,10 @@ bun run webbrain doctor <id>            # add --headed to watch it
 ```
 
 It sends a real message in a new chat and expects `pong`. Iterate on the adapter until it passes. If the site blocks the automated browser (a captcha, "this browser may not be secure"), stop and tell the user rather than working around it.
+
+## 5b. Dogfood
+
+`doctor` only checks a pong in a new chat. Before handing it over, run real messages through the kit (`defineWebBrain` with your adapter, on a copy of the profile so the bot isn't disturbed): a follow-up in a reopened conversation (a stale answer read as the new one is the classic bug), an attachment, and each kind of media it makes. Read `bun run webbrain log <id>` afterwards.
 
 ## 6. Enable
 

@@ -53,6 +53,8 @@ const CONVERSATION_RE = /\/app\/([0-9a-f]{8,})/;
 const QUOTA_RE = /you(?:'ve| have) reached (?:your|the) (?:daily |usage )?limit|limit (?:resets|will reset)|try again (?:tomorrow|later)|out of (?:free )?(?:uses|generations)/i;
 
 const MAX_IMAGE_BYTES = 9 * 1024 * 1024;
+/** Discord's attachment limit for a bot (10 MB), less some room. */
+const MAX_MEDIA_BYTES = 9.5 * 1024 * 1024;
 
 /** Wait out (or Escape) any open menu's backdrop, which swallows clicks. */
 async function closeOverlays(page: Page): Promise<void> {
@@ -140,6 +142,11 @@ async function answerMarkdown(page: Page): Promise<string> {
       const content = answers[answers.length - 1]?.querySelector(textSel as string) as HTMLElement | null;
       if (!content) return "";
       let text = content.innerText;
+      // A track's or picture's player puts its controls' text ("0:00 / 2:35") in the answer.
+      for (const media of content.querySelectorAll("generated-music, generated-video, generated-image, video-player")) {
+        const shown = (media as HTMLElement).innerText;
+        if (shown?.trim() && text.includes(shown)) text = text.replace(shown, "");
+      }
       for (const block of content.querySelectorAll("code-block")) {
         const whole = (block as HTMLElement).innerText;
         const code = ((block.querySelector("code") ?? block.querySelector("pre") ?? block) as HTMLElement).innerText.replace(/\n+$/, "");
@@ -176,20 +183,67 @@ async function codeBlocks(page: Page): Promise<{ lang?: string; code: string }[]
   }, NEW_ANSWER);
 }
 
+/** Pictures, tracks and videos Gemini makes, each in its own element. */
+const MEDIA = "generated-image, generated-music, generated-video";
+
 /**
- * A picture Gemini is still making: a `<generated-image>` whose image hasn't
- * loaded. Its text usually settles first ("Here is a picture of …"), so the
- * turn counts as busy until the picture is there.
+ * A picture or track Gemini is still making: its element is there but the
+ * `<img>` hasn't loaded, or the player has no source yet. Its text (if any)
+ * usually settles first ("Here is a picture of …"), so the turn counts as
+ * busy until it's there.
  */
-async function imagesPending(page: Page): Promise<boolean> {
-  return page.evaluate((sel: string) => {
+async function mediaPending(page: Page): Promise<boolean> {
+  return page.evaluate(
+    ([sel, media]) => {
+      const answers = document.querySelectorAll(sel);
+      const answer = answers[answers.length - 1];
+      return [...(answer?.querySelectorAll(media) ?? [])].some((el) => {
+        if (el.tagName.toLowerCase() === "generated-image") {
+          const img = el.querySelector("img");
+          return !img || !img.complete || img.naturalWidth === 0;
+        }
+        const player = el.querySelector("video, audio") as HTMLMediaElement | null;
+        return !(player?.currentSrc || player?.src);
+      });
+    },
+    [NEW_ANSWER, MEDIA] as [string, string]
+  );
+}
+
+/** The answer has a picture or track (an answer can be only that, no text). */
+async function hasMedia(page: Page): Promise<boolean> {
+  return page.evaluate(
+    ([sel, media]) => {
+      const answers = document.querySelectorAll(sel);
+      return !!answers[answers.length - 1]?.querySelector(media);
+    },
+    [NEW_ANSWER, MEDIA] as [string, string]
+  );
+}
+
+/**
+ * Tracks and videos in the answer: a `<video>` in `<generated-music>` /
+ * `<generated-video>` whose source is a signed https download (an .mp4; a
+ * track comes with its cover art). Fetched through the page.
+ */
+async function answerTracks(page: Page): Promise<{ files: BrainFile[]; tooBig: string[] }> {
+  const found = await page.evaluate((sel: string) => {
     const answers = document.querySelectorAll(sel);
     const answer = answers[answers.length - 1];
-    return [...(answer?.querySelectorAll("generated-image") ?? [])].some((g) => {
-      const img = g.querySelector("img");
-      return !img || !img.complete || img.naturalWidth === 0;
+    return [...(answer?.querySelectorAll("generated-music, generated-video") ?? [])].flatMap((el) => {
+      const player = el.querySelector("video, audio") as HTMLMediaElement | null;
+      const src = player?.currentSrc || player?.src;
+      return src?.startsWith("https:") ? [{ src, kind: el.tagName.toLowerCase() === "generated-music" ? "song" : "video" }] : [];
     });
   }, NEW_ANSWER);
+  const files: BrainFile[] = [];
+  const tooBig: string[] = [];
+  for (const [n, { src, kind }] of found.entries()) {
+    const data = await pageFetchBytes(page, src, MAX_MEDIA_BYTES).catch(() => null);
+    if (data) files.push({ name: `gemini-${kind}-${n + 1}.mp4`, data });
+    else tooBig.push(kind);
+  }
+  return { files, tooBig };
 }
 
 /**
@@ -287,7 +341,8 @@ export const geminiAdapter: SiteAdapter = {
     const reply = await waitForSettledText(() => answerMarkdown(page), {
       timeoutMs: t.timeoutMs,
       quietMs: 3_000,
-      isBusy: async () => (await page.locator(SELECTORS.busy).count()) > 0 || (await imagesPending(page)),
+      isBusy: async () => (await page.locator(SELECTORS.busy).count()) > 0 || (await mediaPending(page)),
+      hasContent: () => hasMedia(page),
       stopRequested: t.stopRequested,
       onTick: (ms) => t.progress(`⏳ ${ID.label} is writing (${Math.round(ms / 1000)}s)`),
     });
@@ -298,15 +353,21 @@ export const geminiAdapter: SiteAdapter = {
     while (lines.length > 1 && names.has(lines.at(-1)!.trim())) lines.pop();
     const tidy = lines.join("\n").trim();
 
-    // A picture can start loading just after the text settles: give it a moment, then wait for it.
+    // A picture or track can start loading just after the text settles: give it a moment, then wait for it.
     await page.waitForTimeout(1_500);
-    for (let waited = 0; waited < 120_000 && !t.stopRequested() && (await imagesPending(page)); waited += 1_000) {
-      t.progress(`⏳ ${ID.label} is making the picture`);
+    const waitStart = Date.now();
+    while (Date.now() - waitStart < 180_000 && !t.stopRequested() && (await mediaPending(page))) {
+      t.progress(`⏳ ${ID.label} is making the picture or track`);
       await page.waitForTimeout(1_000);
     }
-    const files = await answerImages(page);
+    if (Date.now() - waitStart > 2_500) t.log?.("media-wait", { ms: Date.now() - waitStart, stillPending: await mediaPending(page) });
+    const tracks = await answerTracks(page);
+    const files = [...(await answerImages(page)), ...tracks.files];
+    if (tracks.tooBig.length) t.log?.("media-skipped", { kinds: tracks.tooBig });
+    const note = tracks.tooBig.length ? `\n-# The ${tracks.tooBig.join(" and ")} is too big to attach here (over 10 MB): open it on gemini.google.com.` : "";
     const blocks = await codeBlocks(page).catch(() => []);
-    return { text: tidy, ref, stopped: t.stopRequested(), ...(files.length ? { files } : {}), ...(blocks.length ? { codeBlocks: blocks } : {}) };
+    if (!tidy && !files.length) t.log?.("empty", { media: await hasMedia(page) });
+    return { text: tidy + note, ref, stopped: t.stopRequested(), ...(files.length ? { files } : {}), ...(blocks.length ? { codeBlocks: blocks } : {}) };
   },
 
   async stop(page) {

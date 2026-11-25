@@ -11,6 +11,12 @@ export interface SettleOptions {
   timeoutMs: number;
   /** Still generating? (e.g. a visible stop button). */
   isBusy?: () => Promise<boolean>;
+  /**
+   * The answer has something besides text (a picture, a track), so an empty
+   * text can settle too. Without it an answer that's only a picture never
+   * counts as done.
+   */
+  hasContent?: () => Promise<boolean>;
   stopRequested?: () => boolean;
   /** Each poll, with elapsed ms and the text so far. */
   onTick?: (elapsedMs: number, text: string) => void;
@@ -34,7 +40,7 @@ export async function waitForSettledText(read: () => Promise<string>, opts: Sett
     }
     if (opts.stopRequested?.()) return last;
     const busy = opts.isBusy ? await opts.isBusy().catch(() => false) : false;
-    if (last && !busy && now - changedAt >= quietMs) return last;
+    if (!busy && now - changedAt >= quietMs && (last || (opts.hasContent && (await opts.hasContent().catch(() => false))))) return last;
     opts.onTick?.(now - started, last);
     if (now - started > opts.timeoutMs) {
       throw new Error(`no settled answer after ${Math.round((now - started) / 1000)}s`);

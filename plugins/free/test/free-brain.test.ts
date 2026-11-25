@@ -183,13 +183,13 @@ describe("free brain routing", () => {
     const t = setup();
     t.classifier.next = { bucket: "agentic", confidence: 1 };
     const held = await t.brain.send(msg("make me a website"), t.ctx);
-    expect(held.choices).toEqual(["Hand back to free models"]);
+    expect(held.choices).toEqual(["Back to auto"]);
     await t.brain.send(msg("add a footer"), t.ctx);
     expect(t.web.got.length).toBe(2);
 
     // An older reply's button still works after another message.
-    const back = await t.brain.send(msg("Hand back to free models"), t.ctx);
-    expect(back.text).toStartWith("↩️ Back to free models");
+    const back = await t.brain.send(msg("Back to auto"), t.ctx);
+    expect(back.text).toStartWith("↩️ Back to auto");
     expect(t.web.got.length).toBe(2);
     expect(t.chats.bound("chan", "free")!.model).toBeNull();
 
@@ -220,17 +220,17 @@ describe("free brain routing", () => {
     expect((await t.brain.send(msg("thanks, unrelated: how are you doing"), t.ctx)).text).toStartWith("fast answer");
   });
 
-  test("a holding web member that fails doesn't move silently: Retry, or Answer with free models", async () => {
+  test("a holding web member that fails doesn't move silently: Retry, or Answer with another model", async () => {
     const t = setup();
     t.classifier.next = { bucket: "agentic", confidence: 1 };
     await t.brain.send(msg("start the project"), t.ctx);
     t.web.fail = "site is down";
     const r = await t.brain.send(msg("now add tests"), t.ctx);
     expect(r.text).toStartWith("⚠️ Waymond couldn't answer: site is down");
-    expect(r.choices).toEqual(["Retry", "Answer with free models"]);
+    expect(r.choices).toEqual(["Retry", "Answer with another model"]);
     expect(t.smart.calls.length + t.fast.calls.length).toBe(0);
 
-    const released = await t.brain.send(msg("Answer with free models"), t.ctx);
+    const released = await t.brain.send(msg("Answer with another model"), t.ctx);
     expect(released.text).toStartWith("smart answer");
     expect(t.smart.calls[0].messages.at(-1)!.content).toBe("now add tests");
     expect(t.chats.bound("chan", "free")!.model).toBeNull();
@@ -248,7 +248,7 @@ describe("free brain routing", () => {
     const r = await t.brain.send(msg("and the biggest folders?"), t.ctx);
     expect(r.text).toStartWith("⚠️ Antigravity is out of its free allowance (back in ~3h)");
     // Retrying won't help: no Retry button.
-    expect(r.choices).toEqual(["Hand this to Opencode", "Answer with free models"]);
+    expect(r.choices).toEqual(["Hand this to Opencode", "Answer with another model"]);
     expect((await t.brain.status!()).join("\n")).toMatch(/Antigravity\*\* — cooling 3h \(out of quota\)/);
 
     const handed = await t.brain.send(msg("Hand this to Opencode"), t.ctx);

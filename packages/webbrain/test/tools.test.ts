@@ -36,6 +36,10 @@ describe("waitForSettledText", () => {
     expect(await waitForSettledText(async () => "half", { timeoutMs: 1000, isBusy: async () => true, stopRequested: () => true })).toBe("half");
     await expect(waitForSettledText(async () => "", { pollMs: 5, timeoutMs: 30 })).rejects.toThrow("no settled answer");
   });
+
+  test("an answer that's only a picture (no text) settles when hasContent says so", async () => {
+    expect(await waitForSettledText(async () => "", { quietMs: 0, pollMs: 5, timeoutMs: 1_000, hasContent: async () => true })).toBe("");
+  });
 });
 
 describe("small pieces", () => {

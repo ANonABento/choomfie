@@ -31,7 +31,7 @@ Checked Nov 24, 2026:
 
 ## In the free brain
 
-Harnesses are free's members for the `local` bucket (work on this computer), Antigravity first, OpenCode if it's out of quota or failing. Like Waymond, one takes a chat on its first message or through **Hand this to …**, holds it while the work goes on, and gives it back with the **Hand back to free models** button under each of its replies (see [free-brain.md](free-brain.md)). Its folder is per harness chat, so files carry across turns; the free models see its replies, not its files.
+Harnesses are free's members for the `local` bucket (work on this computer), Antigravity first, OpenCode if it's out of quota or failing. Like Waymond, one takes a chat on its first message or through **Hand this to …**, holds it while the work goes on, and gives it back with the **Back to auto** button under each of its replies (see [free-brain.md](free-brain.md)). Its folder is per harness chat, so files carry across turns; the free models see its replies, not its files.
 
 **Out of quota:** a failed run whose output matches the spec's `quota` pattern (default `QUOTA_PATTERN`: `RESOURCE_EXHAUSTED`, "quota exhausted", "usage limit", 429, …) throws `QuotaReachedError` with the reset time read from the output (`parseResetAt`). `/brain antigravity` shows it as the answer; free benches the harness until then and offers the other one.
 

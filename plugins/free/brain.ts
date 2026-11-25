@@ -12,7 +12,7 @@
  *     (`/mode cad`), or when you accept "Hand this to Waymond". Once it has
  *     answered, the chat is on it (`chat.model`, shown by `/model`) until
  *     `/model auto`. If it fails, nothing moves silently: the reply offers
- *     Retry and "Answer with free models".
+ *     Retry and "Answer with another model".
  *
  * `/model` pins a member or `member:model`; a pinned API model that can't
  * answer falls back to the other API models, and the reply says so.
@@ -82,9 +82,13 @@ const LOGIN_COOLDOWN_MS = 3_600_000;
 const QUOTA_COOLDOWN_MS = 3_600_000;
 
 export const RETRY_CHOICE = "Retry";
-export const RELEASE_CHOICE = "Answer with free models";
-/** Under a member's reply while it holds the chat: give the chat back to the free models. */
-export const HAND_BACK_CHOICE = "Hand back to free models";
+export const RELEASE_CHOICE = "Answer with another model";
+/**
+ * Under a member's reply while it holds the chat: let free pick a model per
+ * message again (same as `/model auto`). Not "back to the free models": the
+ * holder (Gemini web, Antigravity) is free too.
+ */
+export const HAND_BACK_CHOICE = "Back to auto";
 export const handChoice = (label: string) => `Hand this to ${label}`;
 
 export interface FreeBrainDeps {
@@ -374,7 +378,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         if (chat.model) chats.setModel?.(chat.id, null);
         if (chat.mode && memberMode(chat.mode)) chats.setMode?.(chat.id, null);
         lastRoute.delete(incoming.chatKey);
-        return { text: `↩️ Back to free models. They have ${label(force.from)}'s replies in this chat's history; \`/model ${force.from}\` to hand it back.` };
+        return { text: `↩️ Back to auto: free picks the model per message again, and it has ${label(force.from)}'s replies in this chat's history; \`/model ${force.from}\` to hand it back.` };
       }
       if (force?.kind === "release" && holderOf(chat)) {
         chats.setModel?.(chat.id, null);
@@ -423,7 +427,10 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         const member = routed.target.member;
         const r: Route = { member, model, ...(routed.target.model ? { asked: routed.target.model } : {}), bucket: decision.bucket, by: decision.by, latencyMs: routed.latencyMs, at: Date.now() };
         transcript.add(chat.id, "user", record);
-        if (reply.text) transcript.add(chat.id, "assistant", reply.text, member, model);
+        // A picture or track alone still goes in the transcript, so the next model knows it was sent.
+        const sent = reply.files?.length ? `[attached: ${reply.files.map((f) => f.name).join(", ")}]` : "";
+        const said = [reply.text, sent].filter(Boolean).join("\n");
+        if (said) transcript.add(chat.id, "assistant", said, member, model);
         // A web member that answered now holds the chat (until `/model auto`).
         if (!members.has(member) && chat.model !== member) chats.setModel?.(chat.id, member);
         lastRoute.set(message.chatKey, r);

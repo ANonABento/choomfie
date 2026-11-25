@@ -41,7 +41,7 @@ Choomfie's chat store (`chats` / `chat_bindings`) is the **index** for every bra
      - through a member mode;
      - or by your click ("Hand this to Waymond").
    - **Once a web member has answered, it holds the chat** (`chat.model`) until `/model auto`.
-   - **A holding member that fails never moves silently:** Retry · Answer with free models.
+   - **A holding member that fails never moves silently:** Retry · Answer with another model.
    - **One-turn override:** an image the pinned model can't see goes to a vision model.
 2. **`/mode` = work modes only** (decided). In `free` it lists the web members' modes; picking one routes to that member.
 3. **`/model` belongs to the brain** (decided). Each brain lists its own models; the pick is stored on the chat.
@@ -91,7 +91,7 @@ Park until the multi-brain and free systems are working and tested. Today a mode
 Instead of "Hand this to Waymond":
 - **Hand off to…** offers one button per agent that could take the job, and you choose.
 - **Agents declare what they can do** (`Brain.capabilities`: `agentic`, `image-gen`, `web-search`, …), so no bucket names a brain.
-- **Today's lock applies to whoever you pick.** It holds the chat until `/model auto`, and if it fails you get Retry or Answer with free models.
+- **Today's lock applies to whoever you pick.** It holds the chat until `/model auto`, and if it fails you get Retry or Answer with another model.
 
 ## The classifier
 
@@ -218,7 +218,7 @@ Different from routing: routing picks **who answers the user**; delegation is **
 **Stage 3 — Harness brains.** Exit: the free CLIs (Antigravity, OpenCode) each answer as a brain (`/brain antigravity`) and can be an `agentic` member of free. (Codex and Gemini CLI have no free tier now.)
 - [x] Harness kit (`@choomfie/harness`, plugin `harnesses`, Nov 24): one print-mode run per message, the CLI's conversation id resumed per chat, a folder per chat, attachments in, changed files back, `/stop`, read-only mode for anyone but the owner. First harness: Antigravity `agy` (free, weekly quota). See [harness.md](harness.md).
 - [x] OpenCode as the second harness (Nov 25): Zen's free models, no account; `run --format json` events, `--session` resumes, `plan` agent read-only.
-- [x] Harnesses as free members (Nov 25): a `local` bucket (work on this computer) → antigravity, opencode; offered / held like Waymond, and a **Hand back to free models** button under every holding member's reply.
+- [x] Harnesses as free members (Nov 25): a `local` bucket (work on this computer) → antigravity, opencode; offered / held like Waymond, and a **Back to auto** button under every holding member's reply.
 - [ ] Harness reports what changed (files, commands) into free's transcript on handback, not only its replies.
 - [ ] ACP (Agent Client Protocol) driver instead of print mode: streaming progress, tool approvals as Discord buttons, one protocol for agy, OpenCode, Gemini CLI, Goose.
 - Researched Nov 24: Cursor CLI's free plan runs out almost at once; Gemini CLI's free serving ended (June 2026) and Qwen Code's free tier ended (April 2026); Codex needs a paid plan or key.

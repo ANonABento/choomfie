@@ -231,7 +231,7 @@
 
 - [x] `@choomfie/apibrain` kit — OpenAI-compatible client, typed failures, multi-key pools, cooldowns, local + header quota, `/models` catalog, transcripts, compaction, router, classifier
 - [x] `free` plugin — OpenRouter, Groq, Gemini, NVIDIA NIM, SambaNova, Cloudflare, Ollama; one `/brain <provider>` each
-- [x] Smart routing — buckets, zero-shot classifier with keyword fallback; API models float per message, web members lock (first message, mode, or "Hand this to …"), failures offer Retry / Answer with free models
+- [x] Smart routing — buckets, zero-shot classifier with keyword fallback; API models float per message, web members lock (first message, mode, or "Hand this to …"), failures offer Retry / Answer with another model
 - [x] `/brain` status, `bun run apibrain doctor free`
 - [x] `/model` per chat for any brain (`Brain.models()`), `/compact` for any brain (`Brain.compact()`), context carried across `/brain` switches (`carry`)
 - [x] `ask_brain` renamed `delegate`

@@ -51,6 +51,12 @@ export interface TurnContext {
   human: Human;
   /** Give up after this long. Real tasks can run for minutes. */
   timeoutMs: number;
+  /**
+   * A line in the site's turn log (`<data>/webbrain/<id>/turns.jsonl`, `bun
+   * run webbrain log <id>`): what the adapter waited on or skipped, so a stuck
+   * or empty turn can be explained afterwards. Not shown in Discord.
+   */
+  log?(event: string, detail?: Record<string, unknown>): void;
 }
 
 export interface Human {

@@ -45,3 +45,13 @@ describe("withoutRunBlocks", () => {
     expect(withoutRunBlocks(text)).toBe("Checking.\n\nExample:\n```ts\nconst x = 1;\n```");
   });
 });
+
+describe("isLookOnly: memory and kernel reads", () => {
+  test("sysctl reads, memory_pressure bare; writes and pressure simulation ask", () => {
+    expect(isLookOnly("sysctl hw.memsize && vm_stat && memory_pressure")).toBe(true);
+    expect(isLookOnly("sysctl -n hw.ncpu")).toBe(true);
+    expect(isLookOnly("sysctl -w kern.maxfiles=1")).toBe(false);
+    expect(isLookOnly("sysctl kern.maxfiles=1")).toBe(false);
+    expect(isLookOnly("memory_pressure -l critical")).toBe(false);
+  });
+});
