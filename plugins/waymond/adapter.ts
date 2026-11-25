@@ -54,7 +54,15 @@ import {
   type TurnState,
 } from "./api.ts";
 
-const COMPOSER_PLACEHOLDER = "Ask Waymond...";
+/**
+ * The chat field. Ambition's redesign (2026-11) replaced the plain
+ * "Ask Waymond..." box with a collapsed live composer: a textarea labelled
+ * "Message Waymond" whose placeholder is the nudge "Ask Waymond" until it
+ * opens, when it becomes "Ask Waymond...". The old placeholder is kept so a
+ * page that hasn't picked up the new shell still sends.
+ */
+const COMPOSER = '[data-component="ChatComposer"] textarea, [placeholder="Ask Waymond..."]';
+const LEGACY_PLACEHOLDER = "Ask Waymond...";
 /** Max wait for tool calls to attach after the text lands (observed ~2.3s). */
 const SETTLE_MS = 8_000;
 const SETTLE_POLL_MS = 800;
@@ -99,6 +107,37 @@ async function withAppActions(page: Page, offers: Offer[]): Promise<Offer[]> {
   return out;
 }
 
+/**
+ * Signed out, `/chat` no longer redirects: it shows Ambition's public landing
+ * (a poster wall with a "Sign in" button) at the same URL. So the URL can't
+ * tell, and the page has to.
+ */
+const LANDING = '[data-component="PosterLanding"]';
+async function signedOut(page: Page): Promise<boolean> {
+  return page
+    .evaluate(
+      (landing: string) =>
+        !!document.querySelector(landing) ||
+        [...document.querySelectorAll("a, button")].some((e) => /^\s*sign in\s*$/i.test(e.textContent ?? "")),
+      LANDING
+    )
+    .catch(() => false);
+}
+
+/** Open the chat and wait for the message box, or the signed-out landing. */
+async function openComposer(page: Page, url: string) {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  const composer = page.locator(COMPOSER).first();
+  try {
+    await page.locator(`${COMPOSER}, ${LANDING}`).first().waitFor({ state: "visible", timeout: 30_000 });
+  } catch {
+    // neither showed: decided below
+  }
+  if (!page.url().startsWith(`${APP_ORIGIN}/chat`) || (await signedOut(page))) throw new LoginRequiredError(ID);
+  if (!(await composer.isVisible())) throw new LayoutChangedError(ID, "the message box never appeared");
+  return composer;
+}
+
 /** fetch() needs the app origin for the session cookie and CORS. */
 async function onApp(page: Page) {
   if (!page.url().startsWith(APP_ORIGIN)) await page.goto(`${APP_ORIGIN}/chat`, { waitUntil: "domcontentloaded" });
@@ -114,13 +153,16 @@ async function onApp(page: Page) {
 async function clearDraftAttachments(page: Page): Promise<void> {
   for (let i = 0; i < 20; i++) {
     const removed = await page.evaluate((placeholder: string) => {
-      let box: Element | null = document.querySelector(`[placeholder="${placeholder}"]`);
-      while (box && !box.querySelector('button[aria-label="Attach files"]')) box = box.parentElement;
+      const root = document.querySelector('[data-component="ChatComposer"]');
+      let box: Element | null = root ?? document.querySelector(`[placeholder="${placeholder}"]`);
+      if (!root) {
+        while (box && !box.querySelector('button[aria-label="Attach files"]')) box = box.parentElement;
+      }
       const btn = box?.querySelector<HTMLButtonElement>('button[aria-label^="Remove "]');
       if (!btn) return false;
       btn.click();
       return true;
-    }, COMPOSER_PLACEHOLDER);
+    }, LEGACY_PLACEHOLDER);
     if (!removed) return;
     await page.waitForTimeout(150);
   }
@@ -197,7 +239,7 @@ export async function withFiles(page: Page, text: string): Promise<{ text: strin
 
 /** Put files on the composer's hidden file input and wait until each shows as attached. */
 async function attach(page: Page, files: string[]): Promise<void> {
-  const input = page.locator('input[type="file"]').first();
+  const input = page.locator('[data-component="ChatComposer"] input[type="file"], input[type="file"]').first();
   if (!(await input.count())) throw new LayoutChangedError(ID, "the attach control is gone");
   await input.setInputFiles(files);
   for (const file of files) {
@@ -219,15 +261,18 @@ export const waymondAdapter: SiteAdapter = {
   taskContext: planContext,
   continueAfter: continueAfterToolCap,
 
-  async turn(page, { text, files, mode }, t) {
-    await page.goto(chatUrl(t.ref), { waitUntil: "domcontentloaded" });
-    const composer = page.getByPlaceholder(COMPOSER_PLACEHOLDER).first();
+  async loggedIn(page) {
     try {
-      await composer.waitFor({ state: "visible", timeout: 30_000 });
-    } catch {
-      if (!page.url().startsWith(`${APP_ORIGIN}/chat`)) throw new LoginRequiredError(ID);
-      throw new LayoutChangedError(ID, "the message box never appeared");
+      await openComposer(page, chatUrl());
+      return true;
+    } catch (e) {
+      if (e instanceof LoginRequiredError) return false;
+      throw e;
     }
+  },
+
+  async turn(page, { text, files, mode }, t) {
+    const composer = await openComposer(page, chatUrl(t.ref));
 
     let ref = t.ref;
     const baseline = new Set(ref ? parseMessages(await getJson(page, messagesUrl(ref))).map((m) => m.id) : []);

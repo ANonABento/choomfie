@@ -180,12 +180,12 @@ Different from routing: routing picks **who answers the user**; delegation is **
 **Next, by stage** (order set Nov 24: apibrain stable, then web brains, then harness brains, then agents talking to agents). Each stage has an exit condition; the next starts when it's met.
 
 **Stage 1 — Stabilize apibrain.** Exit: the test checklist passes on the restarted bot and nothing in `apibrain log` surprises.
-- [ ] Owner's test pass (routing, tables, labels, Waymond fallback note, `/mode`, `/clear`, `/resume`, `/stop`, `/status`, `/usage`, `/brain <provider>`).
+- [x] Owner's test pass (Nov 24). Fixed from its log: a weak short follow-up ("5090 ones") now stays on the last bucket and model; a probe sweep stops after two limit refusals in a row (OVH's "per model" limit is shared in practice).
 - [x] Commands audit, rest: `/persona` fine (read per turn, a switch restarts the worker); `/memory` — API brains now get core memories (capped 2k chars); `/config` gains `free.providersOff`, `free.footer`. `/stop`, `/clear`, `/resume` are in the owner's test pass.
 - [x] Persistent benches: `no_credit` and `auth` key benches outlive a restart (by key fingerprint); `not_free` models already did.
 
 **Stage 2 — Web brains.** Exit: adding a site and keeping it logged in is as easy as `apibrain keys`, and Waymond answers.
-- [ ] Waymond: "the message box never appeared" — Ambition's composer redesign; the owner's uncommitted `adapter.ts` targets it. Profile is logged in (`webbrain sites`, Nov 24); verify with the owner's test, then commit.
+- [x] Waymond: "the message box never appeared" was a signed-out profile. Signed out, Ambition's `/chat` shows a public landing at the same URL instead of redirecting, so the URL check passed. The adapter now spots the landing (`loggedIn`, under a second) and says to log in; the composer selector also follows Ambition's redesign. Verified by the owner Nov 24.
 - [x] `webbrain sites` / `webbrain setup`: every site, logged in or not (headless check, sends nothing), then `login` for the ones that aren't.
 - [ ] More web members (Claude.ai, ChatGPT, …) via the `new-web-brain` skill; multi-profile web brains.
 - [x] Web-brain compact: ask the site for a summary, open a new site conversation seeded with it on the next message.
@@ -210,6 +210,7 @@ Different from routing: routing picks **who answers the user**; delegation is **
 - [ ] Ranking from evidence: probe benchmark with checkable answers (`doctor --rank`), implicit signals (retries, hand-offs, rephrasing), bandit ordering.
 - [ ] `Try a bigger model` button.
 - [ ] More providers: LM Studio (local), GitHub Models (its catalog isn't at `/models`).
+- [ ] **Reinvestigate probing.** Today: every new candidate gets one "Reply with the word: ok" at worker start and every 24h; answers are kept for good, refusals for 7 days, but busy / rate-limited / timed-out results aren't recorded, so every restart probes those again (Gemini's gemma-4 503'd four times in one day). Cheap in tokens (104 probes ≈ 1.6k tokens by Nov 24) but it spends daily request caps and fills the log. Questions: remember a transient failure for hours across restarts; probe lazily (only when a bucket would pick the model) instead of sweeping everything; merge with the probe benchmark above so one call both checks a model answers and scores it; skip non-chat models (PII, safety, embedding) by listing traits before spending a call.
 - [ ] Compaction: big-context models get the original turns instead of the summary; structured summary (goals, decisions, facts, open questions, code and numbers verbatim); a real token count.
 
 **Later (roadmap only):** always-on / ambient mode, per-channel free defaults, opt-in fallback to Claude when every free provider is limited, non-LLM freemium.

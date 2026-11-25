@@ -236,12 +236,14 @@
 - [x] `/model` per chat for any brain (`Brain.models()`), `/compact` for any brain (`Brain.compact()`), context carried across `/brain` switches (`carry`)
 - [x] `ask_brain` renamed `delegate`
 - [ ] Agents talking to agents: `Brain.capabilities` listed by `delegate`; `delegate` from any brain, not only Claude; Claude delegating cheap work to `free` with a model; "Hand off to…" any capable brain; "Try a bigger model" button
-- [ ] Web-brain compact (ask the site for a summary, open a new conversation seeded with it)
+- [x] Web-brain compact (ask the site for a summary, open a new conversation seeded with it)
 - [ ] Harness kit: Codex / OpenCode / Gemini CLI as brains (T3 Code's agent wrappers as reference), then as `agentic` members
 - [ ] More web members — Claude.ai, ChatGPT, Gemini web, Grok, Perplexity, DeepSeek (record each with the `new-web-brain` skill)
 - [ ] Multi-profile web brains — several logged-in profiles per site, each with its own sticky proxy, as separate capacity units
 - [ ] Always-on / ambient mode — opt-in per channel: debounce bursts, reply / react / ignore gate (rules first), per-channel reply caps
 - [ ] Classifier from evidence: a labelled set of real messages (`apibrain eval`); a Jev-style classifier (Simple Jev endpoint — keyless public demo or the same server run locally) scoring labels from token probabilities, the zero-shot LLM only below its threshold; embeddings as the fully local alternative
+- [x] `webbrain sites` / `setup` (login state per site); Waymond reports a signed-out profile instead of "layout changed"
+- [ ] Reinvestigate model probing (transient failures re-probed every restart; lazy probing; fold into the ranking benchmark) — see brains-plan stage 6
 - [ ] Persistent cooldowns; per-channel free defaults; opt-in fallback to Claude when every free provider is limited
 - [ ] Non-LLM freemium — image generation, TTS/STT, search, embeddings behind the same router pattern
 
