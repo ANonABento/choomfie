@@ -214,6 +214,7 @@
 - [ ] Per-brain tool restrictions (background brain can't reply, tutor brain can't browse, etc.)
 
 ### 15e: Brain-to-Brain Communication (~3hr)
+> Superseded for the brains plan: agents talking to agents is stage 4 of [brains-plan.md](brains-plan.md) (`delegate` between any brains, capabilities, hand-off).
 - [ ] Event bus in daemon — brains publish events, other brains subscribe
 - [ ] Cross-brain context sharing (tutor brain: "user learned 50 kanji" → main brain: "congrats!")
 - [ ] Shared memory layer — all brains read/write same SQLite DB (already WAL-compatible)
@@ -234,7 +235,7 @@
 - [x] `/brain` status, `bun run apibrain doctor free`
 - [x] `/model` per chat for any brain (`Brain.models()`), `/compact` for any brain (`Brain.compact()`), context carried across `/brain` switches (`carry`)
 - [x] `ask_brain` renamed `delegate`
-- [ ] Delegation: `Brain.capabilities` listed by `delegate`; Claude delegating cheap work to `free` with a model; "Try a bigger model" button
+- [ ] Agents talking to agents: `Brain.capabilities` listed by `delegate`; `delegate` from any brain, not only Claude; Claude delegating cheap work to `free` with a model; "Hand off to…" any capable brain; "Try a bigger model" button
 - [ ] Web-brain compact (ask the site for a summary, open a new conversation seeded with it)
 - [ ] Harness kit: Codex / OpenCode / Gemini CLI as brains (T3 Code's agent wrappers as reference), then as `agentic` members
 - [ ] More web members — Claude.ai, ChatGPT, Gemini web, Grok, Perplexity, DeepSeek (record each with the `new-web-brain` skill)

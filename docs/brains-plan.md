@@ -177,35 +177,39 @@ Different from routing: routing picks **who answers the user**; delegation is **
   - Moved to stage 2: a local / probability-scored classifier.
 - [x] OpenRouter's free models back (endpoint paths); SambaNova's "payment method required" benches the key a week (`no_credit`); Z.ai's free GLM flash models via `unlistedModels`; a keyless provider's auth error is about the model, not the provider.
 
-**Next, by stage.** Each stage has an exit condition; the next starts when it's met.
+**Next, by stage** (order set Nov 24: apibrain stable, then web brains, then harness brains, then agents talking to agents). Each stage has an exit condition; the next starts when it's met.
 
-**Stage 1 — Stabilize what's shipped.** Exit: the test checklist passes on the restarted bot and nothing in `apibrain log` surprises.
+**Stage 1 — Stabilize apibrain.** Exit: the test checklist passes on the restarted bot and nothing in `apibrain log` surprises.
 - [ ] Owner's test pass (routing, tables, labels, Waymond fallback note, `/mode`, `/clear`, `/resume`, `/stop`, `/status`, `/usage`, `/brain <provider>`).
-- [ ] Waymond: "the message box never appeared" — adapter fix (overlaps the owner's uncommitted `adapter.ts`).
 - [ ] Commands audit, rest: `/config` (no `free` section), `/persona`, `/memory` (API brains don't see memories today) against free, a provider brain and Waymond.
 - [ ] Persistent benches: `no_credit`, `auth` and `not_free` outlive a restart (today a restart costs one wasted call per dead key).
 
-**Stage 2 — Classifier.** Exit: the labelled set picks the classifier and threshold by numbers, and the confidence it reports means something.
+**Stage 2 — Web brains.** Exit: adding a site and keeping it logged in is as easy as `apibrain keys`, and Waymond answers.
+- [ ] Waymond: "the message box never appeared" — adapter fix (overlaps the owner's uncommitted `adapter.ts`).
+- [ ] `webbrain setup`: every site, logged in or not, `login` for the ones that aren't (mirrors `apibrain keys`).
+- [ ] More web members (Claude.ai, ChatGPT, …) via the `new-web-brain` skill; multi-profile web brains.
+- [ ] Web-brain compact: ask the site for a summary, open a new site conversation seeded with it.
+
+**Stage 3 — Harness brains.** Exit: Codex / OpenCode / Gemini CLI each answer as a brain (`/brain codex`) and can be an `agentic` member of free.
+- [ ] Harness kit, T3 Code's agent wrappers as reference: process lifecycle, streaming, approvals, files back to Discord.
+
+**Stage 4 — Agents talking to agents.** Exit: any brain can hand work to the right other brain mid-task and get the result back, and the user can hand a chat to any capable brain. (See "Delegation" and "hand off to any agent" above.)
+- [ ] `Brain.capabilities` (`agentic`, `image-gen`, `web-search`, `code-exec`, `vision`, `long-context`); `delegate`'s description and errors list who can do what.
+- [ ] `delegate` from every brain, not only Claude: Waymond or a harness asking free for a cheap draft, free handing a tool job to Waymond. One call shape, depth-limited (no loops).
+- [ ] Claude offloads cheap work: `delegate to:free` with `model:` (summaries, translation, first drafts).
+- [ ] "Hand off to…" one button per capable brain, replacing "Hand this to Waymond".
+- [ ] Handoff summary by a cheap model (or Claude's compaction summary) instead of the raw excerpt.
+
+**Stage 5 — Classifier.** Exit: the labelled set picks the classifier and threshold by numbers, and the confidence it reports means something.
 - [ ] Labelled set: ~60 real messages from `calls.jsonl` with the right bucket; `bun run apibrain eval` scores any classifier on it (accuracy, confusion, latency, tokens).
 - [ ] Jev-style classifier: any Simple Jev endpoint (`POST /v1/classifier`, bucket descriptions as `criteria`), which scores each label from token probabilities instead of writing JSON, so its confidence is real. Default the keyless public demo (`simple-jev-demo-api.featherless.ai`, 2 RPS, 2k context, no guarantee); the same API runs locally (`simple-jev` Python server) by changing the URL. Measured Nov 24 on 12 messages: Qwen 4B 11/12 at ~420 ms (0.52 on the one genuinely ambiguous message), Gemma 12B 11/12 at ~800 ms, Qwen 27B 10/12; Groq zero-shot 11/12 but 0.85–1.00 on everything.
 - [ ] Pipeline: hard rules → Jev → below the threshold, the zero-shot LLM → keywords. Every stage optional; any failure falls through.
 - [ ] Embeddings classifier as the fully local option (Ollama `nomic-embed`, or Gemini embedding), scored on the same set; kept only if it beats or matches Jev.
 
-**Stage 3 — Routing quality.** Exit: a bucket's first pick is the best model that answers, by evidence, not by size.
+**Stage 6 — Routing quality and context.** Exit: a bucket's first pick is the best model that answers, by evidence; long chats keep what matters.
 - [ ] Ranking from evidence: probe benchmark with checkable answers (`doctor --rank`), implicit signals (retries, hand-offs, rephrasing), bandit ordering.
 - [ ] `Try a bigger model` button.
 - [ ] More providers: LM Studio (local), GitHub Models (its catalog isn't at `/models`).
-
-**Stage 4 — Context and hand-offs.** Exit: switching brain or model mid-chat loses nothing that matters.
-- [ ] "Hand off to…" any capable agent, via `Brain.capabilities`; `delegate` lists them too; `delegate` → free with `model:`.
-- [ ] Handoff summary by a cheap model (or Claude's compaction summary) instead of the raw excerpt.
 - [ ] Compaction: big-context models get the original turns instead of the summary; structured summary (goals, decisions, facts, open questions, code and numbers verbatim); a real token count.
-- [ ] Web-brain compact: ask the site for a summary, open a new site conversation seeded with it.
-
-**Stage 5 — Web brains.** Exit: adding and keeping web brains logged in is as easy as `apibrain keys`.
-- [ ] `webbrain setup`: every site, logged in or not, `login` for the ones that aren't (mirrors `apibrain keys`).
-- [ ] More web members (Claude.ai, ChatGPT, …) via the `new-web-brain` skill; multi-profile web brains.
-
-**Stage 6 — Harness kit.** Codex / OpenCode / Gemini CLI as brains (T3 Code's agent wrappers as reference), then as `agentic` members.
 
 **Later (roadmap only):** always-on / ambient mode, per-channel free defaults, opt-in fallback to Claude when every free provider is limited, non-LLM freemium.
