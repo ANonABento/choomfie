@@ -35,7 +35,8 @@ const TIMEOUT_MS = 60_000;
 
 export function toolGuide(): string {
   return [
-    "[You're connected to the owner's Mac (macOS, zsh). You can run shell commands on it.",
+    "[This chat is relayed from Discord by a bot running on the owner's Mac (macOS, zsh). The bot runs shell commands for you:",
+    "you don't need shell access yourself, and you shouldn't tell the owner to run commands. When a request needs this Mac (disk space, files, git, …), ask the bot.",
     "To run one, put it in a code block whose FIRST LINE is exactly `#!run`, then the command:",
     "```sh",
     "#!run",
@@ -48,7 +49,7 @@ export function toolGuide(): string {
 }
 
 /** A one-line reminder for later messages in the same conversation. */
-export const TOOL_REMINDER = "[You can still run commands on the owner's Mac: a code block starting with the line #!run.]";
+export const TOOL_REMINDER = "[The bot can still run commands on the owner's Mac for you: a code block whose first line is #!run.]";
 
 export interface CodeBlock {
   lang?: string;
@@ -70,6 +71,18 @@ export function runCalls(text: string, blocks?: CodeBlock[]): string[] {
     .filter((b) => b.lang?.toLowerCase() === RUN_LANG || MARKER.test(b.code))
     .map((b) => b.code.replace(MARKER, "").trim())
     .filter(Boolean);
+}
+
+/**
+ * The answer as Discord should see it: fenced `#!run` blocks taken out (the
+ * Run card and the "ran on this Mac" line already show the command). Only
+ * fenced blocks: an adapter that wants this returns its text with fences.
+ */
+export function withoutRunBlocks(text: string): string {
+  return text
+    .replace(/```([\w-]*)[^\n]*\n([\s\S]*?)```/g, (block, lang: string, code: string) => (lang.toLowerCase() === RUN_LANG || MARKER.test(code) ? "" : block))
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /** Programs that only look, and for the ones with subcommands, which subcommands. */

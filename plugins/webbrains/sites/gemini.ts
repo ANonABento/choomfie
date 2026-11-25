@@ -100,47 +100,141 @@ async function signedIn(page: Page): Promise<boolean> {
   return (await page.locator(SELECTORS.account).count()) > 0;
 }
 
+/** Marks every answer already on the page, so the one this turn adds is the only unmarked one. */
+const SEEN = "data-choomfie-seen";
+const NEW_ANSWER = `${SELECTORS.answers}:not([${SEEN}])`;
+
 /**
- * The answer's code blocks with their language: innerText drops the ```
- * fences, and local tools look for blocks starting `#!run`. A block is
- * `<code-block>`; Gemini shows an unknown language as "Code snippet".
+ * Mark the answers already there. Opening a conversation, Gemini fills in its
+ * history a moment after the composer shows: counting too early read an old
+ * answer as the new one (the same reply twice after a Run). So wait for the
+ * history to show and stop growing first.
  */
-async function codeBlocks(page: Page, index: number): Promise<{ lang?: string; code: string }[]> {
+async function markSeen(page: Page, hasHistory: boolean): Promise<void> {
+  const count = () => page.locator(SELECTORS.answers).count();
+  if (hasHistory && !(await count())) {
+    await page
+      .waitForFunction((sel: string) => document.querySelectorAll(sel).length > 0, SELECTORS.answers, { timeout: 20_000 })
+      .catch(() => {
+        throw new LayoutChangedError(ID, "the conversation's earlier answers never showed");
+      });
+  }
+  for (let last = -1, i = 0; i < 10; i++) {
+    const n = await count();
+    if (n === last) break;
+    last = n;
+    await page.waitForTimeout(700);
+  }
+  await page.evaluate(([sel, attr]) => document.querySelectorAll(sel as string).forEach((e) => e.setAttribute(attr as string, "1")), [SELECTORS.answers, SEEN]);
+}
+
+/**
+ * The answer as markdown: its text with each code block fenced (```lang …```).
+ * innerText alone gives the block's header ("Bash", "Code snippet") and the
+ * code with no fences, so `#!run` blocks couldn't be told apart or hidden.
+ */
+async function answerMarkdown(page: Page): Promise<string> {
   return page.evaluate(
-    ([sel, i]) => {
-      const answer = document.querySelectorAll(sel as string)[i as number];
-      if (!answer) return [];
-      return [...answer.querySelectorAll("code-block, pre")]
-        .filter((el) => el.tagName.toLowerCase() === "code-block" || !el.closest("code-block"))
-        .map((el) => {
-          const code = el.querySelector("code") ?? el;
-          const header = el.querySelector(".code-block-decoration, [class*='decoration'], [class*='header']");
-          const label = header?.querySelector("span")?.textContent ?? header?.textContent ?? "";
-          const cls = /language-([\w-]+)/.exec(code.className)?.[1];
-          const lang = (cls ?? label).trim().split(/\s+/)[0]?.toLowerCase();
-          return { lang: lang || undefined, code: (code as HTMLElement).innerText };
-        });
+    ([sel, textSel]) => {
+      const answers = document.querySelectorAll(sel as string);
+      const content = answers[answers.length - 1]?.querySelector(textSel as string) as HTMLElement | null;
+      if (!content) return "";
+      let text = content.innerText;
+      for (const block of content.querySelectorAll("code-block")) {
+        const whole = (block as HTMLElement).innerText;
+        const code = ((block.querySelector("code") ?? block.querySelector("pre") ?? block) as HTMLElement).innerText.replace(/\n+$/, "");
+        const label = block.querySelector(".code-block-decoration, [class*='decoration']")?.textContent?.trim() ?? "";
+        const lang = /^[\w+-]+$/.test(label) ? label.toLowerCase() : "";
+        if (whole && text.includes(whole)) text = text.replace(whole, () => `\`\`\`${lang}\n${code}\n\`\`\`\n`);
+      }
+      return text;
     },
-    [SELECTORS.answers, index] as [string, number]
+    [NEW_ANSWER, SELECTORS.answerText]
   );
 }
 
-/** Images in the answer that aren't icons: Gemini's generated pictures. */
-async function answerImages(page: Page, index: number): Promise<BrainFile[]> {
-  const srcs = await page.evaluate(
-    ([sel, i]) => {
-      const answer = document.querySelectorAll(sel as string)[i as number];
+/**
+ * The answer's code blocks with their language, read from the page (local
+ * tools look for blocks starting `#!run`). A block is `<code-block>`; Gemini
+ * shows an unknown language as "Code snippet".
+ */
+async function codeBlocks(page: Page): Promise<{ lang?: string; code: string }[]> {
+  return page.evaluate((sel: string) => {
+    const answers = document.querySelectorAll(sel);
+    const answer = answers[answers.length - 1];
+    if (!answer) return [];
+    return [...answer.querySelectorAll("code-block, pre")]
+      .filter((el) => el.tagName.toLowerCase() === "code-block" || !el.closest("code-block"))
+      .map((el) => {
+        const code = el.querySelector("code") ?? el;
+        const header = el.querySelector(".code-block-decoration, [class*='decoration'], [class*='header']");
+        const label = header?.querySelector("span")?.textContent ?? header?.textContent ?? "";
+        const cls = /language-([\w-]+)/.exec(code.className)?.[1];
+        const lang = (cls ?? label).trim().split(/\s+/)[0]?.toLowerCase();
+        return { lang: lang || undefined, code: (code as HTMLElement).innerText };
+      });
+  }, NEW_ANSWER);
+}
+
+/**
+ * A picture Gemini is still making: a `<generated-image>` whose image hasn't
+ * loaded. Its text usually settles first ("Here is a picture of …"), so the
+ * turn counts as busy until the picture is there.
+ */
+async function imagesPending(page: Page): Promise<boolean> {
+  return page.evaluate((sel: string) => {
+    const answers = document.querySelectorAll(sel);
+    const answer = answers[answers.length - 1];
+    return [...(answer?.querySelectorAll("generated-image") ?? [])].some((g) => {
+      const img = g.querySelector("img");
+      return !img || !img.complete || img.naturalWidth === 0;
+    });
+  }, NEW_ANSWER);
+}
+
+/**
+ * Images in the answer that aren't icons: Gemini's generated pictures. They
+ * are `blob:` URLs the page has already released (fetching one fails), so
+ * those are copied off the loaded `<img>` through a canvas; an https one is
+ * fetched through the page.
+ */
+async function answerImages(page: Page): Promise<BrainFile[]> {
+  const found = await page.evaluate(
+    ([sel, max]) => {
+      const answers = document.querySelectorAll(sel as string);
+      const answer = answers[answers.length - 1];
       if (!answer) return [];
+      const seen = new Set<string>();
       return [...answer.querySelectorAll("img")]
         .filter((img) => img.naturalWidth >= 256 && img.naturalHeight >= 256 && /^(https:|blob:|data:)/.test(img.src))
-        .map((img) => img.src);
+        .filter((img) => !seen.has(img.src) && seen.add(img.src))
+        .map((img) => {
+          if (img.src.startsWith("https:")) return { url: img.src };
+          try {
+            const canvas = document.createElement("canvas");
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            canvas.getContext("2d")!.drawImage(img, 0, 0);
+            const png = canvas.toDataURL("image/png");
+            // Base64 is 4/3 the bytes: fall back to JPEG for a huge picture.
+            return png.length * 0.75 <= (max as number) ? { dataUrl: png, ext: "png" } : { dataUrl: canvas.toDataURL("image/jpeg", 0.92), ext: "jpg" };
+          } catch {
+            return null;
+          }
+        })
+        .filter((x) => x !== null);
     },
-    [SELECTORS.answers, index] as [string, number]
+    [NEW_ANSWER, MAX_IMAGE_BYTES] as [string, number]
   );
   const files: BrainFile[] = [];
-  for (const [n, src] of [...new Set(srcs)].entries()) {
-    const data = await pageFetchBytes(page, src, MAX_IMAGE_BYTES).catch(() => null);
-    if (data) files.push({ name: `gemini-${n + 1}.png`, data });
+  for (const [n, img] of found.entries()) {
+    if ("url" in img) {
+      const data = await pageFetchBytes(page, img.url, MAX_IMAGE_BYTES).catch(() => null);
+      if (data) files.push({ name: `gemini-${n + 1}.png`, data });
+    } else {
+      const data = new Uint8Array(Buffer.from(img.dataUrl.slice(img.dataUrl.indexOf(",") + 1), "base64"));
+      if (data.length <= MAX_IMAGE_BYTES) files.push({ name: `gemini-${n + 1}.${img.ext}`, data });
+    }
   }
   return files;
 }
@@ -164,7 +258,9 @@ export const geminiAdapter: SiteAdapter = {
   },
 
   async turn(page, { text, files: attachments }, t) {
-    await page.goto(this.chatUrl(t.ref), { waitUntil: "domcontentloaded" });
+    // Already on this conversation (the previous turn in this tab): no reload.
+    const here = t.ref && CONVERSATION_RE.exec(page.url())?.[1] === t.ref;
+    if (!here) await page.goto(this.chatUrl(t.ref), { waitUntil: "domcontentloaded" });
     const composer = page.locator(SELECTORS.composer).first();
     try {
       await composer.waitFor({ state: "visible", timeout: 30_000 });
@@ -174,8 +270,7 @@ export const geminiAdapter: SiteAdapter = {
     }
     if (!(await signedIn(page))) throw new LoginRequiredError(ID);
 
-    const answers = page.locator(SELECTORS.answers);
-    const before = await answers.count();
+    await markSeen(page, !!t.ref);
 
     await attach(page, attachments);
     await t.human.type(composer, text);
@@ -188,15 +283,11 @@ export const geminiAdapter: SiteAdapter = {
     }
     t.started(ref);
 
-    await page.waitForFunction(([sel, n]) => document.querySelectorAll(sel as string).length > (n as number), [SELECTORS.answers, before] as [string, number], {
-      timeout: 90_000,
-    });
-    const index = before;
-    const answer = answers.nth(index);
-    const reply = await waitForSettledText(() => answer.locator(SELECTORS.answerText).first().innerText(), {
+    await page.waitForFunction((sel: string) => document.querySelectorAll(sel).length > 0, NEW_ANSWER, { timeout: 90_000 });
+    const reply = await waitForSettledText(() => answerMarkdown(page), {
       timeoutMs: t.timeoutMs,
       quietMs: 3_000,
-      isBusy: async () => (await page.locator(SELECTORS.busy).count()) > 0,
+      isBusy: async () => (await page.locator(SELECTORS.busy).count()) > 0 || (await imagesPending(page)),
       stopRequested: t.stopRequested,
       onTick: (ms) => t.progress(`⏳ ${ID.label} is writing (${Math.round(ms / 1000)}s)`),
     });
@@ -207,8 +298,14 @@ export const geminiAdapter: SiteAdapter = {
     while (lines.length > 1 && names.has(lines.at(-1)!.trim())) lines.pop();
     const tidy = lines.join("\n").trim();
 
-    const files = await answerImages(page, index);
-    const blocks = await codeBlocks(page, index).catch(() => []);
+    // A picture can start loading just after the text settles: give it a moment, then wait for it.
+    await page.waitForTimeout(1_500);
+    for (let waited = 0; waited < 120_000 && !t.stopRequested() && (await imagesPending(page)); waited += 1_000) {
+      t.progress(`⏳ ${ID.label} is making the picture`);
+      await page.waitForTimeout(1_000);
+    }
+    const files = await answerImages(page);
+    const blocks = await codeBlocks(page).catch(() => []);
     return { text: tidy, ref, stopped: t.stopRequested(), ...(files.length ? { files } : {}), ...(blocks.length ? { codeBlocks: blocks } : {}) };
   },
 

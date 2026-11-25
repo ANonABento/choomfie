@@ -31,7 +31,7 @@ import { outboxDir, profileDir } from "./paths.ts";
 import { hasProfile } from "./sites.ts";
 import { TabPool, type ContextLike } from "./tabs.ts";
 import { LateWatch } from "./watch.ts";
-import { isLookOnly, MAX_CALLS, MAX_STEPS, ranNote, resultsPrompt, runCalls, runCommand, TOOL_REMINDER, toolGuide, type RunResult } from "./local-tools.ts";
+import { isLookOnly, MAX_CALLS, MAX_STEPS, ranNote, resultsPrompt, runCalls, runCommand, TOOL_REMINDER, toolGuide, withoutRunBlocks, type RunResult } from "./local-tools.ts";
 
 export interface WebBrainOptions {
   /** Tabs open at once (chats answering side by side). Default 3. */
@@ -382,6 +382,11 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
             lateWatch.delivered(message.chatKey, result.messageIds ?? []);
             const skipped = asked.length > cmds.length ? `[Only the first ${MAX_CALLS} commands ran.]` : undefined;
             result = await runTurn(resultsPrompt(results, skipped), []);
+          }
+          if (tools) {
+            // The command shows on the Run card / "ran" line, not as a raw #!run block.
+            const shown = withoutRunBlocks(result.text);
+            result = { ...result, text: shown || (waiting ? `-# ${adapter.label} needs a command run here first.` : shown) };
           }
           if (ran.length) result = { ...result, text: `${result.text}\n${ranNote(ran)}` };
           if (waiting) result = { ...result, approvals: [...(result.approvals ?? []), waiting] };

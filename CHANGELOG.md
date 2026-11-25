@@ -31,6 +31,9 @@
 
 ### Fixed
 
+- **Gemini web posted its first answer again after a Run.** Reopening a conversation, the adapter counted answers before Gemini had loaded the old ones, so the first old answer read as the new one (the same `#!run` request each time). It now waits for the history, marks what's there, and reads only the unmarked answer; a tab already on the conversation isn't reloaded.
+- **Gemini's pictures never arrived.** The text settles before the picture loads, and its `blob:` URL can't be fetched once shown: the turn now waits for a generated picture and copies it off the page.
+- **Raw `#!run` blocks in Discord.** The command already shows on the Run card and the "ran" line, so the block is left out of the posted answer; Gemini answers are read as markdown (fenced code, no "Bash" header line). The tool guide now says plainly that the bot runs commands, after Gemini answered "I don't have shell access".
 - **A signed-out Waymond looked like a broken page.** Ambition's `/chat` now shows its public landing (a "Sign in" button) instead of redirecting, so a signed-out profile waited 30s and said "the message box never appeared", and `webbrain sites` called it logged in. Waymond now spots the landing in under a second and says to log in; `webbrain sites` asks the adapter (`loggedIn`).
 - **Short follow-ups changed model mid-chat.** "5090 ones" after a `quality` answer was guessed `chat` by the short-message rule and went to a different model. A weak rule guess mid-chat now continues the last turn's bucket and model; a confident classification still moves.
 - **Probes hammered a shared limit.** OVHcloud's anonymous tier is said to be per model but refuses fresh models together; a probe sweep now stops after two limit refusals in a row and leaves the rest for the next sweep.

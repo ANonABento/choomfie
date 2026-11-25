@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isLookOnly, runCalls } from "../local-tools.ts";
+import { isLookOnly, runCalls, withoutRunBlocks } from "../local-tools.ts";
 
 describe("runCalls", () => {
   test("blocks marked #!run (marker inside the code) or with language run; others ignored", () => {
@@ -36,5 +36,12 @@ describe("isLookOnly", () => {
     ]) {
       expect([c, isLookOnly(c)]).toEqual([c, false]);
     }
+  });
+});
+
+describe("withoutRunBlocks", () => {
+  test("drops fenced #!run and ```run blocks, keeps other code", () => {
+    const text = "Checking.\n\n```sh\n#!run\ndf -h\n```\n\n```run\nls\n```\n\nExample:\n```ts\nconst x = 1;\n```";
+    expect(withoutRunBlocks(text)).toBe("Checking.\n\nExample:\n```ts\nconst x = 1;\n```");
   });
 });

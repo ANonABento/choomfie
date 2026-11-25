@@ -428,6 +428,17 @@ describe("local tools", () => {
     await destroy();
   });
 
+  test("the posted answer leaves out the fenced #!run block (the Run card shows it)", async () => {
+    const { brain, ctx, destroy } = await setup(
+      async () => ({ text: "I'll commit it.\n```bash\n#!run\ngit commit -am x\n```\n", ref: "r", codeBlocks: [{ lang: "bash", code: "#!run\ngit commit -am x" }] }),
+      { localTools: true }
+    );
+    const reply = await brain.send(msg("t1", "commit it"), ctx);
+    expect(reply.text).toBe("I'll commit it.");
+    expect(reply.approvals![0].detail).toContain("git commit -am x");
+    await destroy();
+  });
+
   test("someone other than the owner gets no guide, and a run block is just text", async () => {
     const turns: string[] = [];
     const { brain, ctx, destroy } = await setup(async (input) => (turns.push(input.text), ask("pwd")), { localTools: true });
