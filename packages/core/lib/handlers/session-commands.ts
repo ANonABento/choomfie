@@ -66,10 +66,14 @@ function resolveMode(brain: string, requested: string): { mode: string | null } 
 }
 
 registerCommand("compact", {
-  data: new SlashCommandBuilder()
-    .setName("compact")
-    .setDescription("Free up context, keeping a summary of the conversation (owner only)")
-    .toJSON(),
+  data: {
+    ...new SlashCommandBuilder()
+      .setName("compact")
+      .setDescription("Free up context, keeping a summary of the conversation (owner only)")
+      .toJSON(),
+    // Acts on this location's chat and replies through the interaction: group DMs too, like /clear.
+    ...ANYWHERE,
+  },
   handler: async (interaction, ctx) => {
     if (await requireOwner(interaction, ctx)) return;
     const brain = brainAt(interaction, ctx);

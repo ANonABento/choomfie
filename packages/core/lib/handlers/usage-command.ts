@@ -16,6 +16,7 @@ import {
   MessageFlags,
   SlashCommandBuilder,
 } from "discord.js";
+import { ANYWHERE } from "@choomfie/shared";
 import { registerCommand } from "../register.ts";
 import {
   isDaemonMode,
@@ -227,10 +228,14 @@ function buildEmbed(daemon: DaemonSnapshot, now: number = Date.now()): EmbedBuil
 }
 
 registerCommand("usage", {
-  data: new SlashCommandBuilder()
-    .setName("usage")
-    .setDescription("Show Claude's plan limits and spend, and the free/API brains' use today")
-    .toJSON(),
+  data: {
+    ...new SlashCommandBuilder()
+      .setName("usage")
+      .setDescription("Show Claude's plan limits and spend, and the free/API brains' use today")
+      .toJSON(),
+    // Ephemeral only: fine where the bot isn't a member (group DMs).
+    ...ANYWHERE,
+  },
   handler: async (interaction, ctx: AppContext) => {
     const api = await apiBrainsUsage();
     const apiEmbed = api.length

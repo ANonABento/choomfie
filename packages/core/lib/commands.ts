@@ -716,7 +716,8 @@ registerCommand("config", {
 // that session on it at the next message). `everywhere:true`, foreground mode
 // and channels answered by another brain change the default instead.
 registerCommand("model", {
-  data: new SlashCommandBuilder()
+  data: {
+    ...new SlashCommandBuilder()
     .setName("model")
     .setDescription("View or change the model for this chat, or every chat (owner only)")
     .addStringOption((o) =>
@@ -729,6 +730,9 @@ registerCommand("model", {
       o.setName("everywhere").setDescription("Change the default for every chat instead of this one")
     )
     .toJSON(),
+    // `/model auto` releases a chat another brain holds: needed wherever such a chat can be (group DMs too).
+    ...ANYWHERE,
+  },
   autocomplete: async (interaction, ctx) => {
     const here = brainAt(interaction, ctx);
     const brain = getBrain(here);

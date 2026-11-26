@@ -78,6 +78,7 @@ A normal reply can't reach Choomfie there, so the conversation continues through
 - **A placeholder nobody answers** is changed to "⌛ No answer this time" just before the window closes, rather than turning into Discord's "did not respond".
 - **Reminders set from an `ask:` chat go to the user's DM** (`set_reminder` swaps the chat id), since the chat can't receive them later.
 - **`/clear` works there** and follows the chat's brain: a Waymond group DM gets a fresh Waymond chat.
+- **Commands there:** `/choomfie`, `/brain`, `/status`, `/model`, `/mode`, `/clear`, `/compact`, `/resume`, `/stop`, `/restart`, `/usage`, `/access` and the Ask Choomfie menu — the ones about this chat, or that only reply privately. The rest are in servers and the bot's own DM: global settings (`/config`, `/plugins`, `/persona`, `/memory`, `/voice`), and ones that post to the chat later or publicly (`/remind`, `/pipeline`, `/github`, `/help`).
 - **Anyone else in the chat** can read the answers, but 💬 Reply and the menu refuse them unless they're allowlisted (and Waymond answers per `brainAccess`).
 - **Brains get `BrainMessage.progress`**, which updates the "thinking…" placeholder. Waymond uses it for its status line and approval notice. It's ordered with the sends, so a late status line never overwrites the answer.
 

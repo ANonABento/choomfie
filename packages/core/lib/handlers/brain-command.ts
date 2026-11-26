@@ -679,10 +679,14 @@ async function handleRestart(interaction: ButtonInteraction | ChatInputCommandIn
 }
 
 registerCommand("restart", {
-  data: new SlashCommandBuilder()
-    .setName("restart")
-    .setDescription("Restart Choomfie on the code on disk; says first what it would cut off (owner only)")
-    .toJSON(),
+  data: {
+    ...new SlashCommandBuilder()
+      .setName("restart")
+      .setDescription("Restart Choomfie on the code on disk; says first what it would cut off (owner only)")
+      .toJSON(),
+    // Every reply is ephemeral through the interaction, so it works where the bot isn't a member (a group DM).
+    ...ANYWHERE,
+  },
   handler: (interaction, ctx) => handleRestart(interaction, false, ctx),
 });
 
