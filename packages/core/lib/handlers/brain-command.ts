@@ -1,9 +1,9 @@
 /**
- * `/brain [name]` and `/stop` — who answers in this channel, and interrupting it.
+ * `/brain <name>` and `/stop` — who answers in this channel, and interrupting it.
  *
- *   /brain           show what answers here, for whom, and what's loaded
+ *   /brain status    show what answers here, for whom, and what's loaded
  *   /brain <name>    this channel/thread now answers with <name>; `claude` clears it
- *   /brain threads:  whether an @mention in this server channel opens a thread
+ *   /brain … threads:  whether an @mention in this server channel opens a thread
  *   /stop            interrupt the reply in progress here, whoever is answering
  *
  * Starting over is `/clear`, which also follows the channel's brain, and the
@@ -96,6 +96,9 @@ export async function brainStatus(id: string, timeoutMs = 1_500): Promise<string
   }
 }
 
+/** `/brain status` — not a brain, a question. */
+const STATUS_WORDS = ["status", "?", "show"];
+
 registerCommand("brain", {
   data: {
     ...new SlashCommandBuilder()
@@ -104,7 +107,9 @@ registerCommand("brain", {
       .addStringOption((o) =>
         o
           .setName("name")
-          .setDescription("claude, or a loaded brain — omit to see what answers here")
+          // Required, so Discord opens it straight away: `/brain free`, no `name:` to type.
+          .setDescription("claude, free, or another loaded brain — or status, to see what answers here")
+          .setRequired(true)
           .setAutocomplete(true)
       )
       .addBooleanOption((o) =>
@@ -123,7 +128,9 @@ registerCommand("brain", {
   },
   // Lists only brains actually loaded right now — in-memory, well inside 3s.
   autocomplete: async (interaction) => {
-    await interaction.respond(brainChoices(interaction.options.getFocused()));
+    const typed = interaction.options.getFocused();
+    const status = STATUS_WORDS[0].startsWith(typed.trim().toLowerCase()) ? [{ name: "status — what answers here", value: STATUS_WORDS[0] }] : [];
+    await interaction.respond([...status, ...brainChoices(typed)].slice(0, 25));
   },
   handler: async (interaction, ctx) => {
     if (await requireOwner(interaction, ctx)) return;
@@ -131,7 +138,9 @@ registerCommand("brain", {
     const parentId = parentChannelId(interaction.channel);
     const current = resolveBrainId(channelId, parentId, (id) => ctx.config.getChannelBrain(id), ctx.config.getDefaultBrain());
     const reply = (content: string) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
-    const wantedRaw = interaction.options.getString("name");
+    const named = interaction.options.getString("name")?.trim();
+    // `status` (or `?`) asks what answers here; so did leaving the name out, before it was required.
+    const wantedRaw = named && !STATUS_WORDS.includes(named.toLowerCase()) ? named : null;
     const threads = interaction.options.getBoolean("threads");
 
     if (threads !== null) {
@@ -160,8 +169,8 @@ registerCommand("brain", {
       const threadNote =
         interaction.guildId && interaction.channel?.type === ChannelType.GuildText
           ? ctx.config.getAutoThread(channelId)
-            ? "@mentions here open a thread (`/brain threads:false` to answer inline)."
-            : "@mentions here are answered inline (`/brain threads:true` for threads)."
+            ? "@mentions here open a thread (`/brain status threads:false` to answer inline)."
+            : "@mentions here are answered inline (`/brain status threads:true` for threads)."
           : "";
       const lines = [
         `**${label(current)}** answers here (${source}).`,

@@ -8,8 +8,10 @@
 // Types + helpers
 export type { Plugin, ToolDef, ToolResult } from "./types.ts";
 export { text, err } from "./types.ts";
-export { errorMessage, parseResetAt, QuotaReachedError, isQuotaReached } from "./errors.ts";
+export { errorMessage, parseResetAt, QuotaReachedError, isQuotaReached, mediaKindOf, type MediaKind } from "./errors.ts";
 export { JsonlLog, readJsonl, nowIso } from "./jsonl-log.ts";
+export { fitForDiscord, fitFile, findFfmpeg, parseDuration, videoBitrates, FIT_TARGET_BYTES } from "./media-fit.ts";
+export { shareFile, sharedFilePath, sweepSharedFiles, safeName, SHARE_TTL_MS } from "./shared-files.ts";
 
 // Plugin context
 export type { PluginContext, PluginConfig, McpTransport, NotificationMessage, SocialsConfig, SocialsPlatformConfig, ChoomfieConfig } from "./plugin-context.ts";

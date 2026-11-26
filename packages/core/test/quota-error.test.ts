@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { isQuotaReached, parseResetAt, QuotaReachedError } from "@choomfie/shared";
+import { isQuotaReached, parseResetAt, QuotaReachedError, mediaKindOf } from "@choomfie/shared";
+import { quotaScope } from "../../../plugins/webbrains/sites/gemini.ts";
 
 const NOW = Date.parse("2026-11-25T12:00:00Z");
 const H = 3_600_000;
@@ -28,4 +29,25 @@ test("QuotaReachedError is recognised by name, so a copy from another package co
   expect(isQuotaReached(Object.assign(new Error("x"), { name: "QuotaReachedError" }))).toBe(true);
   expect(isQuotaReached(new Error("quota"))).toBe(false);
   expect(new QuotaReachedError("X").message).toBe("X is out of its free allowance for now.");
+});
+
+describe("media kinds", () => {
+  test("what a message asks a media brain to make", () => {
+    expect(mediaKindOf("can u make me a song about jensen")).toBe("music");
+    expect(mediaKindOf("make a beat for my video")).toBe("music");
+    expect(mediaKindOf("make me a short video of a cat")).toBe("video");
+    expect(mediaKindOf("draw a tabby cat")).toBe("image");
+    expect(mediaKindOf("can u make me a image of a tabby cat")).toBe("image");
+    expect(mediaKindOf("what's the weather")).toBeUndefined();
+  });
+
+  test("Gemini's limit message names which kind is spent", () => {
+    expect(quotaScope("I can create more music as soon as your limit resets. Check your usage in Settings.")).toBe("music");
+    expect(quotaScope("I can create more images as soon as your limit resets.")).toBe("image");
+    expect(quotaScope("You've reached your limit. Try again tomorrow.")).toBeUndefined();
+  });
+
+  test("a scoped quota error says which allowance", () => {
+    expect(new QuotaReachedError("Gemini web", undefined, "…", "music").message).toBe("Gemini web is out of its free music allowance for now.");
+  });
 });

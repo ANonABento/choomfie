@@ -12,11 +12,16 @@
  */
 
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from "discord.js";
+import { loadRemoteMcpConfig } from "./remote-mcp.ts";
 import {
   brainLabel,
   CLAUDE_BRAIN,
   errorMessage,
   fileBatches,
+  fitForDiscord,
+  DISCORD_MESSAGE_BYTES,
+  shareFile,
+  SHARE_TTL_MS,
   getBrain,
   setBrainPoster,
   type Brain,
@@ -519,6 +524,25 @@ export async function postBrainReply(
   replyTo?: string,
   opts: PostOptions = {}
 ): Promise<void> {
+  // Over Discord's limit: shrink (ffmpeg), or drop with a note, or Discord refuses the whole message.
+  // Still too big: a link served from this machine (remoteMcp.publicUrl), else a note.
+  if (reply.files?.some((f) => f.data.length > DISCORD_MESSAGE_BYTES)) {
+    const fit = await fitForDiscord(reply.files);
+    const lines = fit.notes.map((n) => `-# ${n}`);
+    for (const { file, note } of fit.dropped) {
+      if (!fileLinks) {
+        lines.push(`-# ${note}`);
+        continue;
+      }
+      try {
+        const { urlPath } = shareFile(fileLinks.dataDir, file);
+        lines.push(`📎 ${file.name} (${(file.data.length / 1024 / 1024).toFixed(1)} MB, too big for Discord): ${fileLinks.base}/${urlPath}\n-# link works for ${Math.round(SHARE_TTL_MS / 86_400_000)} days, while this Mac is on`);
+      } catch (e) {
+        lines.push(`-# ${note} (couldn't share it: ${errorMessage(e)})`);
+      }
+    }
+    reply = { ...reply, files: fit.files, text: [reply.text, ...lines].filter(Boolean).join("\n") };
+  }
   const choices = (reply.choices ?? []).filter(Boolean).slice(0, MAX_CHOICES);
   const fallback = choices.length ? "(pick one)" : reply.approvals?.length || reply.files?.length ? "" : "(no reply)";
   const chunks = chunkForDiscord(reply.text || fallback);
@@ -629,10 +653,21 @@ export function planOwnsPatch(board: Pick<TaskBoard, "tasks">, index: number, la
 
 /** Where brain replies' images are kept (the data dir); set at boot by installBrainPoster. */
 let threadFilesDir: string | null = null;
+/** Too-big files are linked from here (remoteMcp on, with a `publicUrl`); null = they're left out with a note. */
+let fileLinks: { dataDir: string; base: string } | null = null;
+export function setFileLinks(links: { dataDir: string; base: string } | null): void {
+  fileLinks = links;
+}
 
 /** Lets plugins post late results (background jobs) through the same formatting. */
 export function installBrainPoster(ctx: AppContext): void {
   threadFilesDir = ctx.DATA_DIR;
+  try {
+    const remote = loadRemoteMcpConfig(ctx.DATA_DIR);
+    setFileLinks(remote.enabled && remote.publicUrl ? { dataDir: ctx.DATA_DIR, base: remote.publicUrl } : null);
+  } catch {
+    setFileLinks(null);
+  }
   loadTaskBoards(ctx.DATA_DIR);
   setBrainPoster(async (brainId, chatKey, reply) => {
     const fetched = await ctx.discord?.channels.fetch(chatKey).catch(() => null);

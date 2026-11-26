@@ -221,6 +221,16 @@ describe("files", () => {
     expect(sent[0].content).toBe("");
   });
 
+  test("a file over Discord's limit that can't be shrunk is left out with a note, not a refused message", async () => {
+    const sent: { content?: string; files?: { attachment: Buffer; name: string }[] }[] = [];
+    const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: "m" }) };
+    const huge = { name: "dump.zip", data: new Uint8Array(11 * 1024 * 1024) };
+    const ok = { name: "card.png", data: new Uint8Array([1]) };
+    await postBrainReply(channel, "gemini-web", "c1", { text: "here", files: [huge, ok] });
+    expect(sent.flatMap((m) => m.files?.map((f) => f.name) ?? [])).toEqual(["card.png"]);
+    expect(sent[0].content).toContain("-# dump.zip is too big for Discord (11.0 MB)");
+  });
+
   test("more than one message holds goes on in messages of their own — five 3 MB portraits all arrive", async () => {
     const sent: { content?: string; files?: { attachment: Buffer; name: string }[] }[] = [];
     const channel = { send: async (o: (typeof sent)[number]) => (sent.push(o), { id: "m" }) };

@@ -359,7 +359,14 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
                   return r;
                 },
                 (e) => {
-                  logEvent(message.chatKey, "error", { ms: Date.now() - t0, error: errorMessage(e), kind: e instanceof Error ? e.name : typeof e });
+                  const detail = (e as { detail?: unknown } | null)?.detail;
+                  logEvent(message.chatKey, "error", {
+                    ms: Date.now() - t0,
+                    error: errorMessage(e),
+                    kind: e instanceof Error ? e.name : typeof e,
+                    // The site's own words (a quota message), so the log says what it actually said.
+                    ...(typeof detail === "string" ? { detail: detail.slice(0, 500) } : {}),
+                  });
                   throw e;
                 }
               );

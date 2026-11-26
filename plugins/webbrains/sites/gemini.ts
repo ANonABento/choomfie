@@ -24,7 +24,7 @@ import {
   type Page,
   type SiteAdapter,
 } from "@choomfie/webbrain";
-import type { BrainFile } from "@choomfie/shared";
+import type { BrainFile, MediaKind } from "@choomfie/shared";
 
 const ORIGIN = "https://gemini.google.com";
 /** `gemini` is taken by the Gemini API provider (`/brain gemini`). */
@@ -46,15 +46,23 @@ const SELECTORS = {
 const CONVERSATION_RE = /\/app\/([0-9a-f]{8,})/;
 
 /**
- * The words Gemini uses when a free allowance is spent. Not seen yet (TODO:
- * confirm the wording when it happens); kept narrow, and only checked on a
- * short answer, so a reply *about* limits isn't mistaken for one.
+ * The words Gemini uses when a free allowance is spent. Seen for music: "I
+ * can create more music as soon as your limit resets. Check your usage in
+ * Settings." Only checked on a short answer, so a reply *about* limits isn't
+ * mistaken for one; a bare "try again later" is an error, not a limit.
  */
-const QUOTA_RE = /you(?:'ve| have) reached (?:your|the) (?:daily |usage )?limit|limit (?:resets|will reset)|try again (?:tomorrow|later)|out of (?:free )?(?:uses|generations)/i;
+const QUOTA_RE = /you(?:'ve| have) reached (?:your|the) (?:daily |usage )?limit|limit (?:resets|will reset)|try again tomorrow|out of (?:free )?(?:uses|generations)/i;
+
+/** Gemini caps music, images and video separately: which one this message says is spent. */
+export function quotaScope(text: string): MediaKind | undefined {
+  const m = /more (music|songs?|tracks?|images?|pictures?|videos?)\b|(music|image|video) (?:generation )?limit/i.exec(text);
+  const word = (m?.[1] ?? m?.[2] ?? "").toLowerCase();
+  return /^(music|song|track)/.test(word) ? "music" : /^(image|picture)/.test(word) ? "image" : /^video/.test(word) ? "video" : undefined;
+}
 
 const MAX_IMAGE_BYTES = 9 * 1024 * 1024;
-/** Discord's attachment limit for a bot (10 MB), less some room. */
-const MAX_MEDIA_BYTES = 9.5 * 1024 * 1024;
+/** Fetched whole: over Discord's 10 MB, core shrinks it (`fitForDiscord`, ffmpeg) before posting. */
+const MAX_MEDIA_BYTES = 60 * 1024 * 1024;
 
 /** Wait out (or Escape) any open menu's backdrop, which swallows clicks. */
 async function closeOverlays(page: Page): Promise<void> {
@@ -346,7 +354,7 @@ export const geminiAdapter: SiteAdapter = {
       stopRequested: t.stopRequested,
       onTick: (ms) => t.progress(`⏳ ${ID.label} is writing (${Math.round(ms / 1000)}s)`),
     });
-    if (reply.length < 400 && QUOTA_RE.test(reply)) throw new QuotaReachedError(ID.label, parseResetAt(reply), reply);
+    if (reply.length < 400 && QUOTA_RE.test(reply)) throw new QuotaReachedError(ID.label, parseResetAt(reply), reply, quotaScope(reply));
     // An answer from an attachment ends with a chip naming it ("banana\nnote.txt"): drop it.
     const names = new Set(attachments.map((f) => f.split("/").pop()));
     const lines = reply.split("\n");
@@ -364,7 +372,7 @@ export const geminiAdapter: SiteAdapter = {
     const tracks = await answerTracks(page);
     const files = [...(await answerImages(page)), ...tracks.files];
     if (tracks.tooBig.length) t.log?.("media-skipped", { kinds: tracks.tooBig });
-    const note = tracks.tooBig.length ? `\n-# The ${tracks.tooBig.join(" and ")} is too big to attach here (over 10 MB): open it on gemini.google.com.` : "";
+    const note = tracks.tooBig.length ? `\n-# The ${tracks.tooBig.join(" and ")} is too big to fetch (over 60 MB): open it on gemini.google.com.` : "";
     const blocks = await codeBlocks(page).catch(() => []);
     if (!tidy && !files.length) t.log?.("empty", { media: await hasMedia(page) });
     return { text: tidy + note, ref, stopped: t.stopRequested(), ...(files.length ? { files } : {}), ...(blocks.length ? { codeBlocks: blocks } : {}) };

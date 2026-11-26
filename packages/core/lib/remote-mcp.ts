@@ -26,6 +26,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { IpcToolDef, ToolCaller } from "./ipc-types.ts";
+import { sharedFilePath, sweepSharedFiles } from "@choomfie/shared";
 
 export const DEFAULT_REMOTE_TOOLS = [
   "choomfie_status",
@@ -43,6 +44,11 @@ export interface RemoteMcpConfig {
   port: number;
   /** Tool names exposed remotely. Anything not listed is invisible and uncallable. */
   tools: string[];
+  /**
+   * The tunnel's public https address (`https://<machine>.<tailnet>.ts.net`).
+   * Set, brain files too big for Discord are linked from it (`/f/<token>/<name>`).
+   */
+  publicUrl?: string;
 }
 
 export function parseRemoteMcpConfig(raw: unknown): RemoteMcpConfig {
@@ -61,7 +67,8 @@ export function parseRemoteMcpConfig(raw: unknown): RemoteMcpConfig {
     Array.isArray(r.tools) && r.tools.every((t) => typeof t === "string")
       ? (r.tools as string[])
       : [...DEFAULT_REMOTE_TOOLS];
-  return { enabled: r.enabled === true, host, port, tools };
+  const publicUrl = typeof r.publicUrl === "string" && /^https:\/\/[^\s/]+/.test(r.publicUrl) ? r.publicUrl.replace(/\/+$/, "") : undefined;
+  return { enabled: r.enabled === true, host, port, tools, ...(publicUrl ? { publicUrl } : {}) };
 }
 
 /** Read `remoteMcp` from config.json without going through ConfigManager (which may rewrite the file). */
@@ -198,15 +205,34 @@ async function handleMcpRequest(
   }
 }
 
+/** `GET /f/<token>/<name>`: a file shared because it was too big for Discord. The token is the key; no bearer. */
+export function serveSharedFile(req: Request, dataDir: string): Response | null {
+  const m = /^\/f\/([^/]+)\/([^/]+)$/.exec(new URL(req.url).pathname);
+  if (!m) return null;
+  if (req.method !== "GET" && req.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { Allow: "GET" } });
+  let name: string;
+  try {
+    name = decodeURIComponent(m[2]);
+  } catch {
+    return new Response("Not found", { status: 404 });
+  }
+  const path = sharedFilePath(dataDir, m[1], name);
+  if (!path) return new Response("Not found", { status: 404 });
+  return new Response(Bun.file(path), {
+    headers: { "Content-Disposition": `inline; filename="${name}"`, "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff" },
+  });
+}
+
 export function startRemoteMcp(
   cfg: RemoteMcpConfig,
   token: string,
-  deps: RemoteMcpDeps
+  deps: RemoteMcpDeps,
+  dataDir?: string
 ): ReturnType<typeof Bun.serve> {
   return Bun.serve({
     hostname: cfg.host,
     port: cfg.port,
-    fetch: (req) => handleRemoteMcpRequest(req, cfg, token, deps),
+    fetch: (req) => (dataDir && serveSharedFile(req, dataDir)) || handleRemoteMcpRequest(req, cfg, token, deps),
   });
 }
 
@@ -222,9 +248,18 @@ export function startConfiguredRemoteMcp(
   try {
     const cfg = loadRemoteMcpConfig(dataDir);
     if (!cfg.enabled) return null;
-    const server = startRemoteMcp(cfg, ensureRemoteMcpToken(dataDir), deps);
-    log(`remote MCP on http://${cfg.host}:${cfg.port}/mcp (${cfg.tools.length} tools allowed)`);
-    return { stop: () => void server.stop(true) };
+    const server = startRemoteMcp(cfg, ensureRemoteMcpToken(dataDir), deps, dataDir);
+    log(`remote MCP on http://${cfg.host}:${cfg.port}/mcp (${cfg.tools.length} tools allowed)${cfg.publicUrl ? `; big brain files linked from ${cfg.publicUrl}/f/` : ""}`);
+    // Shared files expire after a week: sweep now and hourly.
+    sweepSharedFiles(dataDir);
+    const sweep = setInterval(() => sweepSharedFiles(dataDir), 3_600_000);
+    sweep.unref?.();
+    return {
+      stop: () => {
+        clearInterval(sweep);
+        void server.stop(true);
+      },
+    };
   } catch (e) {
     log(`remote MCP not started: ${e instanceof Error ? e.message : String(e)}`);
     return null;

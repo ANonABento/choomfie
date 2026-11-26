@@ -46,11 +46,26 @@ export class QuotaReachedError extends Error {
     /** Epoch ms when it comes back, when the site or CLI said. */
     readonly resetAt?: number,
     /** The site's own words, for the logs. */
-    readonly detail?: string
+    readonly detail?: string,
+    /**
+     * One kind of work that's spent ("music"), when the site caps them
+     * separately: the brain still takes everything else.
+     */
+    readonly scope?: MediaKind
   ) {
-    super(`${brainLabel} is out of its free allowance${resetAt ? ` until ${new Date(resetAt).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" })}` : " for now"}.`);
+    super(`${brainLabel} is out of its free ${scope ? `${scope} ` : ""}allowance${resetAt ? ` until ${new Date(resetAt).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" })}` : " for now"}.`);
     this.name = "QuotaReachedError";
   }
+}
+
+export type MediaKind = "image" | "music" | "video";
+
+/** What a message asks a media brain to make, by its words (a song → music). */
+export function mediaKindOf(text: string): MediaKind | undefined {
+  if (/\b(songs?|music|track|beat|melody|jingle|tune|rap|anthem|lullaby|instrumental)\b/i.test(text)) return "music";
+  if (/\b(videos?|animation|animate|clip|movie|film)\b/i.test(text)) return "video";
+  if (/\b(image|picture|pic|photo|drawing|draw|logo|sticker|illustration|paint|painting|sketch|wallpaper|meme|avatar|icon)s?\b/i.test(text)) return "image";
+  return undefined;
 }
 
 export function isQuotaReached(e: unknown): e is QuotaReachedError {

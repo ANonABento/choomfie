@@ -257,6 +257,33 @@ describe("free brain routing", () => {
     expect(t.chats.bound("chan", "free")!.model).toBe("opencode");
   });
 
+  test("a media brain out of one kind (music) is benched for that kind only, and a text model's answer says why", async () => {
+    const gem = { ...fakeWeb("gemini-web"), label: "Gemini web" };
+    const t = setup({ buckets: { media: ["gemini-web", "fast"], chat: ["fast"] } }, [gem]);
+    let calls = 0;
+    gem.send = async (m) => {
+      calls++;
+      if (/song/.test(m.content)) throw new QuotaReachedError("Gemini web", undefined, "I can create more music as soon as your limit resets.", "music");
+      return { text: "here's your cat", files: [{ name: "cat.png", data: new Uint8Array([1]) }] };
+    };
+    t.classifier.next = { bucket: "media", confidence: 0.95 };
+    const r = await t.brain.send(msg("make me a song about robot hands"), t.ctx);
+    expect(r.text).toBe("fast answer\n-# Gemini web is out of its free music allowance for now — answered by FAST, which can't make files or use tools.");
+    // The next song doesn't try Gemini again, and still says why.
+    const again = await t.brain.send(msg("ok another song then", { chatKey: "chan2" }), t.ctx);
+    expect(calls).toBe(1);
+    expect(again.text).toEndWith("-# Gemini web is out of its free music allowance for now — answered by FAST, which can't make files or use tools.");
+    // A picture still goes to Gemini.
+    const pic = await t.brain.send(msg("draw me a picture of a cat", { chatKey: "chan3" }), t.ctx);
+    expect(pic.text).toStartWith("here's your cat");
+    expect(calls).toBe(2);
+    // Gemini now holds chan3: a song there is refused in place, with no Retry.
+    const held = await t.brain.send(msg("now a song about it", { chatKey: "chan3" }), t.ctx);
+    expect(held.text).toStartWith("⚠️ Gemini web is out of its free music allowance");
+    expect(held.text).toContain("It still answers everything else.");
+    expect(held.choices).toEqual(["Answer with another model"]);
+  });
+
   test("/model pins an API model; if it can't answer, another does and the reply says so", async () => {
     const t = setup();
     const chat = t.chats.current("chan", "free");

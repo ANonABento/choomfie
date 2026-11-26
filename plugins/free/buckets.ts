@@ -54,8 +54,9 @@ export const BUCKETS: Bucket[] = [
     description:
       "asks to MAKE or EDIT media, not talk about it: generate or edit an image, picture, drawing, logo or sticker; make music, a song or a sound; a video or animation; a voice clip or text read aloud",
     need: "strong",
-    // Sites that generate media first (ChatGPT, Hugging Face Spaces next); Waymond's sandbox after.
-    brains: ["gemini-web", "waymond"],
+    // Only sites that actually generate media (ChatGPT, Hugging Face Spaces next). Not Waymond: it
+    // can't make a song or a picture, so when these are spent a text model answers and says so.
+    brains: ["gemini-web"],
   },
   {
     id: "agentic",

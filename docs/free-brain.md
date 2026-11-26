@@ -23,7 +23,7 @@ No tools and no instructions, so it costs the Claude session nothing.
    - one tiny request to each listed model nobody has tried yet, to learn which really answer on a free key (see [Which models](#which-models)).
 
    It then shows the routing each bucket gets right now and how the classifier sorts a few sample messages. `bun run apibrain doctor free groq` checks one provider.
-3. Turn it on with `/plugins enable free`, then run `/brain free` in a channel. `/brain` with no name (or `/status` there) shows each provider's state, today's use, and the last few routes; `/usage` shows today's use too.
+3. Turn it on with `/plugins enable free`, then run `/brain free` in a channel. `/brain status` (or `/status` there) shows each provider's state, today's use, and the last few routes; `/usage` shows today's use too.
 4. To see exactly what was sent: `bun run apibrain log` (below).
 
 ## What API models know
@@ -35,7 +35,8 @@ The active persona and the owner's core memories (the same "Current Memories" Cl
 Fixed on our side, for every brain, not by rules in the prompt (a rule costs tokens on every call and still gets ignored):
 - **Tables:** Discord doesn't render markdown tables. A narrow one becomes an aligned code block, a wide one a bullet per row (`packages/core/lib/discord-markdown.ts`).
 - **Speaker labels:** some models open with `**Mahiro**:` when given a character. It's cut before the reply is posted or stored, so the next turn doesn't copy it.
-- **Tool work answered in text:** when Waymond couldn't take a `media`, `agentic` or `research` message, the text model is told (that turn only) it can't make images or run things, and the reply says who couldn't take it.
+- **Tool work answered in text:** when the bucket's web brain (Gemini web, Waymond) couldn't take a `media`, `agentic` or `research` message, the text model is told (that turn only) it can't make images or run things, and the reply says who couldn't take it.
+- **Out of one kind of media:** Gemini caps music, images and video separately. When it says one is spent ("I can create more music as soon as your limit resets"), only that kind is benched (`gemini-web#music`, an hour when it gives no time): a song goes to a text model with a note ("-# Gemini web is out of its free music allowance for now — answered by …"), a picture still goes to Gemini. Waymond isn't in `media`: it can't make a song or a picture.
 
 ## Seeing what was sent
 
@@ -111,7 +112,7 @@ message → a member mode, or a web member holding the chat?  → that member (l
   | `chat` | small talk and quick questions | fast | |
   | `quality` | analysis and writing | strong | |
   | `code` | code answered in the reply | strong | |
-  | `media` | make or edit an image, music, a video, a voice clip; the files come back as attachments | strong | gemini-web, waymond |
+  | `media` | make or edit an image, music, a video, a voice clip; the files come back as attachments | strong | gemini-web |
   | `agentic` | real work in Waymond's cloud sandbox: GitHub repos, apps, CAD, browsing | strong | waymond |
   | `local` | work on this computer: commands, local files and repos, installed programs | strong | antigravity, opencode (harnesses) |
   | `research` | current or sourced information | strong | gemini-web, waymond |

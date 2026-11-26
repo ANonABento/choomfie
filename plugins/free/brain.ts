@@ -50,6 +50,7 @@ import {
   framePrompt,
   getBrain,
   isQuotaReached,
+  mediaKindOf,
   type Brain,
   type BrainMessage,
   type BrainMode,
@@ -76,6 +77,8 @@ export const AUTO_MODEL = "auto";
 
 /** Health unit for a brain member. */
 const brainUnit = (id: string) => `brain:${id}`;
+/** One kind of work a brain is out of ("gemini-web#music"), when its site caps them separately. */
+const scoped = (id: string, kind: string) => `${id}#${kind}`;
 /** A web brain that wants a login sits out this long. */
 const LOGIN_COOLDOWN_MS = 3_600_000;
 /** Out of quota and it didn't say until when: look again after this (one failed call finds out). */
@@ -159,8 +162,10 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
   const recent: (Route & { text: string })[] = [];
   const running = new Map<string, { abort: AbortController; member?: string }>();
   const offers = new Map<string, Offer>();
-  /** Brain members whose last call said their allowance is spent. */
-  const spent = new Set<string>();
+  /** Brain members (or `id#kind`) whose last call said that allowance is spent, and what it said. */
+  const spent = new Map<string, string>();
+  /** Why `id` can't take a message of this kind (out of quota), if it can't. */
+  const spentFor = (id: string, kind?: string) => spent.get(id) ?? (kind ? spent.get(scoped(id, kind)) : undefined);
   const bucket = (id: string) => config.buckets.find((b) => b.id === id);
   const isApi = (t: Target) => members.has(t.member);
 
@@ -186,17 +191,20 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
     return undefined;
   };
 
-  const waitMs = (t: Target, tokens: number): number => {
+  const waitMs = (t: Target, tokens: number, kind?: string): number => {
     const api = members.get(t.member);
     if (api) return api.waitMs(t.model, tokens);
     if (config.providers[t.member] || PROVIDER_IDS.has(t.member)) return Infinity; // a provider with no key, or disabled
-    return lookup(t.member) && t.member !== FREE_BRAIN ? health.waitMs(brainUnit(t.member)) : Infinity;
+    if (!lookup(t.member) || t.member === FREE_BRAIN) return Infinity;
+    // Out of one kind (music) only benches it for messages asking for that kind.
+    return Math.max(health.waitMs(brainUnit(t.member)), kind ? health.waitMs(brainUnit(scoped(t.member, kind))) : 0);
   };
 
   /** Brain members that share a bucket with `id` and can take a call now (where its work can go when it's out). */
-  function siblingsOf(id: string): string[] {
-    const ids = config.buckets.filter((b) => b.brains.includes(id)).flatMap((b) => b.brains);
-    return [...new Set(ids)].filter((x) => x !== id && isBrainMember(x) && waitMs({ member: x }, 0) === 0).slice(0, 2);
+  function siblingsOf(id: string, kind?: string): string[] {
+    // Out of one kind of media: only another media brain can do that work.
+    const ids = config.buckets.filter((b) => b.brains.includes(id) && (!kind || b.id === "media")).flatMap((b) => b.brains);
+    return [...new Set(ids)].filter((x) => x !== id && isBrainMember(x) && waitMs({ member: x }, 0, kind) === 0).slice(0, 2);
   }
 
   function targetsFor(bucketId: string): Target[] {
@@ -296,17 +304,24 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
     const summary = transcript.summary(chatId);
     const missed = transcript.live(chatId).filter((t) => t.id > since);
     const context = recap(summary && since < summary.uptoId ? summary : null, missed);
+    const kind = mediaKindOf(message.content);
     try {
       const reply = await brain.send(context ? { ...message, content: `${context}\n\n${message.content}` } : message, ctx);
       health.ok(brainUnit(brain.id));
       spent.delete(brain.id);
+      if (kind && reply.files?.length) {
+        health.ok(brainUnit(scoped(brain.id, kind)));
+        spent.delete(scoped(brain.id, kind));
+      }
       return { reply, record: framed };
     } catch (e) {
       if (isQuotaReached(e)) {
         // Not broken, just done until the reset: bench it that long, no exponential failures.
-        spent.add(brain.id);
+        // Out of one kind (Gemini's music cap): only that kind is benched; it still takes everything else.
+        const unit = e.scope ? scoped(brain.id, e.scope) : brain.id;
+        spent.set(unit, e.message);
         const ms = e.resetAt ? Math.max(60_000, e.resetAt - Date.now()) : QUOTA_COOLDOWN_MS;
-        health.cool(brainUnit(brain.id), ms, e.resetAt ? "out of quota" : "out of quota (reset time unknown)");
+        health.cool(brainUnit(unit), ms, e.resetAt ? "out of quota" : "out of quota (reset time unknown)");
       } else if ((e as { name?: string })?.name === "LoginRequiredError") health.cool(brainUnit(brain.id), LOGIN_COOLDOWN_MS, "needs a login");
       else health.fail(brainUnit(brain.id), e instanceof Error ? e.message : String(e));
       throw e;
@@ -386,6 +401,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
       }
 
       const framed = framePrompt(message.content, message.meta);
+      const kind = mediaKindOf(message.content);
       // Model lists are fetched at startup; a message in the first seconds waits for them.
       await Promise.all([...members.values()].map((m) => m.ready()));
       const abort = new AbortController();
@@ -415,7 +431,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         routeLog = logRoute;
         const routed = await route(decision.targets, {
           signal: abort.signal,
-          waitMs: (t) => waitMs(t, tokens),
+          waitMs: (t) => waitMs(t, tokens, kind),
           attempt: (t) => {
             run.member = t.member;
             const api = members.get(t.member);
@@ -444,7 +460,15 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         // A brain with tools was meant to take this and couldn't: say so, so a text answer isn't mistaken for the real thing.
         const skipped = members.has(member) ? (bucket(decision.bucket)?.brains ?? []).find((id) => decision.targets.some((t) => t.member === id)) : undefined;
         const skippedWhy = skipped ? routed.passed.find((p) => p.startsWith(`${skipped}:`)) : undefined;
-        if (skipped && !reply.stopped) text += `\n-# ${label(skipped)} couldn't take this${skippedWhy ? ` (${clipNote(skippedWhy.slice(skipped.length + 1))})` : ""} — answered by ${label(member)}, which has no tools.`;
+        if (skipped && !reply.stopped) {
+          const raw = skippedWhy?.slice(skipped.length + 1).trim();
+          // Benched from an earlier message: say why, not just "cooling down".
+          const why = (raw === "cooling down" ? (spentFor(skipped, kind) ?? raw) : raw)?.replace(/\.$/, "");
+          // "Gemini web is out of its free music allowance for now — answered by …" reads on its own.
+          text += why && / is out of its free /.test(why)
+            ? `\n-# ${clipNote(why)} — answered by ${label(member)}, which can't make files or use tools.`
+            : `\n-# ${label(skipped)} couldn't take this${why ? ` (${clipNote(why)})` : ""} — answered by ${label(member)}, which has no tools.`;
+        }
         else if (decision.pin && member !== decision.pin.member && !reply.stopped) text += `\n-# ${label(decision.pin.member)} couldn't answer — ${label(member)} did.`;
         else if (config.footer && !reply.stopped) text += footer(r);
         const offered: [string, OfferKind][] =
@@ -464,11 +488,13 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
           const holder = d.targets[0].member;
           const why = e.attempts[0]?.replace(/^[^:]+:\s*/, "") ?? "unavailable";
           // Out of quota: retrying won't help, but a member that does the same kind of work might.
-          const out = spent.has(holder);
-          const others = out ? siblingsOf(holder) : [];
-          const back = health.waitMs(brainUnit(holder));
+          const outWhy = spentFor(holder, kind);
+          const out = outWhy !== undefined;
+          const scopedOut = out && !spent.has(holder);
+          const others = out ? siblingsOf(holder, scopedOut ? kind : undefined) : [];
+          const back = waitMs({ member: holder }, 0, kind);
           const text = out
-            ? `⚠️ ${label(holder)} is out of its free allowance${back ? ` (back in ~${shortDuration(back)})` : ""}.${others.length ? "" : " Nothing else that does this kind of work is free right now."}`
+            ? `⚠️ ${label(holder)} is out of its free ${scopedOut ? `${kind} ` : ""}allowance${back && back !== Infinity ? ` (back in ~${shortDuration(back)})` : ""}.${others.length ? "" : " Nothing else that does this kind of work is free right now."}${scopedOut ? ` It still answers everything else.` : ""}`
             : `⚠️ ${label(holder)} couldn't answer: ${why.slice(0, 200)}`;
           return withOffer({ text }, message, [
             ...(out ? [] : [[RETRY_CHOICE, { kind: "retry" }] as [string, OfferKind]]),

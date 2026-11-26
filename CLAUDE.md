@@ -147,7 +147,7 @@ Shapes and constraints that don't announce themselves. Getting one wrong compile
 - `Config` carries a `[key: string]: unknown` index signature, so a removed key survives `...saved` unless actively stripped. `REMOVED_CONFIG_KEYS` in `lib/config.ts` does that, and `ConfigManager` rewrites the file once on load when it finds one.
 
 **Process boundaries**
-- Optional `remoteMcp` HTTP endpoint (whichever process owns the worker, loopback + bearer token, read-only tool allowlist) — see [docs/configuration.md](docs/configuration.md). Remote calls run with owner authority; the allowlist is the only boundary.
+- Optional `remoteMcp` HTTP endpoint (whichever process owns the worker, loopback + bearer token, read-only tool allowlist) — see [docs/configuration.md](docs/configuration.md). Remote calls run with owner authority; the allowlist is the only boundary. Its `/f/<token>/<name>` route serves brain files too big for Discord without the bearer (the random token is the key), only when `remoteMcp.publicUrl` is set.
 - **Console output goes to stderr — stdout is the MCP stdio transport.** Entry point is `packages/core/supervisor.ts`.
 - **Hot-reload boundary:** worker code in `packages/core/` and all plugin packages are hot-reloadable via worker restart. Supervisor code (`supervisor.ts`, IPC types, MCP server) requires a full session restart (exit + re-run `choomfie`). `packages/shared/` changes require a worker restart at minimum.
 - Auto-restart triggers: persona switch, plugin enable/disable, voice config change — all send `request_restart` IPC → supervisor restarts worker → confirmation to the Discord channel.
@@ -174,7 +174,7 @@ Shapes and constraints that don't announce themselves. Getting one wrong compile
 - DMs require `Partials.Channel` + `Partials.Message` in discord.js
 - Attachments downloaded to `…/choomfie-inline/inbox/` (`file_path` = first, `file_paths` = all, semicolon-separated)
 - GitHub integration shells out to `gh` via `lib/handlers/github.ts` (15s timeout)
-- Servers: only responds when @mentioned or replied to; an @mention in a text channel opens a thread (auto-thread, `/brain threads:false` to opt out), and in its own threads it answers everything. DMs: always responds. @mentions stripped before forwarding
+- Servers: only responds when @mentioned or replied to; an @mention in a text channel opens a thread (auto-thread, `/brain status threads:false` to opt out), and in its own threads it answers everything. DMs: always responds. @mentions stripped before forwarding
 - Rate limit + conversation timeout configurable in config.json (`rateLimitMs` default 5s per user — the owner is exempt, others get a ⏳ — `convoTimeoutMs` default 5 min)
 - Typing indicator: state machine in `lib/typing.ts`. `keep_typing: true` on `reply` holds it between multi-message workflows. Safety timeout 2 min; skipped for conversation_mode
 - Allowlist loaded at startup from access.json; `allow_user`/`remove_user` update in-memory + persist (no restart). Manual file edits require a restart

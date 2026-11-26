@@ -156,6 +156,8 @@
 - [ ] Todo lists — lightweight task tracking with Discord buttons
 - [ ] Custom auto-reactions — react to specific keywords/users
 - [ ] Quote database — save and recall funny quotes
+- [x] Brain files over Discord's 10 MB shrunk with ffmpeg (`fitForDiscord`): song → audio, video → re-encoded, picture → JPEG
+- [x] Files that still don't fit: served from this Mac behind the Tailscale Funnel (`remoteMcp.publicUrl`, `/f/<token>/<name>`, 7-day expiry) and linked in the reply
 
 ## Phase 12: Extended GitHub
 
