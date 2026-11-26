@@ -89,7 +89,7 @@ More keys for one provider (`_2`, `_3`) must be accounts you legitimately own. S
 ```
 message → a member mode, or a web member holding the chat?  → that member (locked)
         → `/model` pin?                                       → that API model, then the others
-        → hard rules → zero-shot classifier → keyword rules  → bucket
+        → hard rules → embeddings (sure?) → zero-shot → keywords → bucket
         → its API targets, then `priority` → first one healthy and under quota answers
 ```
 
@@ -128,9 +128,17 @@ message → a member mode, or a web member holding the chat?  → that member (l
   - `@code` splices in another bucket's pinned list.
 - **Classifier** (`packages/apibrain/classifier.ts`):
   - **Hard rules, no call:** an image goes to `vision`; a prompt over `longTokens` goes to `long`; a message of three words or fewer goes to `chat`. That last rule is a weak guess (confidence 0.5), so "ok, go on" doesn't pull a chat away from what it was doing.
+  - **Embeddings, local:** Ollama's `nomic-embed-text` (`ollama pull nomic-embed-text`) embeds the message, and it goes to the bucket whose `examples` (in `buckets.ts`) it sits closest to. About 10 ms, nothing leaves this Mac, no quota. Its confidence is the gap between the best two buckets, and it means something: at the default `sureAt` 0.8 it answers alone (about 4 messages in 10); below that, the zero-shot model decides. If the zero-shot call fails, its unsure answer is used rather than keywords. With Ollama off it's skipped for 10 minutes at a time. `classifier.embeddings: false` turns it off; `{ "model", "url", "sureAt" }` changes it.
   - **Zero-shot:** the best-ranked models for the need `tiny` (small, quick, plentiful — today Groq's `gpt-oss-20b`) get the bucket descriptions, the last two turns and the message. It answers `{"bucket", "confidence"}` within 2.5s. Each call spends one request of that model's daily allowance.
   - **Keyword fallback:** used when no classifier model is reachable or it answers nonsense.
-  - The `Classifier` interface lets an embeddings stage drop in later.
+  - **Measuring it:** `bun run apibrain eval free [keywords|embeddings|zero-shot|pipeline] [-v] [--pace=3500]` runs each over `eval-set.ts` (73 hand-written labelled messages, none of them `examples`) and prints accuracy, misses, speed and accuracy at each confidence level. `--pace` waits between calls so Groq's per-minute token limit doesn't skew zero-shot. Nov 26:
+
+    | | ok | median | confidence | calls |
+    |---|---|---|---|---|
+    | keywords | 36% | 0 ms | meaningless | 0 |
+    | embeddings | 77% | 11 ms | ≥0.8: 27/27 right | 0 |
+    | zero-shot (Groq qwen3.8-27b) | 97% | 190 ms | 0.75–1.0 on everything | 73 |
+    | pipeline (sure at 0.8) | 97% | 170 ms | ≥0.8: 71/72 | 46 |
 - **Failover:** each target is skipped while it cools down or is at its quota. On failure the next one is tried:
 
   | Failure | What gets benched |
@@ -196,7 +204,8 @@ To choose a model instead, use `/model`.
   "strategy": "smart",                    // or "priority": ignore buckets, use `priority` in order
   "priority": ["groq", "gemini", "openrouter"],   // default: every provider, in providers/index.ts order
   "buckets": { "code": ["groq:openai/gpt-oss-120b", "gemini"] },   // pins that bucket (otherwise: by its need, from the live lists)
-  "classifier": { "type": "zero-shot", "targets": ["groq:openai/gpt-oss-20b"], "suggestAt": 0.75, "longTokens": 6000 },   // targets: optional pin
+  "classifier": { "type": "zero-shot", "targets": ["groq:openai/gpt-oss-20b"], "suggestAt": 0.75, "longTokens": 6000,   // targets: optional pin
+                  "embeddings": { "model": "nomic-embed-text", "sureAt": 0.8 } },                                        // or false
   "summaryTargets": ["gemini"],                                     // optional pin
   "providers": {
     "groq": { "models": ["openai/gpt-oss-120b"], "limits": { "rpm": 30, "rpd": 1000 }, "contextTokens": 6000 },
@@ -216,8 +225,8 @@ To choose a model instead, use `/model`.
 - **An API provider** (anything OpenAI-compatible): copy a file in `plugins/free/providers/`, add one line to `providers/index.ts`, then put its key in `.env`. A spec is data: `baseURL`, `keyEnv`, optional `limits`, `limitScope`, `resetTimeZone`, `contextTokens`, `vision()`, and `isFree()` (OpenRouter's refuses anything not `:free` or zero-priced). No model list: it comes from the provider's `/models`. Only a provider without one (Cloudflare) gives `fallbackModels`. A provider that isn't OpenAI-compatible needs a new `protocol` in `packages/apibrain/client.ts`.
 - **A model change:** nothing to do. New models are picked up within 6h, tried once, and ranked; retired ones drop out. To choose models yourself, set `free.providers.<id>.models`.
 - **A web brain** (a new chat website): build it with the web-brain kit ([webbrain.md](webbrain.md), the `new-web-brain` skill), then name its id in a bucket's targets. Give it an id that doesn't clash with an API provider (`gemini-web`, not `gemini`). If two brains share an id, the one already loaded keeps `/brain <id>`.
-- **A bucket:** add an entry to `buckets.ts` with a description written for the classifier model.
-- **A classifier stage:** implement `Classifier` and pass it to `classifierPipeline`.
+- **A bucket:** add an entry to `buckets.ts` with a description written for the classifier model and about ten varied `examples`, plus a few cases in `eval-set.ts`; check with `apibrain eval free`.
+- **A classifier stage:** implement `Classifier`, add it to `stages` in `setupFree` (with a `sureAt` if its confidence is real), and score it with `apibrain eval free`.
 
 ## Limits and caveats
 

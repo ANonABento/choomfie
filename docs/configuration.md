@@ -58,7 +58,7 @@ A brain channel only answers messages addressed to it (DM, @mention, reply). Amb
 
 ## Free brain (`free`)
 
-How `/brain free` routes across free API tiers and web brains: `strategy`, `priority`, optional per-bucket pins (otherwise buckets route by need from the providers' live model lists), the zero-shot classifier (`classifier.targets` pin, `suggestAt`), per-provider `models` pins/`limits`/`baseURL`/`enabled`, `footer` and `contextTokens`. All optional; invalid values fall back to the defaults with a warning. API keys never go in config.json — they're `<PROVIDER>_API_KEY` (and `_2`, `_3`… to pool more keys) in the data dir's `.env`. Full reference: [free-brain.md](free-brain.md).
+How `/brain free` routes across free API tiers and web brains: `strategy`, `priority`, optional per-bucket pins (otherwise buckets route by need from the providers' live model lists), the classifier (`classifier.targets` pin, `suggestAt`, the local `embeddings` stage), per-provider `models` pins/`limits`/`baseURL`/`enabled`, `footer` and `contextTokens`. All optional; invalid values fall back to the defaults with a warning. API keys never go in config.json — they're `<PROVIDER>_API_KEY` (and `_2`, `_3`… to pool more keys) in the data dir's `.env`. Full reference: [free-brain.md](free-brain.md).
 
 ## Pipelines (`pipelines`)
 

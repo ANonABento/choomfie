@@ -33,5 +33,7 @@ export {
   type Classification,
   type Classifier,
   type ClassifyInput,
+  type PipelineStage,
 } from "./classifier.ts";
+export { embeddingClassifier, ollamaEmbed, cosine, scoreBuckets, embedText, StageUnavailable, type Embed } from "./embeddings.ts";
 export { defineApiBrain, apiTurn, summarizer, personaOf, type ApiTurnInput } from "./define.ts";

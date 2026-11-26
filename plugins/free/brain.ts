@@ -591,7 +591,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
 
     async status() {
       const lines = [
-        `**Free brain** — ${config.strategy === "smart" ? `smart routing, ${config.classifier.type} classifier` : "priority order"}${config.footer ? " · route footer on" : ""}`,
+        `**Free brain** — ${config.strategy === "smart" ? `smart routing, ${config.classifier.embeddings ? "embeddings + " : ""}${config.classifier.type} classifier` : "priority order"}${config.footer ? " · route footer on" : ""}`,
         ...[...members.values()].map((m) => m.statusLine()),
         ...brainMemberIds().map((id) => {
           const b = lookup(id);

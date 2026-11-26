@@ -25,7 +25,10 @@ import {
   Transcript,
   zeroShotClassifier,
   defineApiBrain,
+  embeddingClassifier,
+  ollamaEmbed,
   type Classifier,
+  type PipelineStage,
   type Target,
 } from "@choomfie/apibrain";
 import { getBrain, registerBrain, unregisterBrain, type Plugin, type PluginContext } from "@choomfie/shared";
@@ -37,6 +40,7 @@ export { PROVIDERS as providers } from "./providers/index.ts";
 export { BUCKETS } from "./buckets.ts";
 export { parseFreeConfig, type FreeConfig } from "./config.ts";
 export { createFreeBrain, FREE_BRAIN } from "./brain.ts";
+export { EVAL_SET as evalSet } from "./eval-set.ts";
 
 /** Model lists are refreshed this often (each member skips it if fresh). */
 const CATALOG_REFRESH_MS = 6 * 3_600_000;
@@ -46,6 +50,8 @@ export interface FreeSetup {
   members: Map<string, ApiMember>;
   unconfigured: { id: string; label: string; signup?: string }[];
   classifier: Classifier;
+  /** Each classifier on its own, for `apibrain eval`. */
+  stages: Record<string, Classifier>;
   /** What the zero-shot classifier would ask now: config's pins, else the smallest quick models listed. */
   classifierTargets(): Target[];
 }
@@ -77,7 +83,11 @@ export function setupFree(
     config.classifier.targets
       ? config.classifier.targets.map(parseTarget).filter((t) => members.has(t.member))
       : rankAcross(members.values(), "tiny", 4);
-  const primary =
+  const emb = config.classifier.embeddings;
+  const embeddings = emb
+    ? embeddingClassifier({ buckets: config.buckets, embed: ollamaEmbed({ url: emb.url ?? env.OLLAMA_BASE_URL, model: emb.model }) })
+    : undefined;
+  const zeroShot =
     config.classifier.type === "zero-shot" && members.size
       ? zeroShotClassifier({
           buckets: config.buckets,
@@ -92,8 +102,18 @@ export function setupFree(
             ).value,
         })
       : undefined;
-  const classifier = classifierPipeline({ hard: hardRules(ids, { longTokens: config.classifier.longTokens }), primary, fallback });
-  return { config, members, unconfigured, classifier, classifierTargets };
+  const pipelineStages: PipelineStage[] = [
+    ...(embeddings && emb ? [{ classifier: embeddings, sureAt: emb.sureAt, timeoutMs: 1_500 }] : []),
+    ...(zeroShot ? [{ classifier: zeroShot }] : []),
+  ];
+  const classifier = classifierPipeline({ hard: hardRules(ids, { longTokens: config.classifier.longTokens }), stages: pipelineStages, fallback });
+  const stages: Record<string, Classifier> = {
+    keywords: fallback,
+    ...(embeddings ? { embeddings } : {}),
+    ...(zeroShot ? { "zero-shot": zeroShot } : {}),
+    pipeline: classifier,
+  };
+  return { config, members, unconfigured, classifier, stages, classifierTargets };
 }
 
 let registered: string[] = [];
@@ -160,6 +180,14 @@ const plugin: Plugin = {
 };
 
 export default plugin;
+
+/** For `bun run apibrain eval free`: each classifier stage, and the whole pipeline. */
+export async function evalClassifiers(env: Record<string, string | undefined>, rawConfig: unknown, dataDir?: string): Promise<Record<string, Classifier>> {
+  const av = dataDir ? new Availability(join(dataDir, "meta", "apibrain-models.json")) : undefined;
+  const { members, stages } = setupFree(rawConfig, env, new Health(), new Quota(), undefined, av);
+  await Promise.all([...members.values()].map((m) => m.refreshCatalog()));
+  return stages;
+}
 
 /** For `bun run apibrain doctor free`: how the classifier sorts a few sample messages. */
 export async function doctorExtras(env: Record<string, string | undefined>, rawConfig: unknown, dataDir?: string): Promise<string[]> {

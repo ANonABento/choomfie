@@ -3,6 +3,7 @@
  * API-brain checks for the owner, run on the machine hosting Choomfie.
  *
  *   bun run apibrain doctor <plugin> [provider]   check keys and models
+ *   bun run apibrain eval <plugin> [stage…] [-v]  score the classifiers on the plugin's labelled messages
  *   bun run apibrain log [count] [--full] [--chat <id>]   what was sent, and why
  *   bun run apibrain keys [list | add <provider> | setup]  get and save API keys (keys-cli.ts)
  *
@@ -24,6 +25,8 @@ import { join } from "node:path";
 import { resolveDataDir } from "@choomfie/shared";
 import { Availability } from "./availability.ts";
 import type { LogEntry } from "./calllog.ts";
+import type { Classifier } from "./classifier.ts";
+import { evaluate, formatReport, type LabelledCase } from "./eval.ts";
 import { ProviderError } from "./errors.ts";
 import { Health } from "./health.ts";
 import { discoverKeys } from "./keys.ts";
@@ -33,13 +36,15 @@ import type { ApiProviderSpec } from "./provider.ts";
 import { Quota } from "./quota.ts";
 
 const USAGE =
-  "usage: bun run apibrain doctor <plugin> [provider]   (e.g. `doctor free groq`)\n       bun run apibrain log [count] [--full] [--chat <id>]\n       bun run apibrain keys [list | add <provider> | setup]";
+  "usage: bun run apibrain doctor <plugin> [provider]   (e.g. `doctor free groq`)\n       bun run apibrain eval <plugin> [keywords|embeddings|zero-shot|pipeline …] [-v] [--pace=ms]\n       bun run apibrain log [count] [--full] [--chat <id>]\n       bun run apibrain keys [list | add <provider> | setup]";
 const PONG = "Reply with exactly: pong";
 
 type Env = Record<string, string | undefined>;
 type DoctorModule = {
   providers?: ApiProviderSpec[];
   doctorExtras?(env: Env, rawConfig: Record<string, unknown>, dataDir: string): Promise<string[]>;
+  evalSet?: LabelledCase[];
+  evalClassifiers?(env: Env, rawConfig: Record<string, unknown>, dataDir: string): Promise<Record<string, Classifier>>;
 };
 
 /** process.env plus the data dir's .env (the worker loads the same file). */
@@ -218,6 +223,27 @@ if (import.meta.main) {
       const section = (readConfig(dataDir).free ?? {}) as { providers?: Record<string, { enabled?: unknown }> };
       const disabled = (spec: ApiProviderSpec) => section.providers?.[spec.id]?.enabled === false;
       process.exit(await keysCommand(process.argv.slice(3), mod.providers ?? [], loadEnv(dataDir), dataDir, disabled));
+    }
+    if (command === "eval" && plugin && /^[a-z0-9-]+$/.test(plugin)) {
+      const mod = (await import(`@choomfie/${plugin}`)) as DoctorModule;
+      if (!mod.evalSet?.length || !mod.evalClassifiers) throw new Error(`@choomfie/${plugin} has no eval set`);
+      const dataDir = resolveDataDir();
+      const args = process.argv.slice(4);
+      const verbose = args.includes("-v");
+      const pace = Number(/^--pace=(\d+)$/.exec(args.find((a) => a.startsWith("--pace=")) ?? "")?.[1] ?? 0);
+      const wanted = args.filter((a) => !a.startsWith("-"));
+      const all = await mod.evalClassifiers(loadEnv(dataDir), (readConfig(dataDir)[plugin] ?? {}) as Record<string, unknown>, dataDir);
+      const names = wanted.length ? wanted : Object.keys(all);
+      console.error(`${mod.evalSet.length} labelled messages\n`);
+      for (const name of names) {
+        if (!all[name]) {
+          console.error(`${name}: not available (have ${Object.keys(all).join(", ")})\n`);
+          continue;
+        }
+        for (const line of formatReport(await evaluate(name, all[name], mod.evalSet, name === "keywords" || name === "embeddings" ? 0 : pace), verbose)) console.error(line);
+        console.error("");
+      }
+      process.exit(0);
     }
     if (command !== "doctor" || !plugin || !/^[a-z0-9-]+$/.test(plugin)) throw new Error(USAGE);
     let mod: DoctorModule;

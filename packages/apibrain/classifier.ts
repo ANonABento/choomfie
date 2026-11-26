@@ -3,9 +3,11 @@
  * code, agentic, vision, …), and the bucket picks the targets.
  *
  *   1. Hard rules — no call: an image, an oversized prompt, a two-word hello.
- *   2. Zero-shot — a fast free model reads the bucket descriptions and the
+ *   2. Embeddings — local, no call: the closest bucket by example messages
+ *      (embeddings.ts); when it's unsure, the zero-shot model decides.
+ *   3. Zero-shot — a fast free model reads the bucket descriptions and the
  *      message and answers `{"bucket": …, "confidence": …}`.
- *   3. Keywords — when the zero-shot call fails or answers nonsense.
+ *   4. Keywords — when nothing else could answer.
  *
  * Buckets are data (id + description), so adding one updates the zero-shot
  * prompt by itself. Any `Classifier` can take the place of a stage
@@ -20,6 +22,8 @@ export interface BucketDef {
   label: string;
   /** What belongs here — read by the zero-shot model, so write it for a model. */
   description: string;
+  /** Typical messages, for the embeddings classifier (never the eval set's). */
+  examples?: string[];
 }
 
 export interface ClassifyInput {
@@ -35,7 +39,7 @@ export interface Classification {
   bucket: string;
   /** 0–1. Hard facts (an image, a huge prompt) say 1; guesses (keywords, a short message) 0.5 or less. */
   confidence: number;
-  by: "rule" | "zero-shot" | "keywords";
+  by: "rule" | "embeddings" | "zero-shot" | "keywords";
   reason: string;
 }
 
@@ -142,29 +146,47 @@ export function zeroShotClassifier(opts: ZeroShotOptions): Classifier {
   };
 }
 
-export interface PipelineOptions {
-  hard?: (input: ClassifyInput) => Classification | null;
-  primary?: Classifier;
-  fallback: Classifier;
-  /** How long the primary gets before the fallback answers. Default 2.5s. */
+export interface PipelineStage {
+  classifier: Classifier;
+  /** Below this confidence the next stage is asked; its answer wins if it has one. Default 0 (always sure). */
+  sureAt?: number;
+  /** How long this stage gets. Default 2.5s. */
   timeoutMs?: number;
 }
 
+export interface PipelineOptions {
+  hard?: (input: ClassifyInput) => Classification | null;
+  /** Tried in order: embeddings (local, unsure → next), zero-shot, … */
+  stages?: PipelineStage[];
+  /** Shorthand for one stage. */
+  primary?: Classifier;
+  fallback: Classifier;
+  timeoutMs?: number;
+}
+
+/**
+ * Hard rules → each stage in order until one is sure → the most confident
+ * unsure answer → the fallback. A stage that fails or times out is skipped.
+ */
 export function classifierPipeline(opts: PipelineOptions): Classifier {
+  const stages: PipelineStage[] = opts.stages ?? (opts.primary ? [{ classifier: opts.primary, timeoutMs: opts.timeoutMs }] : []);
   return {
     async classify(input, signal) {
       const hard = opts.hard?.(input);
       if (hard) return hard;
-      if (opts.primary) {
+      let unsure: Classification | undefined;
+      for (const stage of stages) {
         try {
-          const timeout = AbortSignal.timeout(opts.timeoutMs ?? 2_500);
-          return await opts.primary.classify(input, signal ? AbortSignal.any([signal, timeout]) : timeout);
+          const timeout = AbortSignal.timeout(stage.timeoutMs ?? 2_500);
+          const c = await stage.classifier.classify(input, signal ? AbortSignal.any([signal, timeout]) : timeout);
+          if (c.confidence >= (stage.sureAt ?? 0)) return c;
+          if (!unsure || c.confidence > unsure.confidence) unsure = c;
         } catch (e) {
           if (signal?.aborted) throw e;
-          console.error(`[apibrain] zero-shot classifier: ${e instanceof Error ? e.message : e} — using keywords`);
+          if (!(e instanceof Error && e.name === "StageUnavailable")) console.error(`[apibrain] classifier stage: ${e instanceof Error ? e.message : e} — trying the next`);
         }
       }
-      return opts.fallback.classify(input, signal);
+      return unsure ?? opts.fallback.classify(input, signal);
     },
   };
 }

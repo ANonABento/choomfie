@@ -427,3 +427,21 @@ describe("config", () => {
     expect([...local.members.keys()]).toEqual(["llm7", "ovh", "ollama"]);
   });
 });
+
+describe("classifier setup", () => {
+  test("embeddings stage on by default (sure at 0.8), off with false; eval set has a case per text bucket", async () => {
+    const { parseFreeConfig } = await import("../config.ts");
+    expect(parseFreeConfig({}).classifier.embeddings).toMatchObject({ model: "nomic-embed-text", sureAt: 0.8 });
+    expect(parseFreeConfig({ classifier: { embeddings: false } }).classifier.embeddings).toBe(false);
+    expect(parseFreeConfig({ classifier: { embeddings: { model: "mxbai-embed-large", sureAt: 0.6 } } }).classifier.embeddings).toMatchObject({ model: "mxbai-embed-large", sureAt: 0.6 });
+    const on = setupFree({}, { GROQ_API_KEY: "k" }, new Health(), new Quota());
+    expect(Object.keys(on.stages)).toEqual(["keywords", "embeddings", "zero-shot", "pipeline"]);
+    const off = setupFree({ classifier: { embeddings: false, type: "keywords" } }, {}, new Health(), new Quota());
+    expect(Object.keys(off.stages)).toEqual(["keywords", "pipeline"]);
+    const { EVAL_SET } = await import("../eval-set.ts");
+    const { BUCKETS } = await import("../buckets.ts");
+    const examples = new Set(BUCKETS.flatMap((b) => b.examples ?? []));
+    expect(EVAL_SET.filter((c) => examples.has(c.text))).toEqual([]);
+    for (const b of BUCKETS.filter((b) => b.examples)) expect(EVAL_SET.some((c) => c.bucket === b.id)).toBe(true);
+  });
+});

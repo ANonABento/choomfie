@@ -34,6 +34,11 @@ export interface FreeConfig {
     suggestAt: number;
     /** Prompts over this many tokens are `long`. */
     longTokens: number;
+    /**
+     * Local embeddings stage, before the zero-shot call (Ollama). `false`
+     * turns it off. Below `sureAt` the zero-shot model decides.
+     */
+    embeddings: false | { model: string; url?: string; sureAt: number };
   };
   /** Pinned summary models; otherwise need "fast". */
   summaryTargets?: string[];
@@ -69,6 +74,16 @@ function parseLimits(v: unknown): Limits | undefined {
   return Object.keys(out).length ? out : undefined;
 }
 
+function parseEmbeddings(v: unknown): FreeConfig["classifier"]["embeddings"] {
+  if (v === false) return false;
+  const e = isRecord(v) ? v : {};
+  return {
+    model: typeof e.model === "string" && e.model ? e.model : "nomic-embed-text",
+    ...(typeof e.url === "string" && /^https?:\/\//.test(e.url) ? { url: e.url } : {}),
+    sureAt: num(e.sureAt, 0, 1) ?? 0.8,
+  };
+}
+
 export function parseFreeConfig(raw: unknown, warn: (msg: string) => void = (m) => console.error(`[free] config: ${m}`)): FreeConfig {
   const c = isRecord(raw) ? raw : {};
   if (raw !== undefined && !isRecord(raw)) warn("`free` should be an object — using defaults");
@@ -93,6 +108,7 @@ export function parseFreeConfig(raw: unknown, warn: (msg: string) => void = (m) 
     ...(isStringList(cl.targets) ? { targets: cl.targets } : typeof cl.target === "string" ? { targets: [cl.target] } : {}),
     suggestAt: num(cl.suggestAt, 0, 1) ?? 0.75,
     longTokens: num(cl.longTokens, 500, 1e7) ?? 6_000,
+    embeddings: parseEmbeddings(cl.embeddings),
   };
 
   const providers: Record<string, ProviderSettings> = {};
