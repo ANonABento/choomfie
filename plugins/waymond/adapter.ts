@@ -254,6 +254,8 @@ async function attach(page: Page, files: string[]): Promise<void> {
 
 export const waymondAdapter: SiteAdapter = {
   ...ID,
+  // Its cloud sandbox: repos, builds, CAD, browsing, and pictures (not music or video).
+  capabilities: ["agentic", "web-search", "image-gen", "vision"],
   loginUrl: `${APP_ORIGIN}/chat`,
   chatUrl,
   modes: WAYMOND_MODES,

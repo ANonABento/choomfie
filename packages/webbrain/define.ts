@@ -8,7 +8,7 @@
  * background results.
  */
 
-import { copyFileSync, mkdirSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
   errorMessage,
@@ -21,6 +21,11 @@ import {
   pushBrainReply,
   registerBrain,
   statusLine,
+  askBrain,
+  brainDirectory,
+  DELEGATION_DEPTH,
+  MAX_DELEGATION_DEPTH,
+  type BrainFile,
   unregisterBrain,
   type Brain,
   type BrainApproval,
@@ -35,7 +40,22 @@ import { joinRef, listProfiles, outboxDir, profileDir, siteDir, splitRef } from 
 import { hasProfile } from "./sites.ts";
 import { TabPool, type ContextLike } from "./tabs.ts";
 import { LateWatch } from "./watch.ts";
-import { isLookOnly, MAX_CALLS, MAX_STEPS, ranNote, resultsPrompt, runCalls, runCommand, TOOL_REMINDER, toolGuide, withoutRunBlocks, type RunResult } from "./local-tools.ts";
+import {
+  askCalls,
+  askGuide,
+  askResultsPrompt,
+  isLookOnly,
+  MAX_CALLS,
+  MAX_STEPS,
+  ranNote,
+  resultsPrompt,
+  runCalls,
+  runCommand,
+  TOOL_REMINDER,
+  toolGuide,
+  withoutRunBlocks,
+  type RunResult,
+} from "./local-tools.ts";
 
 export interface WebBrainOptions {
   /** Tabs open at once (chats answering side by side). Default 3. */
@@ -209,6 +229,7 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
       label: adapter.label,
       modes: adapter.modes?.map(({ id, label, description, repo, files }) => ({ id, label, description, ...(repo ? { repo } : {}), ...(files ? { files } : {}) })),
       defaultMode: adapter.defaultMode,
+      ...(adapter.capabilities ? { capabilities: adapter.capabilities } : {}),
 
       // More than one account: which are out, for `/brain status`.
       ...(profiles.length > 1
@@ -321,6 +342,10 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
         // Local tools: the owner's messages only, on a site that opts in.
         const tools = !!adapter.localTools && message.meta?.role === "owner";
         const toolResult = !!message.meta?.[TOOL_RESULT];
+        // Asking another brain (`#!ask <id>`): with tools on, and not past the hand-off depth (no loops).
+        const depth = Number(message.meta?.[DELEGATION_DEPTH] ?? 0) || 0;
+        const others = brainDirectory([adapter.id]);
+        const canAsk = tools && depth < MAX_DELEGATION_DEPTH && !!others;
         try {
           // A thread on a pipeline (`/pipeline`) gets no default frame: its
           // note says how to work there, and a default like "do it in your
@@ -330,7 +355,10 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
           // The guide opens each site conversation; later messages get a one-line reminder.
           // Built per attempt: a turn moved to another account opens a new conversation, which needs the full guide.
           const build = () => {
-            const withTools = tools && !toolResult ? `${turn.ref ? TOOL_REMINDER : toolGuide()}\n\n${framed}` : framed;
+            const guide = turn.ref
+              ? `${TOOL_REMINDER}${canAsk ? " [Or ask another AI: a block starting #!ask <id>.]" : ""}`
+              : `${toolGuide()}${canAsk ? `\n${askGuide(others)}` : ""}`;
+            const withTools = tools && !toolResult ? `${guide}\n\n${framed}` : framed;
             return modePrompt(
               adapter,
               toolResult ? null : (chat.mode ?? (onPipeline ? null : adapter.defaultMode) ?? null),
@@ -420,13 +448,39 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
           // The site asked to run commands here: look-only ones run now, anything else waits for the owner.
           const ran: RunResult[] = [];
           let waiting: BrainApproval | undefined;
+          /** Files other brains made for this turn (an image Waymond drew): attached to the reply. */
+          const fromOthers: BrainFile[] = [];
+          const askedOf: string[] = [];
           for (let step = 0; tools; step++) {
             if (result.stopped || turn.stop || result.background || result.approvals?.length) break;
+            const asks = canAsk ? askCalls(result.text, result.codeBlocks) : [];
             const asked = runCalls(result.text, result.codeBlocks);
-            if (!asked.length) break;
+            if (!asked.length && !asks.length) break;
             if (step >= MAX_STEPS) {
               result = { ...result, text: `${result.text}\n\n-# Stopped after ${MAX_STEPS} rounds of commands; say "go on" to continue.` };
               break;
+            }
+            if (asks.length) {
+              // Ask first; any commands in the same reply wait for the next round.
+              const answers = [];
+              for (const a of asks.slice(0, MAX_CALLS)) {
+                progress(`🤝 asking ${a.to}`);
+                logEvent(message.chatKey, "asked", { to: a.to, task: a.task.slice(0, 200) });
+                try {
+                  const r = await askBrain({ to: a.to, task: a.task, conversation: `${message.chatKey}:${adapter.id}-asks`, from: adapter.label, depth });
+                  for (const f of r.files) fromOthers.push({ name: basename(f), data: new Uint8Array(readFileSync(f)) });
+                  askedOf.push(r.label);
+                  answers.push({ to: a.to, label: r.label, text: r.text, files: r.files });
+                } catch (e) {
+                  answers.push({ to: a.to, error: errorMessage(e) });
+                }
+              }
+              turn.ref = result.ref;
+              chats.setBackendRef(chat.id, joinRef(profile, result.ref));
+              lateWatch.delivered(message.chatKey, result.messageIds ?? []);
+              const prompt = askResultsPrompt(answers) + (asked.length ? "\n[Commands in that reply didn't run; ask again if you still need them.]" : "");
+              result = await runTurn(prompt, []);
+              continue;
             }
             const cmds = asked.slice(0, MAX_CALLS);
             if (!cmds.every(isLookOnly)) {
@@ -458,6 +512,8 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
             result = { ...result, text: shown || (waiting ? `-# ${adapter.label} needs a command run here first.` : shown) };
           }
           if (ran.length) result = { ...result, text: `${result.text}\n${ranNote(ran)}` };
+          if (askedOf.length) result = { ...result, text: `${result.text}\n-# 🤝 asked ${[...new Set(askedOf)].join(", ")}` };
+          if (fromOthers.length) result = { ...result, files: [...(result.files ?? []), ...fromOthers] };
           if (waiting) result = { ...result, approvals: [...(result.approvals ?? []), waiting] };
 
           chats.setBackendRef(chat.id, joinRef(profile, result.ref));

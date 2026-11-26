@@ -249,6 +249,7 @@ export function createHarnessBrain(spec: HarnessSpec, ctx: PluginContext, deps: 
   return {
     id: spec.id,
     label: spec.label,
+    capabilities: spec.capabilities ?? ["local"],
     modes: spec.modes,
     defaultMode: spec.defaultMode,
     send: (message) => serial(message.chatKey, () => turn(message)),

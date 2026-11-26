@@ -16,7 +16,18 @@
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
-import { awaitLateReply, CLAUDE_BRAIN, getBrain, listBrainIds, type BrainFile, type BrainReply } from "@choomfie/shared";
+import {
+  awaitLateReply,
+  brainDirectory,
+  CLAUDE_BRAIN,
+  DELEGATION_DEPTH,
+  getBrain,
+  listBrainIds,
+  MAX_DELEGATION_DEPTH,
+  setBrainAsker,
+  type BrainFile,
+  type BrainReply,
+} from "@choomfie/shared";
 import { inConversation } from "./brain-router.ts";
 import type { AppContext } from "./types.ts";
 
@@ -42,6 +53,10 @@ export interface DelegateRequest {
   from: string;
   /** How long to wait, in all, including results that went to the background. */
   waitMs: number;
+  /** For this task only, the model to use (free: `groq`, `groq:openai/gpt-oss-120b`, `auto`). */
+  model?: string;
+  /** Asks deep this already is: Claude's or the owner's is 0. Past MAX_DELEGATION_DEPTH it's refused (no loops). */
+  depth?: number;
 }
 
 export interface DelegateResult {
@@ -88,12 +103,17 @@ export function saveFiles(files: BrainFile[], dir: string): string[] {
   });
 }
 
+/** Who can take a task and what each does, for errors. */
+const targetsLine = () => `brains: ${brainDirectory() || "none loaded"}`;
+
 export async function delegate(req: DelegateRequest, ctx: AppContext): Promise<DelegateResult> {
   if (!req.task.trim()) throw new DelegateError("task is empty");
   if (!req.conversation) throw new DelegateError("a conversation (chat or thread id) is required");
-  if (NOT_DELEGABLE.has(req.to)) throw new DelegateError(`"${req.to}" can't take a delegated task (targets: ${delegateTargets().join(", ") || "none"})`);
+  const depth = req.depth ?? 0;
+  if (depth >= MAX_DELEGATION_DEPTH) throw new DelegateError(`that's ${depth} hand-offs deep already; answer with what you have`);
+  if (NOT_DELEGABLE.has(req.to)) throw new DelegateError(`"${req.to}" can't take a delegated task (${targetsLine()})`);
   const brain = getBrain(req.to);
-  if (!brain) throw new DelegateError(`no brain "${req.to}" loaded (targets: ${delegateTargets().join(", ") || "none"})`);
+  if (!brain) throw new DelegateError(`no brain "${req.to}" loaded (${targetsLine()})`);
   for (const f of req.files ?? []) {
     if (!isAbsolute(f) || !existsSync(f)) throw new DelegateError(`file not found (absolute path needed): ${f}`);
   }
@@ -107,7 +127,14 @@ export async function delegate(req: DelegateRequest, ctx: AppContext): Promise<D
           chatKey: req.conversation,
           content: req.task,
           filePaths: req.files ?? [],
-          meta: { chat_id: req.conversation, user: req.from, role: "owner" },
+          meta: {
+            chat_id: req.conversation,
+            user: req.from,
+            role: "owner",
+            // Whoever answers this can't hand it on past the limit.
+            [DELEGATION_DEPTH]: String(depth + 1),
+            ...(req.model ? { model: req.model } : {}),
+          },
         },
         ctx
       ),
@@ -128,5 +155,29 @@ export async function delegate(req: DelegateRequest, ctx: AppContext): Promise<D
       stillWorking: !!last.background && !last.stopped,
       stopped: !!last.stopped,
     };
+  });
+}
+
+/**
+ * Let brains outside core ask another brain (`askBrain` in @choomfie/shared):
+ * the web-brain kit's `#!ask` blocks. Same rules as the tool: owner work,
+ * depth-limited, files saved under the data dir.
+ */
+export function installBrainAsker(ctx: AppContext): void {
+  setBrainAsker(async (req) => {
+    const r = await delegate(
+      {
+        to: req.to,
+        task: req.task,
+        conversation: req.conversation,
+        files: req.files ?? [],
+        saveTo: join(ctx.DATA_DIR, "brain-files", req.to, new Date().toISOString().replace(/[:.]/g, "-")),
+        from: req.from,
+        waitMs: 10 * 60_000,
+        depth: req.depth,
+      },
+      ctx
+    );
+    return { label: r.label, text: r.text, files: r.files };
   });
 }

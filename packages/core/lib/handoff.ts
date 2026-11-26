@@ -9,6 +9,7 @@
  * fresh instead.
  */
 
+import { getBrain, listBrainIds } from "@choomfie/shared";
 import { addChatNote } from "./chat-notes.ts";
 
 export interface HandoffMessage {
@@ -25,8 +26,67 @@ const PER_MESSAGE_CHARS = 600;
 const MAX_AGE_MS = 24 * 3_600_000;
 const FETCH_LIMIT = 40;
 
+/** Past this, the older part of a handoff is summarized (when a brain can summarize); the latest messages stay word for word. */
+export const SUMMARIZE_OVER = 2_500;
+const KEEP_VERBATIM = 3;
+const SUMMARY_TIMEOUT_MS = 20_000;
+
+const header = (fromLabel: string, toLabel: string) =>
+  `The owner just moved this chat from ${fromLabel} to you (${toLabel}). Its latest messages, oldest first, so you can pick up where it left off:`;
+
 /** The note for the new brain, or undefined when there's nothing worth carrying. */
 export function handoffNote(fromLabel: string, toLabel: string, messages: HandoffMessage[], now = Date.now(), budget = HANDOFF_CHARS): string | undefined {
+  const lines = handoffLines(fromLabel, messages, now, budget);
+  return lines.length ? [header(fromLabel, toLabel), ...lines].join("\n") : undefined;
+}
+
+/**
+ * The same, with the older messages summarized by a cheap model when it's
+ * long: the new brain gets the gist and the latest exchange exactly, in a
+ * fraction of the tokens. Falls back to the plain note if summarizing fails.
+ */
+export async function condensedHandoffNote(
+  fromLabel: string,
+  toLabel: string,
+  messages: HandoffMessage[],
+  summarize: ((text: string) => Promise<string>) | undefined,
+  now = Date.now()
+): Promise<string | undefined> {
+  const lines = handoffLines(fromLabel, messages, now, HANDOFF_CHARS);
+  if (!lines.length) return undefined;
+  const plain = [header(fromLabel, toLabel), ...lines].join("\n");
+  if (!summarize || plain.length <= SUMMARIZE_OVER || lines.length <= KEEP_VERBATIM) return plain;
+  const older = lines.slice(0, -KEEP_VERBATIM);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const summary = (
+      await Promise.race([summarize(older.join("\n")), new Promise<string>((_, reject) => (timer = setTimeout(() => reject(new Error("timed out")), SUMMARY_TIMEOUT_MS)))])
+    ).trim();
+    if (!summary) return plain;
+    return [
+      `The owner just moved this chat from ${fromLabel} to you (${toLabel}). What happened before, in short:`,
+      summary,
+      "The latest messages, word for word:",
+      ...lines.slice(-KEEP_VERBATIM),
+    ].join("\n");
+  } catch (e) {
+    console.error(`[handoff] summary failed, carrying the messages as they are: ${e instanceof Error ? e.message : e}`);
+    return plain;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** A loaded brain that can summarize cheaply (free), if any. */
+export function findSummarizer(): ((text: string) => Promise<string>) | undefined {
+  for (const id of listBrainIds()) {
+    const b = getBrain(id);
+    if (b?.summarize) return (text) => b.summarize!(text);
+  }
+  return undefined;
+}
+
+function handoffLines(fromLabel: string, messages: HandoffMessage[], now: number, budget: number): string[] {
   const lines: string[] = [];
   let used = 0;
   // Newest first, until the budget runs out; then put them back in order.
@@ -45,11 +105,7 @@ export function handoffNote(fromLabel: string, toLabel: string, messages: Handof
     lines.unshift(line);
     used += line.length;
   }
-  if (!lines.length) return undefined;
-  return [
-    `The owner just moved this chat from ${fromLabel} to you (${toLabel}). Its latest messages, oldest first, so you can pick up where it left off:`,
-    ...lines,
-  ].join("\n");
+  return lines;
 }
 
 interface FetchableChannel {
@@ -70,7 +126,7 @@ export async function carryContext(channel: unknown, locationId: string, fromLab
       content: m.content,
       at: m.createdTimestamp,
     }));
-    const note = handoffNote(fromLabel, toLabel, messages);
+    const note = await condensedHandoffNote(fromLabel, toLabel, messages, findSummarizer());
     if (!note) return false;
     addChatNote(locationId, note);
     return true;

@@ -51,6 +51,9 @@ import {
   getBrain,
   isQuotaReached,
   mediaKindOf,
+  brainsWith,
+  listBrainIds,
+  type Capability,
   type Brain,
   type BrainMessage,
   type BrainMode,
@@ -93,6 +96,14 @@ export const RELEASE_CHOICE = "Answer with another model";
  */
 export const HAND_BACK_CHOICE = "Back to auto";
 export const handChoice = (label: string) => `Hand this to ${label}`;
+/** "Hand this to …" buttons under one answer, at most. */
+const MAX_OFFERS = 3;
+
+/** The capability a bucket's work needs (media: by what the message asks to make). */
+function capabilityFor(bucketId: string, kind?: string): Capability | undefined {
+  if (bucketId === "media") return `${kind ?? "image"}-gen` as Capability;
+  return ({ agentic: "agentic", local: "local", research: "web-search" } as Record<string, Capability>)[bucketId];
+}
 
 export interface FreeBrainDeps {
   config: FreeConfig;
@@ -147,7 +158,8 @@ interface Decision {
   /** A pinned API target, to say when someone else answered. */
   pin?: Target;
   /** A web member this message looks like a job for (offered, not taken). */
-  suggest?: string;
+  /** Brains to offer with a "Hand this to …" button each (best first). */
+  suggest?: string[];
   confidence?: number;
   reason?: string;
 }
@@ -171,7 +183,11 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
 
   /** Every target id that isn't an API provider: brains the router may hand to. */
   const brainMemberIds = (): string[] => {
-    const all = [...config.priority, ...config.buckets.flatMap((b) => [...b.brains, ...(b.targets ?? [])])].map((t) => parseTarget(t).member);
+    const all = [
+      ...[...config.priority, ...config.buckets.flatMap((b) => [...b.brains, ...(b.targets ?? [])])].map((t) => parseTarget(t).member),
+      // A brain that says what it can do is a member too, with no config line (a new site, a new harness).
+      ...listBrainIds().filter((id) => !!getBrain(id)?.capabilities?.length),
+    ];
     return [...new Set(all)].filter((id) => !members.has(id) && id !== FREE_BRAIN && !config.providers[id] && !PROVIDER_IDS.has(id));
   };
   const isBrainMember = (id: string) => brainMemberIds().includes(id) && !!lookup(id);
@@ -202,16 +218,31 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
 
   /** Brain members that share a bucket with `id` and can take a call now (where its work can go when it's out). */
   function siblingsOf(id: string, kind?: string): string[] {
-    // Out of one kind of media: only another media brain can do that work.
-    const ids = config.buckets.filter((b) => b.brains.includes(id) && (!kind || b.id === "media")).flatMap((b) => b.brains);
+    // Out of one kind of media: only a brain that makes that kind can do that work.
+    const ids = kind ? brainsFor("media", kind) : config.buckets.filter((b) => b.brains.includes(id)).flatMap((b) => brainsFor(b.id));
     return [...new Set(ids)].filter((x) => x !== id && isBrainMember(x) && waitMs({ member: x }, 0, kind) === 0).slice(0, 2);
   }
 
-  function targetsFor(bucketId: string): Target[] {
+  /**
+   * The brains for a bucket's work: the ones config lists, minus any that say
+   * they can't do it (a song: only brains with `music-gen`), plus any other
+   * loaded brain that says it can (a new media site needs no config line).
+   */
+  function brainsFor(bucketId: string, kind?: string): string[] {
+    const cap = capabilityFor(bucketId, kind);
+    const listed = (bucket(bucketId)?.brains ?? []).filter((id) => {
+      const caps = lookup(id)?.capabilities;
+      return !cap || !caps || caps.includes(cap);
+    });
+    const more = cap ? brainsWith(cap).map((b) => b.id).filter((id) => id !== FREE_BRAIN && !listed.includes(id)) : [];
+    return [...listed, ...more];
+  }
+
+  function targetsFor(bucketId: string, kind?: string): Target[] {
     if (config.strategy === "priority") return config.priority.map(parseTarget);
     const b = bucket(bucketId);
-    // Pinned in config, or: this kind of work's web brains, then the best live models for its need.
-    const planned = b?.targets ? b.targets.map(parseTarget) : [...(b?.brains ?? []).map((id) => ({ member: id })), ...rankAcross(members.values(), b?.need ?? "fast")];
+    // Pinned in config, or: this kind of work's brains, then the best live models for its need.
+    const planned = b?.targets ? b.targets.map(parseTarget) : [...brainsFor(bucketId, kind).map((id) => ({ member: id })), ...rankAcross(members.values(), b?.need ?? "fast")];
     return [...planned, ...config.priority.map(parseTarget)];
   }
 
@@ -231,9 +262,11 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
       const owned = memberMode(chat.mode);
       if (owned) return { bucket: chat.mode, by: "mode", targets: [{ member: owned.brain.id }], locked: true, pinnedMode: chat.mode };
     }
-    const holder = released ? undefined : holderOf(chat);
+    // A model asked for this message only (`delegate` with `model`): it answers, whoever holds the chat.
+    const oneOff = typeof message.meta?.model === "string" && message.meta.model !== "auto" ? parseTarget(message.meta.model) : undefined;
+    const holder = released || (oneOff && isApi(oneOff)) ? undefined : holderOf(chat);
     if (holder) return { bucket: "pinned", by: "pin", targets: [{ member: holder }], locked: true };
-    const pin = !released && chat.model ? parseTarget(chat.model) : undefined;
+    const pin = oneOff && isApi(oneOff) ? oneOff : !released && chat.model ? parseTarget(chat.model) : undefined;
     if (pin && isApi(pin)) {
       const api = members.get(pin.member)!;
       // An image the pinned model can't see goes to a vision model for this one turn.
@@ -268,20 +301,21 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
       chosen = follow.bucket;
       reason = `follow-up, stays on ${follow.bucket}`;
     }
-    const planned = targetsFor(chosen);
+    const kind = mediaKindOf(message.content);
+    const planned = targetsFor(chosen, kind);
     const again = follow && members.has(follow.member) ? { member: follow.member, ...(follow.asked ? { model: follow.asked } : {}) } : undefined;
     const targets = again ? [again, ...planned.filter((t) => t.member !== again.member || t.model !== again.model)] : planned;
     // A first message may go anywhere: nothing is lost if a web brain takes it.
     const why = { confidence, ...(reason ? { reason } : {}) };
     if (first && !released) return { bucket: chosen, by, targets, locked: false, ...why };
-    // Mid-chat, only API members answer; a web member the bucket names is offered instead.
+    // Mid-chat, only API members answer; the brains that can do this work are offered instead, a button each.
     const b = bucket(chosen);
-    const own = [...(b?.brains ?? []), ...(b?.targets ?? [])].map(parseTarget);
-    const offer =
+    const own = [...brainsFor(chosen, kind).map((id) => ({ member: id }) as Target), ...(b?.targets ?? []).map(parseTarget)];
+    const offers =
       released || confidence < config.classifier.suggestAt
-        ? undefined
-        : own.find((t) => !isApi(t) && isBrainMember(t.member) && waitMs(t, 0) === 0);
-    return { bucket: chosen, by, targets: targets.filter(isApi), locked: false, ...why, ...(offer ? { suggest: offer.member } : {}) };
+        ? []
+        : [...new Set(own.filter((t) => !isApi(t) && isBrainMember(t.member) && waitMs(t, 0, kind) === 0).map((t) => t.member))].slice(0, MAX_OFFERS);
+    return { bucket: chosen, by, targets: targets.filter(isApi), locked: false, ...why, ...(offers.length ? { suggest: offers } : {}) };
   }
 
   async function answerWithApi(member: ApiMember, t: Target, chatId: string, framed: string, filePaths: string[], signal: AbortSignal, bucketId?: string): Promise<Answer> {
@@ -354,6 +388,9 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
   const brain: Brain = {
     id: FREE_BRAIN,
     label: "Free",
+    // Its vision and long-context models; tool work goes to members.
+    capabilities: ["vision", "long-context"],
+    summarize: (text) => summarize(text),
 
     // Read by core on each `/mode`: brain members can load after this one.
     get modes(): BrainMode[] {
@@ -454,12 +491,12 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         recent.unshift({ ...r, text: message.content.slice(0, 40) });
         recent.length = Math.min(recent.length, 5);
         if (routed.passed.length) console.error(`[free] ${targetKey(routed.target)} answered after: ${routed.passed.join("; ")}`);
-        logRoute({ answered: model ? `${member}:${model}` : member, ms: routed.latencyMs, passed: routed.passed, ...(decision.suggest ? { offered: decision.suggest } : {}) });
+        logRoute({ answered: model ? `${member}:${model}` : member, ms: routed.latencyMs, passed: routed.passed, ...(decision.suggest ? { offered: decision.suggest.join(",") } : {}) });
         void maybeCompact({ transcript, chatId: chat.id, budget: budget(), summarize });
 
         let text = reply.text;
         // A brain with tools was meant to take this and couldn't: say so, so a text answer isn't mistaken for the real thing.
-        const skipped = members.has(member) ? (bucket(decision.bucket)?.brains ?? []).find((id) => decision.targets.some((t) => t.member === id)) : undefined;
+        const skipped = members.has(member) ? decision.targets.find((t) => !members.has(t.member))?.member : undefined;
         const skippedWhy = skipped ? routed.passed.find((p) => p.startsWith(`${skipped}:`)) : undefined;
         if (skipped && !reply.stopped) {
           const raw = skippedWhy?.slice(skipped.length + 1).trim();
@@ -474,7 +511,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         else if (config.footer && !reply.stopped) text += footer(r);
         const offered: [string, OfferKind][] =
           reply.stopped ? []
-          : decision.suggest ? [[handChoice(label(decision.suggest)), { kind: "hand", to: decision.suggest }]]
+          : decision.suggest ? decision.suggest.map((to): [string, OfferKind] => [handChoice(label(to)), { kind: "hand", to }])
           // A member now holds this chat: one click gives it back when the work is done.
           : !members.has(member) ? [[HAND_BACK_CHOICE, { kind: "handback", from: member }]]
           : [];

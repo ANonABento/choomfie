@@ -9,7 +9,7 @@
  * read what it printed. Adding a harness is one spec file.
  */
 
-import type { BrainMode } from "@choomfie/shared";
+import type { BrainMode, Capability } from "@choomfie/shared";
 
 export interface HarnessTurn {
   /** What to send, already framed (who's talking, attached files). */
@@ -64,6 +64,8 @@ export interface HarnessSpec {
    * config `harnesses.<id>.acp: false` (back to print mode).
    */
   acp?: { args: string[]; modes: Record<string, string> };
+  /** What it can do; default `["local"]` (works on this computer). */
+  capabilities?: Capability[];
 }
 
 /** What CLIs print when an allowance is spent (agy: `RESOURCE_EXHAUSTED`, "Quota exhausted"). */

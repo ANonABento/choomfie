@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { registerBrain, unregisterBrain } from "@choomfie/shared";
 import { brainModelReply } from "../lib/handlers/brain-model.ts";
-import { handoffNote } from "../lib/handoff.ts";
+import { condensedHandoffNote, handoffNote, SUMMARIZE_OVER } from "../lib/handoff.ts";
 
 function fakeChats() {
   const chats = new Map<string, { id: string; model: string | null }>();
@@ -58,5 +58,21 @@ describe("handoff on /brain switch", () => {
     expect(note.split("\n").slice(1)).toEqual(["kev: newest"]);
     expect(handoffNote("A", "B", [m("kev", "ancient", 60 * 25)], now)).toBeUndefined();
     expect(handoffNote("A", "B", [m("bot", "-# status only", 1, true)], now)).toBeUndefined();
+  });
+
+  test("a long handoff: the older part summarized, the last three messages word for word; a failed summary carries it as is", async () => {
+    const long = Array.from({ length: 10 }, (_, i) => m("kev", `message ${i} ${"x".repeat(400)}`, 20 - i));
+    const asked: string[] = [];
+    const note = (await condensedHandoffNote("Claude", "Free", long, async (t) => (asked.push(t), "They planned a parser rewrite."), now))!;
+    expect(note.split("\n").slice(0, 3)).toEqual(["The owner just moved this chat from Claude to you (Free). What happened before, in short:", "They planned a parser rewrite.", "The latest messages, word for word:"]);
+    expect(note.split("\n").slice(3).map((l) => l.slice(0, 13))).toEqual(["kev: message ", "kev: message ", "kev: message "]);
+    expect(asked[0]).toContain("message 0");
+    expect(asked[0]).not.toContain("message 9");
+    const failed = await condensedHandoffNote("Claude", "Free", long, async () => Promise.reject(new Error("all limited")), now);
+    expect(failed).toBe(handoffNote("Claude", "Free", long, now));
+    // Short, or nobody to summarize: as before.
+    const short = [m("kev", "hi", 1)];
+    expect(await condensedHandoffNote("A", "B", short, async () => "nope", now)).toBe(handoffNote("A", "B", short, now));
+    expect(handoffNote("Claude", "Free", long, now)!.length).toBeGreaterThan(SUMMARIZE_OVER);
   });
 });

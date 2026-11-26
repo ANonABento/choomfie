@@ -303,6 +303,7 @@ async function answerImages(page: Page): Promise<BrainFile[]> {
 
 export const geminiAdapter: SiteAdapter = {
   ...ID,
+  capabilities: ["web-search", "image-gen", "music-gen", "video-gen", "vision"],
   loginUrl: `${ORIGIN}/app`,
   chatUrl: (ref) => (ref ? `${ORIGIN}/app/${ref}` : `${ORIGIN}/app`),
   // A signed-out profile is not redirected: Gemini shows its guest page at /app.

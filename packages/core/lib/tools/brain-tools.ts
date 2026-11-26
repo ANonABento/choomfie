@@ -9,6 +9,7 @@
 
 import { join } from "node:path";
 import { delegate, DelegateError, type DelegateResult } from "../delegate.ts";
+import { brainDirectory } from "@choomfie/shared";
 import { callerIsOwner } from "../caller.ts";
 import type { ToolDef } from "../types.ts";
 import { err, text } from "../types.ts";
@@ -30,8 +31,17 @@ export const brainTools: ToolDef[] = [
   {
     definition: {
       name: "delegate",
-      description:
-        "Owner only. Hand a task (and optional files) to another brain, e.g. Waymond (it can generate images), and get its answer back: text plus the files it made, saved to disk. Waits for the answer, including work it finishes in the background (up to 48 min). Use for things that brain does better or only it can do, like image generation; not for chat.",
+      // Read when the tool list is sent (after plugins load), so it names the brains actually loaded.
+      get description() {
+        const who = brainDirectory();
+        return (
+          "Owner only. Hand a task (and optional files) to another brain and get its answer back: text plus the files it made, saved to disk. " +
+          "Waits for the answer, including work it finishes in the background (up to 48 min). Use for what another brain does better or only it can do " +
+          "(image or music generation, cloud builds, work on this computer), and to save your own usage on cheap text work: `to: \"free\"` " +
+          "(summaries, translation, first drafts; `model` picks one). Not for chat." +
+          (who ? ` Loaded brains and what they do: ${who}.` : "")
+        );
+      },
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -45,6 +55,10 @@ export const brainTools: ToolDef[] = [
           },
           files: { type: "array", items: { type: "string" }, description: "Absolute paths of files to send (reference images, …)" },
           save_to: { type: "string", description: "Absolute folder for the files the brain hands back (default: a new folder under the data dir)" },
+          model: {
+            type: "string",
+            description: 'For this task only, the model inside that brain: for free, a provider ("groq") or provider:model ("groq:openai/gpt-oss-120b"); default: it picks.',
+          },
         },
         required: ["to", "task", "chat_id"],
       },
@@ -66,6 +80,7 @@ export const brainTools: ToolDef[] = [
               : join(ctx.DATA_DIR, "brain-files", to, new Date().toISOString().replace(/[:.]/g, "-")),
             from: "Claude (delegate)",
             waitMs: DELEGATE_WAIT_MS,
+            ...(args.model ? { model: String(args.model) } : {}),
           },
           ctx
         );

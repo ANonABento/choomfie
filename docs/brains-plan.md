@@ -224,11 +224,11 @@ Different from routing: routing picks **who answers the user**; delegation is **
 - Researched Nov 24: Cursor CLI's free plan runs out almost at once; Gemini CLI's free serving ended (June 2026) and Qwen Code's free tier ended (April 2026); Codex needs a paid plan or key.
 
 **Stage 4 — Agents talking to agents.** Exit: any brain can hand work to the right other brain mid-task and get the result back, and the user can hand a chat to any capable brain. (See "Delegation" and "hand off to any agent" above.)
-- [ ] `Brain.capabilities` (`agentic`, `image-gen`, `web-search`, `code-exec`, `vision`, `long-context`); `delegate`'s description and errors list who can do what.
-- [ ] `delegate` from every brain, not only Claude: Waymond or a harness asking free for a cheap draft, free handing a tool job to Waymond. One call shape, depth-limited (no loops).
-- [ ] Claude offloads cheap work: `delegate to:free` with `model:` (summaries, translation, first drafts).
-- [ ] "Hand off to…" one button per capable brain, replacing "Hand this to Waymond".
-- [ ] Handoff summary by a cheap model (or Claude's compaction summary) instead of the raw excerpt.
+- [x] `Brain.capabilities` (`agentic`, `image-gen`, `web-search`, `code-exec`, `vision`, `long-context`); `delegate`'s description and errors list who can do what. Nov 25: `agentic`, `local`, `web-search`, `image-gen`, `music-gen`, `video-gen`, `vision`, `long-context`; free routes media by kind and counts any capable brain as a member.
+- [x] `delegate` from every brain, not only Claude: Waymond or a harness asking free for a cheap draft, free handing a tool job to Waymond. One call shape, depth-limited (no loops). Nov 25: web brains with local tools write `#!ask <id>` (`askBrain` → `delegate`, depth 2). Not for Waymond (its own tools, no local-tools guide) or harnesses (they'd need an MCP tool in their ACP session; not worth it for drafts).
+- [x] Claude offloads cheap work: `delegate to:free` with `model:` (summaries, translation, first drafts).
+- [x] "Hand off to…" one button per capable brain, replacing "Hand this to Waymond". Nov 25: up to 3 buttons.
+- [x] Handoff summary by a cheap model (or Claude's compaction summary) instead of the raw excerpt. Nov 25: over 2,500 characters, free's summarizer condenses the older part (20s, else the raw excerpt); the last 3 messages stay word for word.
 
 **Stage 5 — Classifier.** Exit: the labelled set picks the classifier and threshold by numbers, and the confidence it reports means something.
 - [ ] Labelled set: ~60 real messages from `calls.jsonl` with the right bucket; `bun run apibrain eval` scores any classifier on it (accuracy, confusion, latency, tokens).

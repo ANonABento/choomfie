@@ -48,6 +48,43 @@ export function toolGuide(): string {
   ].join("\n");
 }
 
+/**
+ * Asking another brain: a block whose first line is `#!ask <id>`, then the
+ * task. The kit hands it over (`askBrain`, depth-limited) and sends the answer
+ * back as the next message, like a command's output. `who` is the directory of
+ * brains it can ask ("free (Free): vision, long-context; waymond (…): …").
+ */
+export function askGuide(who: string): string {
+  return [
+    "[You can also ask another AI the bot runs, for what it does better (making images or music, cloud builds) or a cheap draft:",
+    "a code block whose FIRST LINE is `#!ask <id>`, then the task, self-contained (it doesn't see this chat):",
+    "```",
+    "#!ask free",
+    "Summarize this in three bullets: …",
+    "```",
+    `Who's there: ${who}. Its answer (and any files) comes back as the next message.]`,
+  ].join("\n");
+}
+
+const ASK_MARKER = /^\s*#!\s*ask\s+([\w-]+)[^\S\n]*(?:\n|$)/i;
+
+/** The asks a reply makes: `{ to, task }` per `#!ask <id>` block. */
+export function askCalls(text: string, blocks?: CodeBlock[]): { to: string; task: string }[] {
+  return (blocks ?? fencedBlocks(text))
+    .map((b) => ASK_MARKER.exec(b.code) && { to: ASK_MARKER.exec(b.code)![1].toLowerCase(), task: b.code.replace(ASK_MARKER, "").trim() })
+    .filter((a): a is { to: string; task: string } => !!a && !!a.task);
+}
+
+/** The message that hands the answers back to the site. */
+export function askResultsPrompt(results: { to: string; label?: string; text?: string; files?: string[]; error?: string }[]): string {
+  const parts = results.map((r) =>
+    r.error
+      ? `[${r.to} couldn't answer: ${r.error}]`
+      : `[Answer from ${r.label ?? r.to}:]\n${r.text || "(no text)"}${r.files?.length ? `\n[It made ${r.files.length} file(s); they're attached to your reply for the owner: ${r.files.map((f) => f.split("/").pop()).join(", ")}]` : ""}`
+  );
+  return `${parts.join("\n\n")}\n\n[Now answer the owner.]`;
+}
+
 /** A one-line reminder for later messages in the same conversation. */
 export const TOOL_REMINDER = "[The bot can still run commands on the owner's Mac for you: a code block whose first line is #!run.]";
 
@@ -80,7 +117,7 @@ export function runCalls(text: string, blocks?: CodeBlock[]): string[] {
  */
 export function withoutRunBlocks(text: string): string {
   return text
-    .replace(/```([\w-]*)[^\n]*\n([\s\S]*?)```/g, (block, lang: string, code: string) => (lang.toLowerCase() === RUN_LANG || MARKER.test(code) ? "" : block))
+    .replace(/```([\w-]*)[^\n]*\n([\s\S]*?)```/g, (block, lang: string, code: string) => (lang.toLowerCase() === RUN_LANG || MARKER.test(code) || ASK_MARKER.test(code) ? "" : block))
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }

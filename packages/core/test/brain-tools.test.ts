@@ -136,3 +136,23 @@ describe("delegate()", () => {
     expect(order).toEqual(["message", "ask"]);
   });
 });
+
+describe("delegate between brains", () => {
+  test("the target is told how deep this is; past the limit it's refused; a one-off model rides along", async () => {
+    const got: BrainMessage[] = [];
+    fake(async (m) => (got.push(m), { text: "ok" }));
+    await delegate({ to: "fake", task: "go", conversation: "c9", saveTo: join(dataDir, "d1"), from: "Gemini web", waitMs: 5_000, depth: 1, model: "groq" }, ctx);
+    expect(got[0].meta).toMatchObject({ delegation_depth: "2", model: "groq", user: "Gemini web" });
+    await expect(delegate({ to: "fake", task: "go", conversation: "c9", saveTo: join(dataDir, "d2"), from: "x", waitMs: 5_000, depth: 2 }, ctx)).rejects.toThrow("hand-offs deep");
+  });
+
+  test("the tool's description names the loaded brains and what they do; an unknown brain lists them", async () => {
+    registerBrain({ id: "drawer", label: "Drawer", capabilities: ["image-gen"], send: async () => ({ text: "" }) });
+    try {
+      expect(askTool.definition.description).toContain("drawer (Drawer): image-gen");
+      expect(textOf(await ask({ to: "nobody" }))).toContain("drawer (Drawer): image-gen");
+    } finally {
+      unregisterBrain("drawer");
+    }
+  });
+});

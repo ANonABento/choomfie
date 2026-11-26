@@ -222,7 +222,71 @@ export interface Brain {
   models?(): BrainModel[];
   /** Summarize this chat's context now (`/compact`). Returns a short status line. */
   compact?(chatKey: string): Promise<string>;
+  /**
+   * What this brain can do, so other brains (and Claude's `delegate`) pick the
+   * right one, and free offers it for that kind of work. Absent: chat only.
+   */
+  capabilities?: Capability[];
+  /** Summarize any text cheaply (free: its fast models). Used for handoffs. */
+  summarize?(text: string): Promise<string>;
 }
+
+/**
+ * What a brain can do beyond chat:
+ * - `agentic`: does multi-step work with its own tools in the cloud (repos, sites, builds);
+ * - `local`: works on this computer (files, commands);
+ * - `web-search`: answers from the live web;
+ * - `image-gen` / `music-gen` / `video-gen`: makes that kind of file;
+ * - `vision`: reads images; `long-context`: takes very long input.
+ */
+export type Capability = "agentic" | "local" | "web-search" | "image-gen" | "music-gen" | "video-gen" | "vision" | "long-context";
+
+/** Who can do what, one line per loaded brain (Claude left out): for tool descriptions and errors. */
+export function brainDirectory(except: string[] = []): string {
+  return [...brains.values()]
+    .filter((b) => !except.includes(b.id))
+    .map((b) => `${b.id} (${b.label}): ${b.capabilities?.length ? b.capabilities.join(", ") : "chat"}`)
+    .join("; ");
+}
+
+/** Loaded brains that can do this. */
+export function brainsWith(cap: Capability): Brain[] {
+  return [...brains.values()].filter((b) => b.capabilities?.includes(cap));
+}
+
+/**
+ * One brain asking another mid-task (core's `delegate`, installed at
+ * startup), so packages outside core (the web-brain kit) can ask without
+ * importing it. `depth` is how many asks deep this already is: a brain
+ * answering a delegated task can't delegate again past the limit.
+ */
+export interface AskRequest {
+  to: string;
+  task: string;
+  /** A conversation key of its own (not the asker's chat, which is busy with this turn). */
+  conversation: string;
+  from: string;
+  depth: number;
+  files?: string[];
+}
+export interface AskResult {
+  label: string;
+  text: string;
+  /** Saved files, as paths. */
+  files: string[];
+}
+type Asker = (req: AskRequest) => Promise<AskResult>;
+let asker: Asker | null = null;
+export function setBrainAsker(fn: Asker | null): void {
+  asker = fn;
+}
+export async function askBrain(req: AskRequest): Promise<AskResult> {
+  if (!asker) throw new Error("asking another brain isn't available here");
+  return asker(req);
+}
+/** Delegation depth on a message: 0 for the owner's own. */
+export const DELEGATION_DEPTH = "delegation_depth";
+export const MAX_DELEGATION_DEPTH = 2;
 
 /** Brains only ever see one account, so say who's talking when it isn't the owner. */
 export function framePrompt(content: string, meta: Record<string, string>): string {

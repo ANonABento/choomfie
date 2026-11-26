@@ -29,6 +29,7 @@ import {
 } from "@choomfie/shared";
 import { downloadAttachments, forwardToClaude } from "./inbound.ts";
 import { decideRoute, dispatchToBrain, installBrainPoster, parentChannelId } from "./brain-router.ts";
+import { installBrainAsker } from "./delegate.ts";
 import { isOwnThread, openThread, wantsThread } from "./chats/auto-thread.ts";
 import { replyExcerpt, replyPrompt, repliesToLatest } from "./ask-relay.ts";
 import { recordThreadFiles } from "./pipelines/thread-files.ts";
@@ -138,6 +139,8 @@ export function createDiscordClient(ctx: AppContext): Client {
 
     // Brains may post late results (background jobs) — give them the poster first.
     installBrainPoster(ctx);
+    // …and a way to ask each other (web brains' `#!ask` blocks).
+    installBrainAsker(ctx);
 
     // Initialize plugins
     await initializePlugins(ctx.plugins, ctx);

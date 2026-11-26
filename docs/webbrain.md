@@ -35,6 +35,7 @@ A site's model can't run anything here, so an adapter with `localTools: true` le
 - Whatever a command prints goes to the site. That's why secrets are never auto-run; approve with that in mind.
 - `bun run webbrain log <id> [-n 40]` — what the last turns did, from `<data>/webbrain/<id>/turns.jsonl`: each turn's start (your message, the conversation), its end (time, text, files, code blocks) or error, commands asked / run / declined, and adapter notes (a picture it waited on, an empty answer). The daemon's stderr isn't kept, so this is where to look when a reply was wrong or never came. Rolls over at 5 MB.
 - `bun run webbrain doctor <id> --tools` checks a site asks the right way (one real message; nothing is run).
+- **Asking another brain.** With local tools on, the guide also lists the other loaded brains and what they do, and the site can write a block starting `#!ask <id>` with a self-contained task: the kit hands it over (`askBrain` → core's `delegate`, in a conversation of its own, `<chat>:<site>-asks`), sends the answer back as the next message, attaches any files it made to the reply, and ends it with `-# 🤝 asked …`. Depth-limited like `delegate`: a site answering a hand-off at the limit gets no ask guide. The turn log records each ask.
 
 ## What the kit does
 

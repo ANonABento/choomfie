@@ -10,7 +10,7 @@
 
 import type { EngineName } from "./engine/launch.ts";
 import type { Locator, Page } from "patchright";
-import type { BrainApproval, BrainFile, BrainMode } from "@choomfie/shared";
+import type { BrainApproval, BrainFile, BrainMode, Capability } from "@choomfie/shared";
 
 export type { Locator, Page };
 
@@ -138,6 +138,8 @@ export interface SiteAdapter {
   loggedIn?(page: Page): Promise<boolean>;
   /** What the site's terms say about driving it with a bot; `webbrain sites` shows it. */
   terms?: SiteTerms;
+  /** What it can do beyond chat (`image-gen`, `web-search`, …): free routes and offers by it, `delegate` lists it. */
+  capabilities?: Capability[];
   /**
    * The site's model may run commands on this Mac (```run blocks, owner
    * only; see local-tools.ts). Off for a site with tools of its own (Waymond).

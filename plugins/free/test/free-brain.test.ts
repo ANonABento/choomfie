@@ -295,6 +295,54 @@ describe("free brain routing", () => {
     expect(t.transcript.live(chat.id).at(-1)!.content).toBe("fixed the test\n[changed: app.ts · did: ran `npm test`]");
   });
 
+  test("media goes by what's asked: a song only to brains that make music, a picture to any that draws, configured or not", async () => {
+    const { registerBrain, unregisterBrain } = await import("@choomfie/shared");
+    const gem = { ...fakeWeb("gemini-web"), label: "Gemini web", capabilities: ["image-gen", "music-gen"] as const };
+    const drawer = { ...fakeWeb("drawer"), capabilities: ["image-gen"] as const };
+    gem.send = async (m) => {
+      if (/song/.test(m.content)) throw new QuotaReachedError("Gemini web", undefined, "music limit", "music");
+      throw new QuotaReachedError("Gemini web");
+    };
+    let drew = 0;
+    drawer.send = async () => (drew++, { text: "drawn", files: [{ name: "cat.png", data: new Uint8Array([1]) }] });
+    registerBrain(gem as never);
+    registerBrain(drawer as never);
+    try {
+      const t = setup({}, [gem as never, drawer as never]);
+      t.classifier.next = { bucket: "media", confidence: 0.95 };
+      const song = await t.brain.send(msg("make me a song"), t.ctx);
+      expect(song.text).toContain("Gemini web is out of its free music allowance");
+      expect(drew).toBe(0);
+      const pic = await t.brain.send(msg("draw a cat", { chatKey: "chan2" }), t.ctx);
+      expect(pic.text).toStartWith("drawn");
+      expect(drew).toBe(1);
+    } finally {
+      unregisterBrain("gemini-web");
+      unregisterBrain("drawer");
+    }
+  });
+
+  test("mid-chat, every brain that can do the work is offered, a button each", async () => {
+    const { registerBrain, unregisterBrain } = await import("@choomfie/shared");
+    const other = { ...fakeWeb("builder"), capabilities: ["agentic"] as const };
+    registerBrain(other as never);
+    try {
+      const t = setup({}, [other as never]);
+      await t.brain.send(msg("hey there"), t.ctx);
+      t.classifier.next = { bucket: "agentic", confidence: 0.9 };
+      const r = await t.brain.send(msg("build me a site"), t.ctx);
+      expect(r.choices).toEqual(["Hand this to Waymond", "Hand this to Builder"]);
+    } finally {
+      unregisterBrain("builder");
+    }
+  });
+
+  test("a model asked for one message (delegate's model) answers it, then auto again", async () => {
+    const t = setup();
+    expect((await t.brain.send(msg("summarize this please", { meta: { role: "owner", model: "smart" } }), t.ctx)).text).toStartWith("smart answer");
+    expect((await t.brain.send(msg("thanks a lot"), t.ctx)).text).toStartWith("fast answer");
+  });
+
   test("/model pins an API model; if it can't answer, another does and the reply says so", async () => {
     const t = setup();
     const chat = t.chats.current("chan", "free");

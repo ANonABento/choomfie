@@ -515,3 +515,58 @@ describe("several accounts on one site", () => {
     }
   });
 });
+
+describe("asking another brain (#!ask)", () => {
+  test("the guide lists who's there; an #!ask block goes to that brain, its answer comes back to the site, its files to the owner", async () => {
+    const { registerBrain, unregisterBrain, setBrainAsker } = await import("@choomfie/shared");
+    registerBrain({ id: "drawer", label: "Drawer", capabilities: ["image-gen"], send: async () => ({ text: "" }) });
+    const dir = mkdtempSync(join(tmpdir(), "asked-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, "cat.png"), "png");
+    const asks: { to: string; task: string; depth: number }[] = [];
+    setBrainAsker(async (req) => (asks.push(req), { label: "Drawer", text: "Here's a cat.", files: [join(dir, "cat.png")] }));
+    const turns: string[] = [];
+    const { brain, ctx, destroy } = await setup(
+      async (input) => {
+        turns.push(input.text);
+        return turns.length === 1
+          ? { text: "Asking.\n```\n#!ask drawer\nDraw a tabby cat.\n```", ref: "r" }
+          : { text: "Drawer made your cat.", ref: "r" };
+      },
+      { localTools: true }
+    );
+    try {
+      const reply = await brain.send(msg("t1", "draw me a cat"), ctx);
+      expect(turns[0]).toContain("drawer (Drawer): image-gen");
+      expect(asks).toEqual([{ to: "drawer", task: "Draw a tabby cat.", conversation: "t1:fakesite-asks", from: "FakeSite", depth: 0 }] as never);
+      expect(turns[1]).toStartWith("[Answer from Drawer:]\nHere's a cat.");
+      expect(reply.text).toBe("Drawer made your cat.\n-# 🤝 asked Drawer");
+      expect(reply.files?.map((f) => f.name)).toEqual(["cat.png"]);
+    } finally {
+      setBrainAsker(null);
+      unregisterBrain("drawer");
+      await destroy();
+    }
+  });
+
+  test("a brain answering a hand-off at the depth limit gets no ask guide, and its #!ask blocks are just text", async () => {
+    const { registerBrain, unregisterBrain, setBrainAsker } = await import("@choomfie/shared");
+    registerBrain({ id: "drawer", label: "Drawer", send: async () => ({ text: "" }) });
+    let asked = 0;
+    setBrainAsker(async () => (asked++, { label: "x", text: "", files: [] }));
+    const turns: string[] = [];
+    const { brain, ctx, destroy } = await setup(
+      async (input) => (turns.push(input.text), { text: "```\n#!ask drawer\nloop\n```", ref: "r" }),
+      { localTools: true }
+    );
+    try {
+      await brain.send(msg("t1", "go", { meta: { role: "owner", delegation_depth: "2" } }), ctx);
+      expect(turns[0]).not.toContain("#!ask");
+      expect(asked).toBe(0);
+    } finally {
+      setBrainAsker(null);
+      unregisterBrain("drawer");
+      await destroy();
+    }
+  });
+});
