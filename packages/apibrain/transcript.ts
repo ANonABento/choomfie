@@ -73,6 +73,11 @@ export class Transcript {
       .all(chatId, upto) as Turn[];
   }
 
+  /** Every turn, summarized or not, oldest first. */
+  all(chatId: string): Turn[] {
+    return this.db.query("SELECT id, role, content, member, model FROM turns WHERE chat_id = ? ORDER BY id").all(chatId) as Turn[];
+  }
+
   summary(chatId: string): Summary | null {
     const row = this.db.query("SELECT summary, upto_id FROM summaries WHERE chat_id = ?").get(chatId) as
       | { summary: string; upto_id: number }
@@ -87,6 +92,11 @@ export class Transcript {
          ON CONFLICT (chat_id) DO UPDATE SET summary = excluded.summary, upto_id = excluded.upto_id, updated_at = excluded.updated_at`
       )
       .run(chatId, text, uptoId, nowUTC());
+  }
+
+  /** Forget this turn and every later one in the chat (an answer being redone). */
+  dropFrom(chatId: string, id: number): void {
+    this.db.query("DELETE FROM turns WHERE chat_id = ? AND id >= ?").run(chatId, id);
   }
 
   /** The id of the last turn this member answered in the chat (0 if never). */

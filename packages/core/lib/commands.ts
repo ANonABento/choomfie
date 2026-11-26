@@ -17,8 +17,8 @@ import {
   type ChatInputCommandInteraction,
 } from "discord.js";
 import type { AppContext } from "./types.ts";
-import { AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain, relativeTime } from "@choomfie/shared";
-import { brainAt, cwdLabel, liveChat } from "./chats/here.ts";
+import { ANYWHERE, AUTOCOMPLETE_LIMIT, CLAUDE_BRAIN, getBrain } from "@choomfie/shared";
+import { brainAt, chatStateLines, liveChat } from "./chats/here.ts";
 import { parentChannelId, resolveBrainId } from "./brain-router.ts";
 import { VERSION } from "./version.ts";
 import { registerCommand, registerButtonHandler } from "./register.ts";
@@ -409,11 +409,7 @@ async function chatHere(interaction: ChatInputCommandInteraction, ctx: AppContex
   const lines = [brainHere(interaction, ctx)];
   const { brain, chat } = await liveChat(interaction, ctx);
   if (chat) {
-    lines.push(`Chat: **${chat.title}** · since ${relativeTime(chat.createdAt)}`);
-    const cwd = cwdLabel(ctx, chat.cwd);
-    if (cwd) lines.push(`cwd: \`${cwd}\``);
-    if (chat.model) lines.push(`Model: **${chat.model}**`);
-    if (chat.mode) lines.push(`Mode: **${chat.mode}**`);
+    lines.push(...chatStateLines(ctx, brain, chat));
   } else if (brain === CLAUDE_BRAIN && !(await isDaemonMode(ctx.DATA_DIR))) {
     lines.push("Chat: the terminal session");
   } else {
@@ -424,10 +420,14 @@ async function chatHere(interaction: ChatInputCommandInteraction, ctx: AppContex
 
 // /status
 registerCommand("status", {
-  data: new SlashCommandBuilder()
-    .setName("status")
-    .setDescription("Show bot status and stats")
-    .toJSON(),
+  data: {
+    ...new SlashCommandBuilder()
+      .setName("status")
+      .setDescription("Show bot status and stats, and who answers here")
+      .toJSON(),
+    // DMs and group DMs too: it's how you see which brain holds a chat there.
+    ...ANYWHERE,
+  },
   handler: async (interaction, ctx) => {
     const stats = ctx.memory.getStats();
     const uptime = ctx.startedAt ? formatDuration(Date.now() - ctx.startedAt) : "unknown";

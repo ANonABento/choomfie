@@ -58,6 +58,12 @@ export async function maybeCompact(opts: CompactOptions, now = Date.now()): Prom
 }
 
 /** The instruction for the summarizer. */
-export const SUMMARY_PROMPT =
-  "Summarize this conversation for whoever continues it: who wants what, decisions, facts, names, numbers, open questions. " +
-  "Plain bullet points, under 250 words. Write only the summary.";
+export const SUMMARY_PROMPT = [
+  "Summarize this conversation for whoever continues it. Use these headings, leaving out any with nothing under them:",
+  "Goals — what the user wants overall.",
+  "Decisions — what was agreed or chosen.",
+  "Facts — names, preferences, constraints, results.",
+  "Open questions — what is still unanswered or unfinished.",
+  "Verbatim — code, commands, numbers, file names, links that later turns may need, copied exactly.",
+  "Short bullet points, under 350 words. Write only the summary.",
+].join("\n");

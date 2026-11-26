@@ -74,6 +74,9 @@ const UNTESTED_PENALTY = 1.5;
  * that answers, until it answers again.
  */
 const FLAKY_PENALTY = 1;
+/** Score cost per answer someone had a bigger model redo (this week), up to REDO_PENALTY_MAX. */
+const REDO_PENALTY = 0.5;
+const REDO_PENALTY_MAX = 2;
 const PROBE: ChatMessage[] = [{ role: "user", content: "Reply with the word: ok" }];
 
 const asProviderError = (e: unknown): ProviderError =>
@@ -165,7 +168,8 @@ export class ApiMember {
     // A model seen answering beats one only known by its name.
     const seen = check?.ok;
     const flaky = Math.min(3, this.deps.health.failures(this.modelUnit(m.id))) * FLAKY_PENALTY;
-    return base - (this.deps.availability && !seen ? UNTESTED_PENALTY : 0) - flaky;
+    const redone = Math.min(REDO_PENALTY_MAX, (this.deps.availability?.redos(this.modelUnit(m.id)) ?? 0) * REDO_PENALTY);
+    return base - (this.deps.availability && !seen ? UNTESTED_PENALTY : 0) - flaky - redone;
   }
 
   traits(model: string): ModelTraits | undefined {
@@ -354,6 +358,8 @@ export class ApiMember {
         const kind = e instanceof ProviderError ? e.kind : String(e);
         // Refusing a plain "say ok" means it isn't a chat model we can use (an agent, a special endpoint).
         if (kind === "bad_request") av.mark(this.modelUnit(m.id), false, "refused a plain chat request");
+        // Busy, limited, timed out: no verdict, but not worth another call at the next restart.
+        else if (["server", "timeout", "network", "rate_limit", "quota"].includes(kind)) av.tried(this.modelUnit(m.id), kind);
         opts.onResult?.(m.id, false, kind);
         // The key itself is out (bad, or its shared allowance spent): the rest would fail the same way.
         if (kind === "auth" || kind === "no_credit" || (this.spec.limitScope !== "model" && (kind === "rate_limit" || kind === "quota"))) return;
@@ -363,6 +369,11 @@ export class ApiMember {
         if (limited >= 2) return;
       }
     }
+  }
+
+  /** Someone had a bigger model redo this model's answer: it ranks a little lower for a week. */
+  redone(model: string): void {
+    this.deps.availability?.redo(this.modelUnit(model));
   }
 
   /** Resolves once a model list has been tried (at most one fetch in flight). */

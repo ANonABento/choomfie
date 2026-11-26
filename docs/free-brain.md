@@ -77,6 +77,7 @@ None of these needs a card. Limits change without notice: `bun run apibrain keys
 | LLM7 | no key | its `turbo` models | Undocumented; may vanish |
 | OVHcloud | no key, off by default | 2 RPM per model on paper, shared per address in practice; EU | A key here would be pay-as-you-go, so none is used. `free.providers.ovh.enabled: true` to try it |
 | Ollama | — | your machine | Opt-in: `free.providers.ollama.enabled: true` |
+| LM Studio | — | your machine (its local server, port 1234) | Opt-in: `free.providers.lmstudio.enabled: true` |
 
 A provider with credit on the account (AxForge, Runcrate, Gonka, Aion) bills past its free allowance. The free brain can't tell a free-tier key from a funded one, so keep those accounts unfunded. Any provider can be turned off with `/config setting:free.providersOff value:kilo,ovh` (it writes `free.providers.<id>.enabled: false`; `/restart` to apply). `/config setting:free.footer` shows which provider and model answered.
 
@@ -101,7 +102,7 @@ message → a member mode, or a web member holding the chat?  → that member (l
   - through one of its modes (`/mode cad`);
   - when you click **Hand this to …**, offered under an API answer when the classifier is sure (≥ `suggestAt`, default 0.75) that the message is a job for a brain: one button per brain that can do it (up to 3), so you choose. The click resends that message to that brain, with a recap of what it missed.
 - **Brains by what they can do.** A bucket's brains are the ones config lists, minus any whose `capabilities` say they can't do this message's work (a song needs `music-gen`), plus any loaded brain that says it can (`agentic` for agentic, `local`, `web-search` for research, `image-gen` / `music-gen` / `video-gen` for media by what's asked). A new site or harness that declares its capabilities is a member with no config line. Waymond declares `image-gen`, so a picture goes to Gemini web first and Waymond after; a song only to brains that make music.
-- **Once a web member has answered, it holds the chat.** `/model` shows it, and every message goes to it, with no classifier call, until you hand it back.
+- **Once a web member has answered, it holds the chat.** `/model` shows it, and every message goes to it, with no classifier call, until you hand it back. One exception: a message naming a kind of media the holder can't make (a song while Waymond holds the chat) is classified, and if it really is a media request, that one message goes to a brain that can (or a text model, with what was tried first); the reply says so, and the chat stays with the holder.
 - **Handing back:** every reply from a holding member carries a **Back to auto** button (an older reply's button works too). It clears the hold and the member mode, and says so; nothing is resent. The member's replies are already in the chat's transcript, so the free models pick up from there, and the member gets a recap of what it missed if it's handed the chat again. `/model auto` does the same without the note.
 - **A holding member that fails never moves silently.** The reply says what went wrong and offers **Retry** and **Answer with another model**; the second answers that message with an API model and releases the chat.
 - **`/model` pins** a member (`groq`), a model (`groq:openai/gpt-oss-120b`) or a web member (`waymond`). A pinned API model that can't answer falls back to the other API models, and the reply says who answered. An image the pinned model can't see goes to a vision model for that one message.
@@ -178,13 +179,18 @@ No model id is written in code: providers rename and retire them every few weeks
 
 `/model` lists each provider's models best first with what's known (`~120B · 131k context · ~0.4s`). `bun run apibrain doctor free` shows the routing each bucket gets right now. To override, pin: `free.providers.<id>.models`, `free.buckets.<id>`, `free.classifier.targets`.
 
-Name-based ranking is a starting point. Next: a probe benchmark and implicit signals (retries, hand-offs, rephrasing) refine it ([brains-plan.md](brains-plan.md)).
+Evidence moves it from there:
+- **Answered or not:** each listed model gets one "Reply with the word: ok" at startup (`meta/apibrain-models.json`). One that answered ranks above one only known by name; one refused (paid, gone, not a chat model) is skipped for 7 days; one that came back busy, rate-limited or timed out isn't refused, but isn't probed again for 6 hours, restarts included.
+- **Failing in a row:** each busy / 5xx / timeout costs a point, up to three, until it answers (in memory).
+- **Redone:** **Try a bigger model** under an API answer (shown when a ready model at least twice its size exists, not when you picked the model) answers the same message again, biggest first, and replaces the small model's exchange in the transcript. Each redo costs the small model half a point for a week (saved), up to two.
+
+Not done: a benchmark with checkable answers and other implicit signals (rephrasing, hand-offs) ([brains-plan.md](brains-plan.md)).
 
 ## Context
 
 - **One transcript per chat** (`<data>/apibrain/transcripts.db`, keyed by chat id) holds every turn, whoever answered it. Switching from Groq to Gemini mid-chat keeps the conversation. `/clear` starts a new chat (empty history) and `/resume` brings an old one back, with no extra work.
-- **What an API model gets:** the persona (`/persona`), Discord rules and any mode frame, then the rolling summary, then the newest turns that fit its budget, then the message. Budgets per provider: Groq's free TPM is small (6k); Gemini takes more (32k). `contextTokens` caps them all.
-- **Compaction:** after a reply, once a chat passes 70% of its budget, the older half is summarized on a quick model (need `fast`, or `summaryTargets` if pinned). It runs in the background, at most once per chat every 5 minutes. `/compact` does it now.
+- **What an API model gets:** the persona (`/persona`), Discord rules and any mode frame, then the rolling summary, then the newest turns that fit its budget, then the message. A model whose budget holds the whole chat (Gemini's 32k when compaction started at Groq's size) gets the original turns instead of the summary. Budgets per provider: Groq's free TPM is small (6k); Gemini takes more (32k). `contextTokens` caps them all.
+- **Compaction:** after a reply, once a chat passes 70% of its budget, the older half is summarized on a quick model (need `fast`, or `summaryTargets` if pinned) under fixed headings: goals, decisions, facts, open questions, and code / numbers / names copied verbatim. It runs in the background, at most once per chat every 5 minutes. `/compact` does it now.
 - **Attachments:**
   - images go to vision models as data URLs (vision comes from the provider's `/models` where it says so);
   - text and code files are inlined, up to 24k characters;

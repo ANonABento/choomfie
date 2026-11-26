@@ -43,10 +43,11 @@ const NOT_CHAT = new Set([
   "embed", "embedding", "embeddings", "whisper", "tts", "speech", "transcribe", "transcription", "audio", "guard", "safeguard",
   "moderation", "rerank", "reranker", "retriever", "orpheus", "image", "imagen", "veo", "lyria", "music", "aqa", "robotics",
   "computer", "live", "banana", "research", "ocr", "clip", "playai", "diffusion", "flux", "sdxl", "video", "bge", "kokoro",
-  "chatterbox", "kling", "voxtral", "riva", "nvr", "asr", "vad", "translate", "summarise", "summarize",
+  "chatterbox", "kling", "voxtral", "riva", "nvr", "asr", "vad", "translate", "summarise", "summarize", "pii", "safety",
+  "gliner", "reward", "parse", "parser", "detector",
 ]);
 /** Inside a run-together token too (`qwen3guard`, `bgem3`). */
-const NOT_CHAT_PARTS = ["guard", "embed", "whisper", "tts", "diffusion", "rerank"];
+const NOT_CHAT_PARTS = ["guard", "embed", "whisper", "tts", "diffusion", "rerank", "gliner", "nvclip"];
 const SMALL = new Set(["lite", "mini", "nano", "instant", "tiny", "small", "micro", "haiku"]);
 const MID = new Set(["flash", "medium", "turbo", "air"]);
 const BIG = new Set(["pro", "ultra", "large", "max", "opus", "plus", "maverick"]);

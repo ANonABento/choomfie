@@ -73,6 +73,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { requireOwner } from "./shared.ts";
 import { carryContext } from "../handoff.ts";
+import { chatStateLines } from "../chats/here.ts";
 
 function label(id: string): string {
   return isBrainId(id) ? brainLabel(id) : `${id} (not loaded)`;
@@ -180,6 +181,8 @@ registerCommand("brain", {
           : ctx.config.getBrainAccess() === "owner"
             ? `It answers you; others on your allowlist get Claude. To let them use ${label(current)} too: \`/config setting:brainAccess value:allowlist\``
             : `It answers everyone on your allowlist. To keep it to yourself: \`/config setting:brainAccess value:owner\``,
+        // This location's chat: what it's on, and above all whether another brain holds it.
+        ...(current === CLAUDE_BRAIN ? [] : ((chat) => (chat ? chatStateLines(ctx, current, chat) : []))(ctx.chats.bound(channelId, current))),
         `Loaded brains: ${listBrainIds().map((b) => `\`${b}\``).join(", ")} · \`/brain <name>\` to switch`,
       ].filter(Boolean);
       // A brain's own report (providers, quota, cooldowns). In memory, so it's quick; never let it block the reply.

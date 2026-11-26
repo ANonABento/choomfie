@@ -11,7 +11,7 @@ const ids = (ms: { id: string }[]) => ms.map((m) => m.id).sort();
 
 describe("models from live lists", () => {
   test("non-chat models are left out", () => {
-    for (const id of ["whisper-large-v3", "meta-llama/llama-prompt-guard-2-22m", "openai/gpt-oss-safeguard-20b", "canopylabs/orpheus-v1-english", "text-embedding-004", "gemini-2.5-flash-image", "imagen-4", "veo-3"]) {
+    for (const id of ["whisper-large-v3", "meta-llama/llama-prompt-guard-2-22m", "openai/gpt-oss-safeguard-20b", "canopylabs/orpheus-v1-english", "text-embedding-004", "gemini-2.5-flash-image", "imagen-4", "veo-3", "fastino/gliner2-pii", "nvidia/nemotron-3.5-content-safety", "nvidia/nvclip"]) {
       expect(isChatModel(id)).toBe(false);
     }
     for (const id of ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "gemini-3.8-flash", "allam-2-7b"]) expect(isChatModel(id)).toBe(true);

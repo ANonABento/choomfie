@@ -6,7 +6,7 @@
 import { realpathSync } from "node:fs";
 import { sep } from "node:path";
 import type { AutocompleteInteraction, ButtonInteraction, ChatInputCommandInteraction } from "discord.js";
-import { chatHomeDir, CLAUDE_BRAIN, type ChatRecord } from "@choomfie/shared";
+import { chatHomeDir, CLAUDE_BRAIN, getBrain, relativeTime, type ChatRecord } from "@choomfie/shared";
 import { parentChannelId, resolveBrainId } from "../brain-router.ts";
 import { isDaemonMode } from "../daemon-status.ts";
 import type { AppContext } from "../types.ts";
@@ -29,6 +29,29 @@ export async function liveChat(
   const brain = brainAt(interaction, ctx);
   if (brain === CLAUDE_BRAIN && !(await isDaemonMode(ctx.DATA_DIR))) return { brain, chat: null };
   return { brain, chat: ctx.chats.bound(interaction.channelId!, brain) };
+}
+
+/**
+ * A chat's state in a few lines: title, cwd, model, mode. A model that is
+ * another brain (free's chat after Waymond answered) means that brain holds
+ * the chat and gets every message until released — said in so many words,
+ * with how to release it.
+ */
+export function chatStateLines(ctx: Pick<AppContext, "DATA_DIR">, brain: string, chat: ChatRecord): string[] {
+  const lines = [`Chat: **${chat.title}** · since ${relativeTime(chat.createdAt)}`];
+  const cwd = cwdLabel(ctx, chat.cwd);
+  if (cwd) lines.push(`cwd: \`${cwd}\``);
+  if (chat.model) {
+    const member = chat.model.split(":")[0];
+    const holder = member !== brain ? getBrain(member) : undefined;
+    lines.push(
+      holder
+        ? `Held by **${holder.label}** — it answered here, so every message goes to it. **Back to auto** under its reply or \`/model auto\` to release; \`/clear\` for a fresh chat.`
+        : `Model: **${chat.model}** (\`/model auto\` to let it choose)`
+    );
+  }
+  if (chat.mode) lines.push(`Mode: **${chat.mode}**`);
+  return lines;
 }
 
 export const home = () => process.env.HOME ?? "";

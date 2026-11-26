@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { Availability } from "../availability.ts";
 import { Health } from "../health.ts";
@@ -200,7 +203,7 @@ describe("benched keys across a restart", () => {
 });
 
 describe("probe sweep", () => {
-  test("two fresh models refused for limits in a row: stop, and leave the rest untested", async () => {
+  test("two fresh models refused for limits in a row: stop; those two wait hours for a re-probe (not refused), the rest stay untested", async () => {
     const f = fakeFetch(() => fail(429, "API rate limit exceeded"));
     const av = new Availability(null);
     const m = new ApiMember(
@@ -210,6 +213,69 @@ describe("probe sweep", () => {
     const seen: string[] = [];
     await m.probe({ onResult: (model, _ok, why) => seen.push(`${model} ${why}`) });
     expect(seen).toEqual(["a rate_limit", "b rate_limit"]);
-    expect(["a", "b", "c"].map((x) => av.untested(`anon:${x}`))).toEqual([true, true, true]);
+    expect(["a", "b", "c"].map((x) => av.untested(`anon:${x}`))).toEqual([false, false, true]);
+    expect(["a", "b"].map((x) => av.refused(`anon:${x}`))).toEqual([false, false]);
+  });
+
+  test("a verdict-less probe is remembered across restarts, re-probed after 6h, and never overwrites a verdict", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "av-")), "models.json");
+    let now = 1_000_000;
+    const av = new Availability(file, () => now);
+    av.tried("p:busy", "server");
+    av.mark("p:good", true);
+    av.tried("p:good", "timeout");
+    av.flush();
+    const again = new Availability(file, () => now);
+    expect(again.untested("p:busy")).toBe(false);
+    expect(again.refused("p:busy")).toBe(false);
+    expect(again.unproven("p:busy")).toBe(true);
+    expect(again.get("p:good")?.ok).toBe(true);
+    now += 6 * 3_600_000;
+    expect(again.untested("p:busy")).toBe(true);
+    again.mark("p:busy", true);
+    expect(again.get("p:busy")).toMatchObject({ ok: true });
+    expect(again.get("p:busy")?.pending).toBeUndefined();
+  });
+});
+
+describe("evidence and context", () => {
+  test("a model whose answer was redone by a bigger one ranks lower for a week, across restarts", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "av-")), "models.json");
+    let now = 5_000_000;
+    const av = new Availability(file, () => now);
+    const s = defineProvider({ ...spec, fallbackModels: ["model-70b", "model-72b"] });
+    const make = (a: Availability) => new ApiMember(s, { env: { ACME_API_KEY: "k" }, health: new Health(), quota: new Quota(), availability: a });
+    const m = make(av);
+    av.mark("acme:model-70b", true);
+    av.mark("acme:model-72b", true);
+    expect(m.models()[0]).toBe("model-72b");
+    m.redone("model-72b");
+    av.flush();
+    const later = make(new Availability(file, () => now));
+    expect(later.models()[0]).toBe("model-70b");
+    now += 8 * 24 * 3_600_000;
+    expect(make(new Availability(file, () => now)).models()[0]).toBe("model-72b");
+  });
+
+  test("a model with room for the whole chat gets the original turns, not the summary", async () => {
+    const { Transcript } = await import("../transcript.ts");
+    const { apiTurn } = await import("../define.ts");
+    const t = new Transcript(":memory:");
+    t.add("c", "user", "my cat is called Miso");
+    const upto = t.add("c", "assistant", "cute name");
+    t.add("c", "user", "she is 3");
+    t.add("c", "assistant", "nice");
+    t.setSummary("c", "- cat named Miso", upto);
+    const sent: unknown[][] = [];
+    const { m } = member((call) => {
+      sent.push((call.body as { messages: unknown[] }).messages);
+      return ok("ok");
+    });
+    const current = { content: "how old is she", record: "how old is she", tokens: 5 };
+    await apiTurn({ member: m, transcript: t, chatId: "c", system: "sys", current, budget: 10_000 });
+    expect(JSON.stringify(sent[0])).toContain("my cat is called Miso");
+    expect(JSON.stringify(sent[0])).not.toContain("Summary of the conversation");
+    await apiTurn({ member: m, transcript: t, chatId: "c", system: "sys", current, budget: 16 });
+    expect(JSON.stringify(sent[1])).toContain("Summary of the conversation");
   });
 });

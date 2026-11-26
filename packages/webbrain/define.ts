@@ -23,6 +23,7 @@ import {
   statusLine,
   askBrain,
   brainDirectory,
+  getBrain,
   DELEGATION_DEPTH,
   MAX_DELEGATION_DEPTH,
   type BrainFile,
@@ -111,6 +112,8 @@ const headedFor = (id: string) => process.env[`CHOOMFIE_${id.toUpperCase().repla
 interface ActiveTurn {
   ref?: string;
   stop: boolean;
+  /** Another brain this turn is waiting on (`#!ask`): `/stop` stops it too. */
+  asking?: { brain: string; chatKey: string };
 }
 
 /** What `/compact` asks the site for: everything a fresh conversation needs to carry on. */
@@ -277,6 +280,12 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
 
       async stop(chatKey) {
         const turn = active.get(chatKey);
+        // Waiting on another brain (`#!ask`): stop that one, and don't hand its answer back to the site.
+        if (turn?.asking) {
+          turn.stop = true;
+          await getBrain(turn.asking.brain)?.stop?.(turn.asking.chatKey).catch(() => false);
+          return true;
+        }
         const page = poolFor(profileOf(chatKey)).peek(chatKey);
         if (!turn?.ref || !page || !adapter.stop) return false;
         turn.stop = true;
@@ -466,14 +475,24 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
               for (const a of asks.slice(0, MAX_CALLS)) {
                 progress(`🤝 asking ${a.to}`);
                 logEvent(message.chatKey, "asked", { to: a.to, task: a.task.slice(0, 200) });
+                if (turn.stop) break;
+                const conversation = `${message.chatKey}:${adapter.id}-asks`;
+                turn.asking = { brain: a.to, chatKey: conversation };
                 try {
-                  const r = await askBrain({ to: a.to, task: a.task, conversation: `${message.chatKey}:${adapter.id}-asks`, from: adapter.label, depth });
+                  const r = await askBrain({ to: a.to, task: a.task, conversation, from: adapter.label, depth });
                   for (const f of r.files) fromOthers.push({ name: basename(f), data: new Uint8Array(readFileSync(f)) });
                   askedOf.push(r.label);
                   answers.push({ to: a.to, label: r.label, text: r.text, files: r.files });
                 } catch (e) {
                   answers.push({ to: a.to, error: errorMessage(e) });
+                } finally {
+                  turn.asking = undefined;
                 }
+              }
+              // Stopped while asking: the site doesn't get another turn.
+              if (turn.stop) {
+                result = { ...result, stopped: true };
+                break;
               }
               turn.ref = result.ref;
               chats.setBackendRef(chat.id, joinRef(profile, result.ref));

@@ -96,6 +96,10 @@ export const RELEASE_CHOICE = "Answer with another model";
  */
 export const HAND_BACK_CHOICE = "Back to auto";
 export const handChoice = (label: string) => `Hand this to ${label}`;
+/** Under an API answer when a much bigger model is ready: answer the same message again with it. */
+export const BIGGER_CHOICE = "Try a bigger model";
+/** "Bigger" means at least this many times the parameters. */
+const BIGGER_FACTOR = 2;
 /** "Hand this to …" buttons under one answer, at most. */
 const MAX_OFFERS = 3;
 
@@ -140,7 +144,13 @@ interface Answer {
 }
 
 /** What a quick-reply button this brain offered does when clicked. */
-type OfferKind = { kind: "retry" } | { kind: "release" } | { kind: "hand"; to: string } | { kind: "handback"; from: string };
+type OfferKind =
+  | { kind: "retry" }
+  | { kind: "release" }
+  | { kind: "hand"; to: string }
+  | { kind: "handback"; from: string }
+  /** Redo with a bigger model: the answer's size, what answered, the bucket, and the transcript turn to replace from. */
+  | { kind: "bigger"; than: number; skip: string; bucket: string; fromTurn: number };
 
 /** Buttons under the last reply, and the message they act on. */
 interface Offer {
@@ -162,6 +172,8 @@ interface Decision {
   suggest?: string[];
   confidence?: number;
   reason?: string;
+  /** Answered for this message only: the chat stays with `heldBy`, and the reply says why it went elsewhere. */
+  heldBy?: string;
 }
 
 export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain {
@@ -255,6 +267,7 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
     force?: OfferKind
   ): Promise<Decision> {
     if (force?.kind === "hand") return { bucket: "handoff", by: "you", targets: [{ member: force.to }], locked: true };
+    if (force?.kind === "bigger") return { bucket: force.bucket, by: "you", targets: [...biggerThan(force.than, force.skip), ...rankAcross(members.values(), "strong")], locked: false };
     const released = force?.kind === "release";
     const hasImages = message.filePaths.some(isImage);
 
@@ -265,7 +278,20 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
     // A model asked for this message only (`delegate` with `model`): it answers, whoever holds the chat.
     const oneOff = typeof message.meta?.model === "string" && message.meta.model !== "auto" ? parseTarget(message.meta.model) : undefined;
     const holder = released || (oneOff && isApi(oneOff)) ? undefined : holderOf(chat);
-    if (holder) return { bucket: "pinned", by: "pin", targets: [{ member: holder }], locked: true };
+    if (holder) {
+      // The holder can't make what's asked (a song from Waymond): if it really is a media request,
+      // this one message goes to a brain that can, and the chat stays with the holder.
+      const kind = mediaKindOf(message.content);
+      const caps = lookup(holder)?.capabilities;
+      if (kind && caps && !caps.includes(`${kind}-gen` as Capability) && bucket("media")) {
+        const c = await deps.classifier.classify({ text: framed, hasImages, tokens, recent: [] }, signal);
+        if (c.bucket === "media") {
+          const targets = targetsFor("media", kind).filter((t) => t.member !== holder && (isApi(t) || isBrainMember(t.member)));
+          return { bucket: "media", by: c.by, targets, locked: false, confidence: c.confidence, reason: `${holder} can't make ${kind}`, heldBy: holder };
+        }
+      }
+      return { bucket: "pinned", by: "pin", targets: [{ member: holder }], locked: true };
+    }
     const pin = oneOff && isApi(oneOff) ? oneOff : !released && chat.model ? parseTarget(chat.model) : undefined;
     if (pin && isApi(pin)) {
       const api = members.get(pin.member)!;
@@ -373,6 +399,18 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
 
   const label = (member: string) => members.get(member)?.label ?? lookup(member)?.label ?? member;
 
+  /** Every usable API model with its size. */
+  const sized = () => [...members.values()].flatMap((m) => (m.configured ? m.ranked("strong").map((t) => ({ member: m.id, model: t.id, params: t.params })) : []));
+  const paramsOf = (member: string, model?: string) => (model ? sized().find((t) => t.member === member && t.model === model)?.params : undefined);
+  /** Ready models at least BIGGER_FACTOR× the size, biggest first. */
+  function biggerThan(params: number, skip: string): Target[] {
+    return sized()
+      .filter((t) => t.params >= params * BIGGER_FACTOR && `${t.member}:${t.model}` !== skip && waitMs(t, 0) === 0)
+      .sort((a, b) => b.params - a.params)
+      .slice(0, 4)
+      .map(({ member, model }) => ({ member, model }));
+  }
+
   function footer(r: Route): string {
     const model = r.model ? ` · ${r.model.replace(/^[^/]+\//, "")}` : "";
     return `\n-# via ${label(r.member)}${model} · ${r.bucket}`;
@@ -436,6 +474,13 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         chats.setModel?.(chat.id, null);
         chat.model = null;
       }
+      // The smaller model's exchange is replaced, so the message isn't in the history twice.
+      if (force?.kind === "bigger") {
+        transcript.dropFrom(chat.id, force.fromTurn);
+        // Evidence: that answer wasn't good enough.
+        const t = parseTarget(force.skip);
+        if (t.model) members.get(t.member)?.redone(t.model);
+      }
 
       const framed = framePrompt(message.content, message.meta);
       const kind = mediaKindOf(message.content);
@@ -479,14 +524,14 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         const { reply, record, model } = routed.value;
         const member = routed.target.member;
         const r: Route = { member, model, ...(routed.target.model ? { asked: routed.target.model } : {}), bucket: decision.bucket, by: decision.by, latencyMs: routed.latencyMs, at: Date.now() };
-        transcript.add(chat.id, "user", record);
+        const userTurn = transcript.add(chat.id, "user", record);
         // A picture or track alone still goes in the transcript, so the next model knows it was sent.
         const sent = reply.files?.length ? `[attached: ${reply.files.map((f) => f.name).join(", ")}]` : "";
         // A harness's work (files changed, commands run) too: after a hand-back, the next model knows what changed.
         const said = [reply.text, sent, reply.record ?? ""].filter(Boolean).join("\n");
         if (said) transcript.add(chat.id, "assistant", said, member, model);
         // A web member that answered now holds the chat (until `/model auto`).
-        if (!members.has(member) && chat.model !== member) chats.setModel?.(chat.id, member);
+        if (!members.has(member) && chat.model !== member && !decision.heldBy) chats.setModel?.(chat.id, member);
         lastRoute.set(message.chatKey, r);
         recent.unshift({ ...r, text: message.content.slice(0, 40) });
         recent.length = Math.min(recent.length, 5);
@@ -498,7 +543,11 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         // A brain with tools was meant to take this and couldn't: say so, so a text answer isn't mistaken for the real thing.
         const skipped = members.has(member) ? decision.targets.find((t) => !members.has(t.member))?.member : undefined;
         const skippedWhy = skipped ? routed.passed.find((p) => p.startsWith(`${skipped}:`)) : undefined;
-        if (skipped && !reply.stopped) {
+        if (decision.heldBy && !reply.stopped) {
+          const why = skippedWhy ?? routed.passed.find((p) => !p.startsWith(`${member}:`));
+          const raw = why?.replace(/^[^:]+:\s*/, "").replace(/\.$/, "");
+          text += `\n-# ${label(decision.heldBy)} holds this chat but can't make ${kind ?? "media"}, so ${label(member)} took this one${raw ? ` (tried first: ${clipNote(raw)})` : ""}. The chat stays with ${label(decision.heldBy)}.`;
+        } else if (skipped && !reply.stopped) {
           const raw = skippedWhy?.slice(skipped.length + 1).trim();
           // Benched from an earlier message: say why, not just "cooling down".
           const why = (raw === "cooling down" ? (spentFor(skipped, kind) ?? raw) : raw)?.replace(/\.$/, "");
@@ -509,12 +558,18 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         }
         else if (decision.pin && member !== decision.pin.member && !reply.stopped) text += `\n-# ${label(decision.pin.member)} couldn't answer — ${label(member)} did.`;
         else if (config.footer && !reply.stopped) text += footer(r);
+        // A small model answered and a much bigger one is ready: offer it (not when you picked the model).
+        const asked = routed.target.model ?? model;
+        const size = members.has(member) && !decision.pin && decision.by !== "you" ? paramsOf(member, asked) : undefined;
+        const bigger: [string, OfferKind][] =
+          size && biggerThan(size, `${member}:${asked}`).length ? [[BIGGER_CHOICE, { kind: "bigger", than: size, skip: `${member}:${asked}`, bucket: decision.bucket, fromTurn: userTurn }]] : [];
         const offered: [string, OfferKind][] =
           reply.stopped ? []
-          : decision.suggest ? decision.suggest.map((to): [string, OfferKind] => [handChoice(label(to)), { kind: "hand", to }])
+          : decision.suggest ? [...decision.suggest.map((to): [string, OfferKind] => [handChoice(label(to)), { kind: "hand", to }]), ...bigger]
           // A member now holds this chat: one click gives it back when the work is done.
+          : decision.heldBy ? [[HAND_BACK_CHOICE, { kind: "handback", from: decision.heldBy }]]
           : !members.has(member) ? [[HAND_BACK_CHOICE, { kind: "handback", from: member }]]
-          : [];
+          : bigger;
         return withOffer({ ...reply, text }, message, offered);
       } catch (e) {
         if (abort.signal.aborted) return { text: "⏹️ Stopped.", stopped: true };

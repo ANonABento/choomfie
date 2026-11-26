@@ -549,6 +549,38 @@ describe("asking another brain (#!ask)", () => {
     }
   });
 
+  test("/stop while waiting on the asked brain stops that brain too, and the site gets no further turn", async () => {
+    const { registerBrain, unregisterBrain, setBrainAsker } = await import("@choomfie/shared");
+    const stopped: string[] = [];
+    let release: () => void = () => {};
+    registerBrain({ id: "drawer", label: "Drawer", send: async () => ({ text: "" }), stop: async (k) => (stopped.push(k), release(), true) });
+    let askStarted: () => void = () => {};
+    const asking = new Promise<void>((r) => (askStarted = r));
+    setBrainAsker(async () => {
+      askStarted();
+      await new Promise<void>((r) => (release = r));
+      return { label: "Drawer", text: "too late", files: [] };
+    });
+    const turns: string[] = [];
+    const { brain, ctx, destroy } = await setup(
+      async (input) => (turns.push(input.text), { text: "Asking.\n```\n#!ask drawer\nDraw a cat.\n```", ref: "r" }),
+      { localTools: true }
+    );
+    try {
+      const pending = brain.send(msg("t1", "draw me a cat"), ctx);
+      await asking;
+      expect(await brain.stop!("t1")).toBe(true);
+      const reply = await pending;
+      expect(stopped).toEqual(["t1:fakesite-asks"]);
+      expect(turns).toHaveLength(1);
+      expect(reply.text).toContain("⏹️ Stopped.");
+    } finally {
+      setBrainAsker(null);
+      unregisterBrain("drawer");
+      await destroy();
+    }
+  });
+
   test("a brain answering a hand-off at the depth limit gets no ask guide, and its #!ask blocks are just text", async () => {
     const { registerBrain, unregisterBrain, setBrainAsker } = await import("@choomfie/shared");
     registerBrain({ id: "drawer", label: "Drawer", send: async () => ({ text: "" }) });

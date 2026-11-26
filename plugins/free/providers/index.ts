@@ -15,6 +15,7 @@ import gonka from "./gonka.ts";
 import groq from "./groq.ts";
 import kilo from "./kilo.ts";
 import llm7 from "./llm7.ts";
+import lmstudio from "./lmstudio.ts";
 import mistral from "./mistral.ts";
 import nvidia from "./nvidia.ts";
 import ollama from "./ollama.ts";
@@ -30,5 +31,5 @@ export const PROVIDERS: ApiProviderSpec[] = [
   // No key: anonymous free tiers, on unless config turns them off.
   kilo, llm7, ovh,
   // Opt-in: a local server.
-  ollama,
+  ollama, lmstudio,
 ];

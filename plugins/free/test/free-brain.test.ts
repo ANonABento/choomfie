@@ -31,8 +31,8 @@ function fakeChats(): ChatsApi & { all: ChatRecord[] } {
 
 type Script = (model: string, body: { messages: { role: string; content: unknown }[] }) => Response;
 
-function apiMember(id: string, script: Script, health: Health, quota: Quota) {
-  const spec = defineProvider({ id, label: id.toUpperCase(), baseURL: `https://${id}/v1`, keyEnv: `${id.toUpperCase()}_KEY`, fallbackModels: [`${id}-m`], listsModels: false });
+function apiMember(id: string, script: Script, health: Health, quota: Quota, model = `${id}-m`) {
+  const spec = defineProvider({ id, label: id.toUpperCase(), baseURL: `https://${id}/v1`, keyEnv: `${id.toUpperCase()}_KEY`, fallbackModels: [model], listsModels: false });
   const calls: { model: string; messages: { role: string; content: unknown }[] }[] = [];
   const fetchImpl = (async (_url: string, init?: RequestInit) => {
     const body = JSON.parse(String(init!.body));
@@ -80,12 +80,12 @@ function scripted(): Classifier & { next: Partial<Classification> } {
   return c;
 }
 
-function setup(over: Record<string, unknown> = {}, extra: Brain[] = []) {
+function setup(over: Record<string, unknown> = {}, extra: Brain[] = [], models: { fast?: string; smart?: string } = {}) {
   const health = new Health();
   const quota = new Quota();
   const transcript = new Transcript(":memory:");
-  const fast = apiMember("fast", () => ok("fast answer"), health, quota);
-  const smart = apiMember("smart", () => ok("smart answer"), health, quota);
+  const fast = apiMember("fast", () => ok("fast answer"), health, quota, models.fast);
+  const smart = apiMember("smart", () => ok("smart answer"), health, quota, models.smart);
   const web = fakeWeb("waymond", ["code", "cad"]);
   const classifier = scripted();
   const config = parseFreeConfig(
@@ -322,6 +322,57 @@ describe("free brain routing", () => {
     }
   });
 
+  test("a chat held by Waymond: a song goes to a brain that makes music, once, and the chat stays with Waymond", async () => {
+    const { registerBrain, unregisterBrain } = await import("@choomfie/shared");
+    const gem = { ...fakeWeb("gemini-web"), label: "Gemini web", capabilities: ["image-gen", "music-gen"] as const };
+    gem.send = async () => ({ text: "here's your song", files: [{ name: "song.mp4", data: new Uint8Array([1]) }] });
+    registerBrain(gem as never);
+    try {
+      const t = setup({ footer: false }, [gem as never]);
+      Object.assign(t.web, { capabilities: ["agentic", "image-gen"] });
+      t.classifier.next = { bucket: "agentic", confidence: 0.95 };
+      await t.brain.send(msg("build me a site"), t.ctx);
+      expect(t.web.got).toHaveLength(1);
+      t.classifier.next = { bucket: "media", confidence: 0.95 };
+      const song = await t.brain.send(msg("can i get a song about my cat"), t.ctx);
+      expect(song.text).toStartWith("here's your song");
+      expect(song.text).toContain("Waymond holds this chat but can't make music, so Gemini web took this one");
+      expect(song.choices).toEqual(["Back to auto"]);
+      expect(t.web.got).toHaveLength(1);
+      // Still Waymond's chat: the next message goes there without classifying.
+      t.classifier.next = { bucket: "chat", confidence: 0.95 };
+      await t.brain.send(msg("now deploy the site"), t.ctx);
+      expect(t.web.got).toHaveLength(2);
+      // A picture Waymond can make stays with Waymond.
+      await t.brain.send(msg("draw a logo for the site"), t.ctx);
+      expect(t.web.got).toHaveLength(3);
+    } finally {
+      unregisterBrain("gemini-web");
+    }
+  });
+
+  test("held by Waymond, Gemini out of music: a text model answers and says what was tried", async () => {
+    const { registerBrain, unregisterBrain } = await import("@choomfie/shared");
+    const gem = { ...fakeWeb("gemini-web"), label: "Gemini web", capabilities: ["music-gen"] as const };
+    gem.send = async () => {
+      throw new QuotaReachedError("Gemini web", undefined, "music limit", "music");
+    };
+    registerBrain(gem as never);
+    try {
+      const t = setup({ footer: false }, [gem as never]);
+      Object.assign(t.web, { capabilities: ["agentic"] });
+      t.classifier.next = { bucket: "agentic", confidence: 0.95 };
+      await t.brain.send(msg("build me a site"), t.ctx);
+      t.classifier.next = { bucket: "media", confidence: 0.95 };
+      const song = await t.brain.send(msg("make a song about it"), t.ctx);
+      expect(t.web.got).toHaveLength(1);
+      expect(song.text).toContain("Waymond holds this chat but can't make music");
+      expect(song.text).toContain("tried first: Gemini web is out of its free music allowance");
+    } finally {
+      unregisterBrain("gemini-web");
+    }
+  });
+
   test("mid-chat, every brain that can do the work is offered, a button each", async () => {
     const { registerBrain, unregisterBrain } = await import("@choomfie/shared");
     const other = { ...fakeWeb("builder"), capabilities: ["agentic"] as const };
@@ -443,5 +494,30 @@ describe("classifier setup", () => {
     const examples = new Set(BUCKETS.flatMap((b) => b.examples ?? []));
     expect(EVAL_SET.filter((c) => examples.has(c.text))).toEqual([]);
     for (const b of BUCKETS.filter((b) => b.examples)) expect(EVAL_SET.some((c) => c.bucket === b.id)).toBe(true);
+  });
+});
+
+describe("Try a bigger model", () => {
+  test("offered under a small model's answer; the click redoes the message on the bigger one and replaces the exchange", async () => {
+    const t = setup({ footer: false }, [], { fast: "fast-8b", smart: "smart-120b" });
+    const r = await t.brain.send(msg("what's a good name for a cat"), t.ctx);
+    expect(r.text).toBe("fast answer");
+    expect(r.choices).toEqual(["Try a bigger model"]);
+    const again = await t.brain.send(msg("Try a bigger model"), t.ctx);
+    expect(again.text).toBe("smart answer");
+    // The bigger model saw the question once, not the small model's answer.
+    expect(t.smart.calls[0].messages.slice(1).map((m) => m.content)).toEqual(["what's a good name for a cat"]);
+    expect(again.choices ?? []).not.toContain("Try a bigger model");
+    const chat = t.chats.all.find((c) => c.brain === "free")!;
+    expect(t.transcript.live(chat.id).map((x) => x.content)).toEqual(["what's a good name for a cat", "smart answer"]);
+  });
+
+  test("not offered when the answer came from the biggest ready model, or one you picked", async () => {
+    const t = setup({ footer: false }, [], { fast: "fast-8b", smart: "smart-120b" });
+    t.classifier.next = { bucket: "quality", confidence: 0.95 };
+    expect((await t.brain.send(msg("compare two essays"), t.ctx)).choices ?? []).not.toContain("Try a bigger model");
+    const pinned = await t.brain.send(msg("hello there friend", { meta: { role: "owner", user: "kev", model: "fast:fast-8b" } }), t.ctx);
+    expect(pinned.text).toBe("fast answer");
+    expect(pinned.choices ?? []).not.toContain("Try a bigger model");
   });
 });

@@ -6,7 +6,7 @@
 
 import { framePrompt, type Brain, type BrainReply, type PluginContext } from "@choomfie/shared";
 import { maybeCompact, SUMMARY_PROMPT } from "./compact.ts";
-import { buildMessages, stripSpeakerLabel, systemPrompt, userContent, type Persona, type UserContent } from "./context.ts";
+import { buildMessages, estimateTokens, stripSpeakerLabel, systemPrompt, userContent, type Persona, type UserContent } from "./context.ts";
 import type { ApiMember, Completion } from "./member.ts";
 import type { Transcript } from "./transcript.ts";
 
@@ -26,12 +26,17 @@ export interface ApiTurnInput {
 
 /** One answer from one API member, with the chat's history to its budget. Records nothing. */
 export async function apiTurn(input: ApiTurnInput): Promise<Completion & { tokens: number }> {
+  const budget = input.budget ?? input.member.contextTokens;
+  const summary = input.transcript.summary(input.chatId);
+  // A model with room for the whole chat gets the original turns, not the summary of them.
+  const all = summary ? input.transcript.all(input.chatId) : [];
+  const fits = summary && estimateTokens(input.system) + input.current.tokens + all.reduce((n, t) => n + estimateTokens(t.content), 0) <= budget * 0.9;
   const built = buildMessages({
     system: input.system,
-    summary: input.transcript.summary(input.chatId),
-    history: input.transcript.live(input.chatId),
+    summary: fits ? null : summary,
+    history: fits ? all : input.transcript.live(input.chatId),
     current: input.current,
-    budget: input.budget ?? input.member.contextTokens,
+    budget,
   });
   const r = await input.member.complete(built.messages, { model: input.model, signal: input.signal, tokens: built.tokens, purpose: "answer", chatId: input.chatId });
   return { ...r, text: stripSpeakerLabel(r.text, input.persona), tokens: built.tokens };
@@ -46,7 +51,7 @@ export function summarizer(member: ApiMember): (text: string) => Promise<string>
           { role: "system", content: SUMMARY_PROMPT },
           { role: "user", content: text },
         ],
-        { maxTokens: 600, temperature: 0.2, timeoutMs: 60_000, purpose: "summary" }
+        { maxTokens: 900, temperature: 0.2, timeoutMs: 60_000, purpose: "summary" }
       )
     ).text;
 }
