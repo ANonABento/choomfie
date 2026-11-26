@@ -22,6 +22,17 @@ test("an error event with no answer fails with its message; a failed tool is not
   expect(parseOpenCode({ stdout: tool, stderr: "", code: 0 }).text).toBe("couldn't\n-# failed: bash");
 });
 
+test("what it did: commands and edits, not looking around", () => {
+  const stdout = lines(
+    { type: "tool_use", sessionID: "s", part: { tool: "glob", state: { status: "completed", input: { pattern: "*.ts" } } } },
+    { type: "tool_use", sessionID: "s", part: { tool: "write", state: { status: "completed", input: { filePath: "/tmp/x/note.txt" } } } },
+    { type: "tool_use", sessionID: "s", part: { tool: "edit", state: { status: "completed", input: { filePath: "/tmp/x/app.ts" } } } },
+    { type: "tool_use", sessionID: "s", part: { tool: "bash", state: { status: "completed", input: { command: "npm test" } } } },
+    { type: "text", sessionID: "s", part: { text: "done" } }
+  );
+  expect(parseOpenCode({ stdout, stderr: "", code: 0 }).actions).toEqual(["wrote note.txt", "edited app.ts", "ran `npm test`"]);
+});
+
 test("command line: plan agent for ask, resume by session, prompt after --", () => {
   expect(oc.args({ prompt: "-x hi", ref: "ses_1", model: "opencode/big-pickle", mode: "ask", cwd: "/w" })).toEqual([
     "run", "--format", "json", "--agent", "plan", "--session", "ses_1", "--model", "opencode/big-pickle", "--", "-x hi",

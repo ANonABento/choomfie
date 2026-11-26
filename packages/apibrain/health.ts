@@ -76,6 +76,11 @@ export class Health {
     }
   }
 
+  /** Unexplained failures in a row (5xx, timeouts) since it last answered; doesn't create the unit. */
+  failures(unit: string): number {
+    return this.units.get(unit)?.failures ?? 0;
+  }
+
   /** Units that are cooling down right now, soonest back first. */
   cooling(): [string, UnitHealth][] {
     const now = this.now();

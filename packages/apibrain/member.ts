@@ -67,6 +67,13 @@ const CATALOG_MAX_AGE_MS = 6 * 3_600_000;
 const SCARCE_RPD = 200;
 /** Score cost of a model that hasn't answered yet (about one size class). */
 const UNTESTED_PENALTY = 1.5;
+/**
+ * Score cost per failure in a row (busy, 5xx, timeout), up to three. Its
+ * cooldown is short and runs out between messages; this keeps a model that
+ * keeps saying "high demand" (Gemini's gemma-4: 30 of 32 calls) behind one
+ * that answers, until it answers again.
+ */
+const FLAKY_PENALTY = 1;
 const PROBE: ChatMessage[] = [{ role: "user", content: "Reply with the word: ok" }];
 
 const asProviderError = (e: unknown): ProviderError =>
@@ -157,7 +164,8 @@ export class ApiMember {
     const base = score(m, need, { scarce: this.scarce, latencyMs: this.latency.get(m.id), contextTokens: this.contextTokens, reasons: check?.reasons });
     // A model seen answering beats one only known by its name.
     const seen = check?.ok;
-    return base - (this.deps.availability && !seen ? UNTESTED_PENALTY : 0);
+    const flaky = Math.min(3, this.deps.health.failures(this.modelUnit(m.id))) * FLAKY_PENALTY;
+    return base - (this.deps.availability && !seen ? UNTESTED_PENALTY : 0) - flaky;
   }
 
   traits(model: string): ModelTraits | undefined {

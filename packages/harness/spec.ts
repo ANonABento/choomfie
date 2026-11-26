@@ -29,6 +29,8 @@ export interface HarnessResult {
   /** The conversation id to resume next time. */
   ref?: string;
   tokens?: { in: number; out: number };
+  /** What the agent did, from its own events: "ran `npm test`", "edited app.ts". Read-only steps left out. */
+  actions?: string[];
   /** Set when the run didn't answer: what to tell the user. */
   failed?: string;
 }
@@ -55,6 +57,13 @@ export interface HarnessSpec {
   timeoutMs?: number;
   /** A failed run whose output matches this is out of quota, not broken. Default `QUOTA_PATTERN`. */
   quota?: RegExp;
+  /**
+   * The CLI speaks ACP (`opencode acp`, `agy acp`): turns stream progress and
+   * ask permission as Discord buttons instead of one print-mode run. `modes`
+   * maps this spec's mode ids to the agent's own (`work` → `auto`). Off with
+   * config `harnesses.<id>.acp: false` (back to print mode).
+   */
+  acp?: { args: string[]; modes: Record<string, string> };
 }
 
 /** What CLIs print when an allowance is spent (agy: `RESOURCE_EXHAUSTED`, "Quota exhausted"). */

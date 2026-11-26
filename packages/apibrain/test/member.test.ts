@@ -155,6 +155,23 @@ describe("models that think first", () => {
   });
 });
 
+describe("flaky models", () => {
+  const spec2 = defineProvider({ ...spec, limits: {} });
+  test("a model that keeps failing (busy, 5xx) ranks behind one that answers, until it answers again", () => {
+    const availability = new Availability();
+    const health = new Health();
+    const m = new ApiMember(defineProvider({ ...spec2, fallbackModels: ["plain-27b", "plain-8b"] }), { env: { ACME_API_KEY: "k" }, health, quota: new Quota(), fetch: fakeFetch(() => ok("x")), availability });
+    availability.mark("acme:plain-27b", true);
+    availability.mark("acme:plain-8b", true);
+    const first = m.ranked("tiny")[0].id;
+    const other = first === "plain-8b" ? "plain-27b" : "plain-8b";
+    for (let i = 0; i < 3; i++) health.fail(`acme:${first}`, "server");
+    expect(m.ranked("tiny")[0].id).toBe(other);
+    health.ok(`acme:${first}`);
+    expect(m.ranked("tiny")[0].id).toBe(first);
+  });
+});
+
 describe("benched keys across a restart", () => {
   const spec3 = defineProvider({ ...spec, limits: {} });
   test("a key that wants a card stays out after a restart, by fingerprint only; an answer clears it", async () => {

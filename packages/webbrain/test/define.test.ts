@@ -450,3 +450,68 @@ describe("local tools", () => {
     await destroy();
   });
 });
+
+describe("several accounts on one site", () => {
+  async function twoAccounts(turn: (input: TurnInput, t: TurnContext, account: string) => Promise<Awaited<ReturnType<SiteAdapter["turn"]>>>) {
+    const dataDir = mkdtempSync(join(tmpdir(), "webbrain-"));
+    dirs.push(dataDir);
+    for (const p of ["profile", "profile-2"]) mkdirSync(join(dataDir, "webbrain", "fakesite", p, "Default"), { recursive: true });
+    const chats = new ChatStore(new Database(":memory:"));
+    const adapter: SiteAdapter = {
+      id: "fakesite",
+      label: "FakeSite",
+      loginUrl: "https://fake.example/login",
+      chatUrl: (ref) => `https://fake.example/c/${ref ?? "new"}`,
+      turn: (page, input, t) => turn(input, t, (page as unknown as { account: string }).account),
+    };
+    // Each account's browser: its pages say which profile folder they came from.
+    const launch = async (dir: string) => {
+      const c = new FakeContext();
+      for (const p of c.opened) Object.assign(p, { account: dir.split("/").pop() });
+      const newPage = c.newPage.bind(c);
+      c.newPage = async () => Object.assign(await newPage(), { account: dir.split("/").pop() });
+      return c as never;
+    };
+    const plugin = defineWebBrain(adapter, { launch });
+    await plugin.init!({ DATA_DIR: dataDir, chats, config: {} } as unknown as PluginContext);
+    return { brain: getBrain("fakesite") as Brain, chats, destroy: () => plugin.destroy!() };
+  }
+
+  test("an account out of one kind (music) hands that work to the next; a chat stays on its account; status says who's out", async () => {
+    const { brain, chats, destroy } = await twoAccounts(async (input, t, account) => {
+      if (account === "profile" && /song/.test(input.text)) {
+        const { QuotaReachedError } = await import("@choomfie/shared");
+        throw new QuotaReachedError("FakeSite", undefined, "I can create more music as soon as your limit resets.", "music");
+      }
+      return { text: `${account}: ${input.text}`, ref: t.ref ?? `${account}-conv` };
+    });
+    try {
+      expect((await brain.send(msg("a", "hi there"), {} as never)).text).toBe("profile: hi there");
+      expect(chats.bound("a", "fakesite")!.backendRef).toBe("profile-conv");
+      // Account 1 is out of music: the song goes to account 2, in a fresh conversation there.
+      expect((await brain.send(msg("b", "make me a song"), {} as never)).text).toBe("profile-2: make me a song");
+      expect(chats.bound("b", "fakesite")!.backendRef).toBe("2~profile-2-conv");
+      // That chat stays on account 2.
+      expect((await brain.send(msg("b", "another verse"), {} as never)).text).toBe("profile-2: another verse");
+      // A song in chat "a" (account 1, out of music) moves to account 2 without trying account 1 again.
+      expect((await brain.send(msg("a", "now a song"), {} as never)).text).toBe("profile-2: now a song");
+      // Pictures still go to account 1.
+      expect((await brain.send(msg("c", "draw a cat"), {} as never)).text).toBe("profile: draw a cat");
+      expect((await brain.status!()).join()).toBe("FakeSite accounts: 1 (out of music), 2");
+    } finally {
+      await destroy();
+    }
+  });
+
+  test("when every account is out, the quota error goes up (free benches the brain)", async () => {
+    const { brain, destroy } = await twoAccounts(async () => {
+      const { QuotaReachedError } = await import("@choomfie/shared");
+      throw new QuotaReachedError("FakeSite");
+    });
+    try {
+      await expect(brain.send(msg("a", "hello"), {} as never)).rejects.toThrow("out of its free allowance");
+    } finally {
+      await destroy();
+    }
+  });
+});

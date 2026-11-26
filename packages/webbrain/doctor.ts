@@ -32,9 +32,9 @@ export function looksLikePong(text: string): boolean {
   return /\bpong\b/i.test(text);
 }
 
-export async function doctor(dataDir: string, adapter: SiteAdapter, opts: { headless?: boolean; timeoutMs?: number; tools?: boolean } = {}): Promise<DoctorReport> {
+export async function doctor(dataDir: string, adapter: SiteAdapter, opts: { headless?: boolean; timeoutMs?: number; tools?: boolean; profile?: number } = {}): Promise<DoctorReport> {
   const engine = engineFor(dataDir, adapter);
-  const profile = profileDir(dataDir, adapter.id, engine);
+  const profile = profileDir(dataDir, adapter.id, engine, opts.profile ?? 1);
   if (profileInUse(profile)) {
     return { ok: false, ms: 0, error: `${adapter.label}'s profile is open in another browser (Choomfie mid-conversation?). Try again when it's idle.` };
   }

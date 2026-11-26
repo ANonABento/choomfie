@@ -30,7 +30,9 @@ const plugin: Plugin = {
         continue;
       }
       const models = await listModels(binPath, spec);
-      registerBrain(createHarnessBrain(spec, ctx, { binPath, models }));
+      // config.json `harnesses.<id>.acp: false`: one print-mode run per message instead.
+      const own = ((ctx.config.getConfig() as { harnesses?: Record<string, { acp?: boolean }> }).harnesses ?? {})[spec.id];
+      registerBrain(createHarnessBrain(spec, ctx, { binPath, models, acp: own?.acp !== false }));
       registered.push(spec.id);
     }
     console.error(`Harnesses initialized — ${registered.length ? registered.join(", ") : "none installed"}`);

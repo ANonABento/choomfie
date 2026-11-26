@@ -445,7 +445,8 @@ export function createFreeBrain(deps: FreeBrainDeps, ctx: PluginContext): Brain 
         transcript.add(chat.id, "user", record);
         // A picture or track alone still goes in the transcript, so the next model knows it was sent.
         const sent = reply.files?.length ? `[attached: ${reply.files.map((f) => f.name).join(", ")}]` : "";
-        const said = [reply.text, sent].filter(Boolean).join("\n");
+        // A harness's work (files changed, commands run) too: after a hand-back, the next model knows what changed.
+        const said = [reply.text, sent, reply.record ?? ""].filter(Boolean).join("\n");
         if (said) transcript.add(chat.id, "assistant", said, member, model);
         // A web member that answered now holds the chat (until `/model auto`).
         if (!members.has(member) && chat.model !== member) chats.setModel?.(chat.id, member);

@@ -284,6 +284,17 @@ describe("free brain routing", () => {
     expect(held.choices).toEqual(["Answer with another model"]);
   });
 
+  test("a member's work record goes in the transcript, so the model after a hand-back knows what changed", async () => {
+    const agy = fakeWeb("antigravity");
+    agy.send = async () => ({ text: "fixed the test", record: "[changed: app.ts · did: ran `npm test`]" });
+    const t = setup({}, [agy]);
+    t.classifier.next = { bucket: "local", confidence: 1 };
+    const r = await t.brain.send(msg("fix my failing test"), t.ctx);
+    expect(r.text).not.toContain("changed:");
+    const chat = t.chats.bound("chan", "free")!;
+    expect(t.transcript.live(chat.id).at(-1)!.content).toBe("fixed the test\n[changed: app.ts · did: ran `npm test`]");
+  });
+
   test("/model pins an API model; if it can't answer, another does and the reply says so", async () => {
     const t = setup();
     const chat = t.chats.current("chan", "free");
@@ -361,10 +372,10 @@ describe("config", () => {
 
   test("setupFree: providers with keys become members, keyless free tiers too; a local server is opt-in", () => {
     const s = setupFree({}, { GROQ_API_KEY: "k", GEMINI_API_KEY: "g" }, new Health(), new Quota());
-    expect([...s.members.keys()]).toEqual(["groq", "gemini", "kilo", "llm7", "ovh"]);
+    expect([...s.members.keys()]).toEqual(["groq", "gemini", "kilo", "llm7"]);
     expect(s.unconfigured.map((u) => u.id)).toContain("openrouter");
     expect(s.unconfigured.map((u) => u.id)).not.toContain("ollama");
-    const local = setupFree({ providers: { ollama: { enabled: true }, groq: { enabled: false }, kilo: { enabled: false } } }, { GROQ_API_KEY: "k" }, new Health(), new Quota());
+    const local = setupFree({ providers: { ollama: { enabled: true }, ovh: { enabled: true }, groq: { enabled: false }, kilo: { enabled: false } } }, { GROQ_API_KEY: "k" }, new Health(), new Quota());
     expect([...local.members.keys()]).toEqual(["llm7", "ovh", "ollama"]);
   });
 });

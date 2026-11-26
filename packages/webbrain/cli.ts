@@ -4,8 +4,10 @@
  *
  *   bun run webbrain sites               every web brain, logged in or not
  *   bun run webbrain setup               open the login window for each one that isn't
- *   bun run webbrain login <id>          open the site headed on its own profile;
- *                                        sign in, then close the window
+ *   bun run webbrain login <id> [--profile 2]
+ *                                        open the site headed on its own profile;
+ *                                        sign in, then close the window. --profile N
+ *                                        adds another account (its own allowance)
  *   bun run webbrain record <id> <url>   capture one hand-sent message, for
  *                                        writing an adapter (docs/webbrain.md)
  *   bun run webbrain doctor <id>         send "pong" through the adapter and
@@ -33,9 +35,9 @@ const USAGE = [
   "usage:",
   "  bun run webbrain sites",
   "  bun run webbrain setup",
-  "  bun run webbrain login <id>",
+  "  bun run webbrain login <id> [--profile 2]   (another account on the same site)",
   "  bun run webbrain record <id> <url>",
-  "  bun run webbrain doctor <id> [--headed]",
+  "  bun run webbrain doctor <id> [--headed] [--profile 2]",
   "  bun run webbrain doctor <id> --tools [--headed]   (does it ask for ```run commands? nothing is run)",
   "  bun run webbrain doctor <id> --detect [--engine patchright|cloak|all] [--headed]",
   "  bun run webbrain log <id> [-n 40]",
@@ -50,9 +52,9 @@ async function loadAdapter(id: string): Promise<SiteAdapter> {
   return found;
 }
 
-async function login(dataDir: string, adapter: SiteAdapter) {
+async function login(dataDir: string, adapter: SiteAdapter, n = 1) {
   const engine = engineFor(dataDir, adapter);
-  const dir = profileDir(dataDir, adapter.id, engine);
+  const dir = profileDir(dataDir, adapter.id, engine, n);
   if (profileInUse(dir)) {
     throw new Error(
       `${adapter.label}'s browser profile is open in another process (Choomfie's worker, mid-conversation?).\n` +
@@ -65,7 +67,11 @@ async function login(dataDir: string, adapter: SiteAdapter) {
   const page = context.pages()[0] ?? (await context.newPage());
   await page.goto(adapter.loginUrl);
   await new Promise<void>((resolve) => context.on("close", () => resolve()));
-  console.error(`Saved. Choomfie's ${adapter.label} brain will use this session.`);
+  console.error(
+    n === 1
+      ? `Saved. Choomfie's ${adapter.label} brain will use this session.`
+      : `Saved account ${n}. After a /restart, ${adapter.label} uses it when account 1 is out of its allowance (a spare account: never your main one).`
+  );
 }
 
 /** One visible line from the terminal (enter alone = empty). */
@@ -127,6 +133,14 @@ async function sites(dataDir: string, setup: boolean): Promise<number> {
 }
 
 const [command, id, ...rest] = process.argv.slice(2);
+/** `--profile N`: another account on the same site (1 is the first). */
+const profileArg = (): number => {
+  const i = rest.indexOf("--profile");
+  if (i < 0) return 1;
+  const n = Number(rest[i + 1]);
+  if (!Number.isInteger(n) || n < 1 || n > 9) throw new Error("--profile takes a number from 1 to 9");
+  return n;
+};
 try {
   if (command === "sites" || command === "setup") process.exit(await sites(resolveDataDir(), command === "setup"));
   if (!command || !id) throw new Error(USAGE);
@@ -142,7 +156,7 @@ try {
       console.log(`${time}  ${String(chat).slice(-6)}  ${String(event).padEnd(8)} ${JSON.stringify(rest)}`);
     }
   } else if (command === "login") {
-    await login(dataDir, await loadAdapter(id));
+    await login(dataDir, await loadAdapter(id), profileArg());
   } else if (command === "record") {
     const url = rest[0];
     if (!url || !/^https:\/\//.test(url)) throw new Error(`record needs the site's https URL\n${USAGE}`);
@@ -177,7 +191,7 @@ try {
   } else if (command === "doctor") {
     const adapter = await loadAdapter(id);
     console.error(`${adapter.label}: sending "${PONG_PROMPT}" in a new chat…`);
-    const report = await doctor(dataDir, adapter, { headless: !rest.includes("--headed") });
+    const report = await doctor(dataDir, adapter, { headless: !rest.includes("--headed"), profile: profileArg() });
     if (report.ok) console.error(`✅ pong in ${(report.ms / 1000).toFixed(1)}s (conversation ${report.ref})`);
     else console.error(`❌ ${report.error ?? `answer didn't contain pong: ${JSON.stringify(report.text?.slice(0, 200))}`}`);
     process.exit(report.ok ? 0 : 1);

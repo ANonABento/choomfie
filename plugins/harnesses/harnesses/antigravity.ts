@@ -18,6 +18,8 @@ export default defineHarness({
   ],
   defaultMode: "work",
   readOnlyMode: "ask",
+  // `agy acp`: auto approves edits and safe commands and asks (a Discord card) before anything irreversible.
+  acp: { args: ["acp"], modes: { work: "auto", ask: "plan" } },
   args: ({ prompt, ref, model, mode }) => [
     "-p",
     prompt,

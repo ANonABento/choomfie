@@ -16,7 +16,7 @@ No tools and no instructions, so it costs the Claude session nothing.
 
 ## Setup
 
-1. `bun run apibrain keys` shows every provider: key set or not, what its free tier gives and its catch. `bun run apibrain keys setup` walks through the ones without a key: their key page opens, you paste the key (hidden), it's checked against the provider and saved to the data dir's `.env` (0600). `keys add groq` adds one; a second `add` saves `GROQ_API_KEY_2` (pooled, each its own quota). Keys never go in config.json or through Discord. The worker loads `.env` at startup, so `/restart` after adding. Kilo, LLM7 and OVHcloud need no key and are on already.
+1. `bun run apibrain keys` shows every provider: key set or not, what its free tier gives and its catch. `bun run apibrain keys setup` walks through the ones without a key: their key page opens, you paste the key (hidden), it's checked against the provider and saved to the data dir's `.env` (0600). `keys add groq` adds one; a second `add` saves `GROQ_API_KEY_2` (pooled, each its own quota). Keys never go in config.json or through Discord. The worker loads `.env` at startup, so `/restart` after adding. Kilo and LLM7 need no key and are on already; OVHcloud needs none either but is off unless `free.providers.ovh.enabled: true` (its anonymous limit is shared per address: 1 answer in 45 calls here).
 2. `bun run apibrain doctor free` checks each provider:
    - which keys are set, and how many free chat models `/models` lists today;
    - a real `pong` through each key on its best model;
@@ -75,7 +75,7 @@ None of these needs a card. Limits change without notice: `bun run apibrain keys
 | Runcrate | runcrate.ai/dashboard/api-keys | weekly allowance on five models | Sign up with GitHub (Google sign-up needs a card) |
 | Kilo | no key | `:free` models, 200 requests an hour | Free models may log prompts |
 | LLM7 | no key | its `turbo` models | Undocumented; may vanish |
-| OVHcloud | no key | 2 RPM per model, EU | A key here would be pay-as-you-go, so none is used |
+| OVHcloud | no key, off by default | 2 RPM per model on paper, shared per address in practice; EU | A key here would be pay-as-you-go, so none is used. `free.providers.ovh.enabled: true` to try it |
 | Ollama | — | your machine | Opt-in: `free.providers.ollama.enabled: true` |
 
 A provider with credit on the account (AxForge, Runcrate, Gonka, Aion) bills past its free allowance. The free brain can't tell a free-tier key from a funded one, so keep those accounts unfunded. Any provider can be turned off with `/config setting:free.providersOff value:kilo,ovh` (it writes `free.providers.<id>.enabled: false`; `/restart` to apply). `/config setting:free.footer` shows which provider and model answered.

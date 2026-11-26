@@ -78,6 +78,13 @@ export interface BrainReply {
   taskContext?: string;
   /** Run `tasks[0]` now, in this same chat, switched to its mode — instead of posting buttons. */
   runNow?: boolean;
+  /**
+   * What the chat's history should keep beyond the text: the work done
+   * ("[changed: app.ts, test.ts · ran: npm test]"). Not posted; free adds it
+   * to its transcript, so the model that picks the chat up after a hand-back
+   * knows what changed, not only what was said.
+   */
+  record?: string;
 }
 
 /** One step of a plan, for the mode that should do it. */

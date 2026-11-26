@@ -161,3 +161,4 @@ export {
 
 // Chats (location → conversation bindings)
 export { CHAT_TITLE_MAX, UNTITLED_CHAT, titleFrom, type ChatRecord, type ChatsApi } from "./chat.ts";
+export { statusLine, quiet, type StatusLine } from "./status-line.ts";

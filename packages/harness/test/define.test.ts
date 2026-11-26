@@ -98,6 +98,19 @@ describe("harness brain", () => {
     expect(r.files?.map((f) => [f.name, new TextDecoder().decode(f.data)])).toEqual([["out.txt", "made it"]]);
   });
 
+  test("what it changed and ran goes in the reply's record (for the chat history), not the text", async () => {
+    let n = 0;
+    const t = setup((_cmd, cwd) => {
+      if (n++) return says("you're welcome", "c");
+      writeFileSync(join(cwd, "app.ts"), "x");
+      return { stdout: JSON.stringify({ text: "fixed", ref: "c", actions: ["ran `npm test`", "edited app.ts"] }) };
+    });
+    const r = await t.brain.send(msg("fix it"), t.ctx);
+    expect(r.text).toBe("fixed");
+    expect(r.record).toBe("[changed: app.ts · did: ran `npm test`; edited app.ts]");
+    expect((await t.brain.send(msg("thanks"), t.ctx)).record).toBeUndefined();
+  });
+
   test("a failed run is an error (so free can fail over); the conversation id is still kept", async () => {
     const t = setup(() => ({ stdout: JSON.stringify({ text: "", ref: "conv-9", failed: "quota spent" }) }));
     await expect(t.brain.send(msg("hi"), t.ctx)).rejects.toThrow("Fake: quota spent");

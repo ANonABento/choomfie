@@ -13,12 +13,14 @@ import { basename, join } from "node:path";
 import {
   errorMessage,
   isQuotaReached,
+  mediaKindOf,
   JsonlLog,
   nowIso,
   framePrompt,
   parseTaskList,
   pushBrainReply,
   registerBrain,
+  statusLine,
   unregisterBrain,
   type Brain,
   type BrainApproval,
@@ -29,7 +31,7 @@ import type { Page } from "patchright";
 import { LoginRequiredError, type SiteAdapter, type TurnContext, type TurnResult } from "./adapter.ts";
 import { engineFor, launchContext } from "./engine/launch.ts";
 import { createHuman, Pacer } from "./engine/human.ts";
-import { outboxDir, profileDir, siteDir } from "./paths.ts";
+import { joinRef, listProfiles, outboxDir, profileDir, siteDir, splitRef } from "./paths.ts";
 import { hasProfile } from "./sites.ts";
 import { TabPool, type ContextLike } from "./tabs.ts";
 import { LateWatch } from "./watch.ts";
@@ -46,24 +48,6 @@ export interface WebBrainOptions {
   workTurnTimeoutMs?: number;
   /** Replace the browser launch (tests, or another engine). Gets the site's profile dir. */
   launch?(profileDir: string): Promise<ContextLike<Page>>;
-}
-
-type Quiet = { content: string; allowedMentions: { parse: never[] } };
-/** Status lines quote the site's own words: never let them ping anyone. */
-const quiet = (content: string): Quiet => ({ content, allowedMentions: { parse: [] } });
-
-interface StatusChannel {
-  send(options: Quiet): Promise<{ edit(options: Quiet): Promise<unknown>; delete(): Promise<unknown> }>;
-  sendTyping?(): Promise<unknown>;
-}
-
-async function channelFor(ctx: PluginContext, chatKey: string): Promise<StatusChannel | null> {
-  try {
-    const ch = await ctx.discord?.channels.fetch(chatKey);
-    return ch && "send" in ch ? (ch as unknown as StatusChannel) : null;
-  } catch {
-    return null;
-  }
 }
 
 export { framePrompt };
@@ -125,8 +109,12 @@ interface WebBrainRuntime {
   close(): Promise<void>;
 }
 
+/** An account out of quota that didn't say until when: try it again after this. */
+const PROFILE_QUOTA_MS = 3_600_000;
+
 function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebBrainRuntime {
-  let pool: TabPool<Page> | null = null;
+  /** One browser per logged-in account (profile 1, 2, …). */
+  const pools = new Map<number, TabPool<Page>>();
   let watch: LateWatch | null = null;
 
   function createBrain(ctx: PluginContext): Brain {
@@ -134,7 +122,8 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
     if (!chats) throw new Error(`${adapter.label} needs Choomfie's chat store (ctx.chats)`);
 
     const engine = engineFor(ctx.DATA_DIR, adapter);
-    const profile = profileDir(ctx.DATA_DIR, adapter.id, engine);
+    /** The accounts logged in on this site (`webbrain login <id> --profile 2` adds one); at least profile 1. */
+    const profiles = ((l) => (l.length ? l : [1]))(listProfiles(ctx.DATA_DIR, adapter.id, engine));
     const outbox = outboxDir(ctx.DATA_DIR, adapter.id);
     /** What each turn did (`bun run webbrain log <id>`): the daemon's stderr isn't kept anywhere. */
     const turnLog = new JsonlLog(join(siteDir(ctx.DATA_DIR, adapter.id), "turns.jsonl"), undefined, "webbrain");
@@ -155,16 +144,40 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
     const compacted = new Map<string, string>();
     /** Commands waiting for the owner's Approve button, by approval id. */
     const pendingRuns = new Map<string, { chatKey: string; cmds: string[] }>();
-    const tabs = (pool = new TabPool<Page>({
-      launch: () => (opts.launch ? opts.launch(profile) : launchContext(profile, { headless: !headedFor(adapter.id), engine })),
-      maxTabs: opts.maxTabs,
-      idleCloseMs: opts.idleCloseMs,
-    }));
-    const refAt = (chatKey: string) => chats.bound(chatKey, adapter.id)?.backendRef ?? undefined;
+    const poolFor = (n: number): TabPool<Page> => {
+      let p = pools.get(n);
+      if (!p) {
+        const dir = profileDir(ctx.DATA_DIR, adapter.id, engine, n);
+        p = new TabPool<Page>({
+          launch: () => (opts.launch ? opts.launch(dir) : launchContext(dir, { headless: !headedFor(adapter.id), engine })),
+          maxTabs: opts.maxTabs,
+          idleCloseMs: opts.idleCloseMs,
+        });
+        pools.set(n, p);
+      }
+      return p;
+    };
 
-    /** Run on the chat's tab; a broken page (not a logged-out one) is reset so it can't poison the next turn. */
-    const onTab = <T>(chatKey: string, fn: (page: Page) => Promise<T>) =>
-      tabs.run(chatKey, async (page) => {
+    /**
+     * Accounts out of their allowance, until when: `2`, or `2#music` when the
+     * site caps one kind of work. A chat stays on the account its conversation
+     * lives on; new work goes to the first account that isn't out.
+     */
+    const outUntil = new Map<string, number>();
+    const isOut = (n: number, kind?: string) =>
+      (outUntil.get(`${n}`) ?? 0) > Date.now() || (!!kind && (outUntil.get(`${n}#${kind}`) ?? 0) > Date.now());
+    const freeProfile = (kind?: string) => profiles.find((n) => !isOut(n, kind));
+    /** A chat with no conversation id yet: the account its first turn is on. */
+    const startedOn = new Map<string, number>();
+    const profileOf = (chatKey: string) => {
+      const stored = chats.bound(chatKey, adapter.id)?.backendRef;
+      return stored ? splitRef(stored).profile : (startedOn.get(chatKey) ?? profiles[0]);
+    };
+    const refAt = (chatKey: string) => splitRef(chats.bound(chatKey, adapter.id)?.backendRef).ref;
+
+    /** Run on the chat's tab, in its account's browser; a broken page (not a logged-out one) is reset so it can't poison the next turn. */
+    const onTab = <T>(chatKey: string, fn: (page: Page) => Promise<T>, profile = profileOf(chatKey)) =>
+      poolFor(profile).run(chatKey, async (page) => {
         try {
           return await fn(page);
         } catch (e) {
@@ -196,6 +209,20 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
       label: adapter.label,
       modes: adapter.modes?.map(({ id, label, description, repo, files }) => ({ id, label, description, ...(repo ? { repo } : {}), ...(files ? { files } : {}) })),
       defaultMode: adapter.defaultMode,
+
+      // More than one account: which are out, for `/brain status`.
+      ...(profiles.length > 1
+        ? {
+            async status() {
+              const now = Date.now();
+              const parts = profiles.map((n) => {
+                const out = [...outUntil].filter(([k, until]) => until > now && (k === `${n}` || k.startsWith(`${n}#`)));
+                return out.length ? `${n} (out${out.map(([k]) => (k.includes("#") ? ` of ${k.split("#")[1]}` : "")).join(",")})` : `${n}`;
+              });
+              return [`${adapter.label} accounts: ${parts.join(", ")}`];
+            },
+          }
+        : {}),
 
       // Core has already bound a fresh chat here; only the background watch is ours to drop.
       async reset(chatKey) {
@@ -229,7 +256,7 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
 
       async stop(chatKey) {
         const turn = active.get(chatKey);
-        const page = tabs.peek(chatKey);
+        const page = poolFor(profileOf(chatKey)).peek(chatKey);
         if (!turn?.ref || !page || !adapter.stop) return false;
         turn.stop = true;
         return adapter.stop(page, turn.ref);
@@ -258,43 +285,12 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
       async send(message) {
         if (!message.meta?.[LATE_CONTINUE]) lateContinues.delete(message.chatKey);
         const chat = chats.current(message.chatKey, adapter.id, message.content);
-        // In a chat the bot isn't in, status goes in the "thinking…" reply instead.
-        const relayProgress = message.progress;
-        const channel = relayProgress ? null : await channelFor(ctx, message.chatKey);
-        let status: Awaited<ReturnType<StatusChannel["send"]>> | null = null;
-        let lastEdit = 0;
-        let lastTyping = 0;
-        let statusBusy = false;
-        let started = 0;
-
-        const progress = (line: string) => {
-          const now = Date.now();
-          const elapsed = now - started;
-          if (channel?.sendTyping && now - lastTyping > 8_000) {
-            lastTyping = now;
-            void channel.sendTyping().catch(() => {});
-          }
-          if (relayProgress) {
-            // The placeholder is already on screen, so it can say more, sooner.
-            if (statusBusy || elapsed < 10_000 || now - lastEdit < 15_000) return;
-            lastEdit = now;
-            statusBusy = true;
-            void relayProgress(line)
-              .catch(() => {})
-              .finally(() => (statusBusy = false));
-            return;
-          }
-          // Quiet for short answers; one self-updating status line for long tasks.
-          if (!channel || statusBusy || elapsed < 45_000 || now - lastEdit < 20_000) return;
-          lastEdit = now;
-          statusBusy = true;
-          void (status ? status.edit(quiet(line)) : channel.send(quiet(line)).then((m) => (status = m)))
-            .catch(() => {})
-            .finally(() => (statusBusy = false));
-        };
+        // One self-updating status line on a long turn (or the "thinking…" reply, in a chat the bot isn't in).
+        const status = await statusLine(ctx, message.chatKey, message.progress);
+        const progress = status.progress;
         const notice = (line: string) => {
           logEvent(message.chatKey, "notice", { line });
-          void (relayProgress ? relayProgress(line) : channel?.send(quiet(line)))?.catch(() => {});
+          status.notice(line);
         };
 
         // Copy attachments under their original names so the site sees "photo.png".
@@ -308,7 +304,20 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
 
         // After /compact: a fresh site conversation, opened with the summary.
         const seed = message.meta?.[LATE_CONTINUE] ? undefined : compacted.get(message.chatKey);
-        const turn: ActiveTurn = { ref: seed ? undefined : (chat.backendRef ?? undefined), stop: false };
+        const stored = splitRef(chat.backendRef);
+        const turn: ActiveTurn = { ref: seed ? undefined : stored.ref, stop: false };
+        // Which account: the conversation's own, unless that one is out of what this asks for and another isn't.
+        const kind = mediaKindOf(message.content);
+        let profile = stored.profile;
+        if (!turn.ref || isOut(profile, kind)) {
+          const free = freeProfile(kind);
+          if (free !== undefined && free !== profile && turn.ref) {
+            notice(`${adapter.label} account ${profile} is out of ${kind ? `its ${kind} allowance` : "its allowance"} — this goes to account ${free}, in a fresh conversation`);
+            turn.ref = undefined;
+          }
+          profile = free ?? profile;
+        }
+        if (!turn.ref) startedOn.set(message.chatKey, profile);
         // Local tools: the owner's messages only, on a site that opts in.
         const tools = !!adapter.localTools && message.meta?.role === "owner";
         const toolResult = !!message.meta?.[TOOL_RESULT];
@@ -319,21 +328,25 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
           const onPipeline = !!chats.pipelineAt?.(message.chatKey);
           const framed = (adapter.framePrompt ?? framePrompt)(message.content, message.meta);
           // The guide opens each site conversation; later messages get a one-line reminder.
-          const withTools = tools && !toolResult ? `${turn.ref ? TOOL_REMINDER : toolGuide()}\n\n${framed}` : framed;
-          const { text, mode } = modePrompt(
-            adapter,
-            toolResult ? null : (chat.mode ?? (onPipeline ? null : adapter.defaultMode) ?? null),
-            seed ? seededPrompt(seed, withTools) : withTools
-          );
+          // Built per attempt: a turn moved to another account opens a new conversation, which needs the full guide.
+          const build = () => {
+            const withTools = tools && !toolResult ? `${turn.ref ? TOOL_REMINDER : toolGuide()}\n\n${framed}` : framed;
+            return modePrompt(
+              adapter,
+              toolResult ? null : (chat.mode ?? (onPipeline ? null : adapter.defaultMode) ?? null),
+              seed ? seededPrompt(seed, withTools) : withTools
+            );
+          };
+          const { mode } = build();
           const runTurn = (prompt: string, attach: string[]) =>
             onTab(message.chatKey, (page) => {
-              started ||= Date.now();
+              status.begin();
               active.set(message.chatKey, turn);
               const tctx: TurnContext = {
                 ref: turn.ref,
                 started(ref) {
                   turn.ref = ref;
-                  chats.setBackendRef(chat.id, ref);
+                  chats.setBackendRef(chat.id, joinRef(profile, ref));
                 },
                 stopRequested: () => turn.stop,
                 progress,
@@ -342,7 +355,7 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
                 timeoutMs: isWorkMode(mode) ? workTimeoutMs : timeoutMs,
               };
               const t0 = Date.now();
-              logEvent(message.chatKey, "start", { ref: turn.ref ?? null, mode: mode ?? null, said: message.content.slice(0, 200), prompt: prompt.slice(-200), files: attach.map((f) => basename(f)) });
+              logEvent(message.chatKey, "start", { ref: turn.ref ?? null, ...(profiles.length > 1 ? { profile } : {}), mode: mode ?? null, said: message.content.slice(0, 200), prompt: prompt.slice(-200), files: attach.map((f) => basename(f)) });
               tctx.log = (event, detail) => logEvent(message.chatKey, event, { ref: turn.ref ?? null, ...detail });
               return adapter.turn(page, { text: prompt, files: attach, mode }, tctx).then(
                 (r) => {
@@ -370,15 +383,31 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
                   throw e;
                 }
               );
-            });
-          let result = await runTurn(text, files);
+            }, profile);
+          const firstTurn = async () => {
+            try {
+              return await runTurn(build().text, files);
+            } catch (e) {
+              if (!isQuotaReached(e)) throw e;
+              // This account is spent (or spent on this kind of work): bench it, and go on with another if there is one.
+              outUntil.set(e.scope ? `${profile}#${e.scope}` : `${profile}`, e.resetAt ?? Date.now() + PROFILE_QUOTA_MS);
+              const next = freeProfile(e.scope ?? kind);
+              if (next === undefined) throw e;
+              notice(`${adapter.label} account ${profile} is out of ${e.scope ? `its ${e.scope} allowance` : "its allowance"} — trying account ${next}${turn.ref ? ", in a fresh conversation" : ""}`);
+              profile = next;
+              turn.ref = undefined;
+              startedOn.set(message.chatKey, profile);
+              return await runTurn(build().text, files);
+            }
+          };
+          let result = await firstTurn();
           // The site cut the answer short (a tool-call cap): carry on, keeping files from every part.
           for (let i = 0; i < MAX_CONTINUES && !result.stopped && !turn.stop && !result.approvals?.length; i++) {
             if (result.background) break;
             const more = adapter.continueAfter?.(result.text, mode ?? undefined);
             if (!more) break;
             turn.ref = result.ref;
-            chats.setBackendRef(chat.id, result.ref);
+            chats.setBackendRef(chat.id, joinRef(profile, result.ref));
             lateWatch.delivered(message.chatKey, result.messageIds ?? []);
             notice(`${adapter.label} stopped before finishing — continuing (${i + 1}/${MAX_CONTINUES})`);
             const earlier = result.files ?? [];
@@ -418,7 +447,7 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
             for (const r of results) logEvent(message.chatKey, "ran", { cmd: r.cmd, exit: r.code, auto: true, ...(r.timedOut ? { timedOut: true } : {}) });
             ran.push(...results);
             turn.ref = result.ref;
-            chats.setBackendRef(chat.id, result.ref);
+            chats.setBackendRef(chat.id, joinRef(profile, result.ref));
             lateWatch.delivered(message.chatKey, result.messageIds ?? []);
             const skipped = asked.length > cmds.length ? `[Only the first ${MAX_CALLS} commands ran.]` : undefined;
             result = await runTurn(resultsPrompt(results, skipped), []);
@@ -431,7 +460,8 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
           if (ran.length) result = { ...result, text: `${result.text}\n${ranNote(ran)}` };
           if (waiting) result = { ...result, approvals: [...(result.approvals ?? []), waiting] };
 
-          chats.setBackendRef(chat.id, result.ref);
+          chats.setBackendRef(chat.id, joinRef(profile, result.ref));
+          startedOn.delete(message.chatKey);
           if (seed) {
             compacted.delete(message.chatKey);
             lateWatch.stop(message.chatKey); // the old conversation's background work isn't this one's
@@ -454,7 +484,7 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
           };
         } finally {
           if (active.get(message.chatKey) === turn) active.delete(message.chatKey);
-          await (status as { delete(): Promise<unknown> } | null)?.delete().catch(() => {});
+          await status.close();
           rmSync(batch, { recursive: true, force: true });
         }
       },
@@ -467,8 +497,8 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
     async close() {
       watch?.stopAll();
       watch = null;
-      await pool?.close();
-      pool = null;
+      await Promise.all([...pools.values()].map((p) => p.close()));
+      pools.clear();
     },
   };
 }

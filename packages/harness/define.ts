@@ -16,12 +16,16 @@ import {
   DISCORD_MESSAGE_FILES,
   framePrompt,
   parseResetAt,
+  pushBrainReply,
   QuotaReachedError,
+  statusLine,
   type Brain,
   type BrainFile,
   type BrainMessage,
+  type BrainReply,
   type PluginContext,
 } from "@choomfie/shared";
+import { acpTurn, type AcpSpawn, type PermissionAsk } from "./acp.ts";
 import { spawnCli, type Spawner } from "./run.ts";
 import { lastLine, QUOTA_PATTERN, type HarnessSpec } from "./spec.ts";
 
@@ -31,7 +35,14 @@ export interface HarnessDeps {
   spawn?: Spawner;
   /** Models for `/model`, listed at init. */
   models?: string[];
+  /** Drive the CLI over ACP when its spec says it can (default true). */
+  acp?: boolean;
+  /** Replace the ACP process (tests). */
+  acpSpawn?: AcpSpawn;
 }
+
+/** A permission card nobody answers is a no after this long, so the run isn't stuck forever. */
+const PERMISSION_WAIT_MS = 15 * 60_000;
 
 const ATTACHED = "attachments";
 const SKIP_DIRS = new Set([".git", "node_modules", ".venv", "__pycache__", ATTACHED]);
@@ -56,6 +67,18 @@ export function snapshot(dir: string): Map<string, string> {
   return seen;
 }
 
+/** `[note.txt](file:///…/note.txt)` → `note.txt`: a link to this machine's disk is dead in Discord. */
+export const unlinkLocalFiles = (text: string) => text.replace(/\[([^\]\n]+)\]\(file:\/\/[^)\s]+\)/g, "`$1`");
+
+/** One line of what a run did, for the chat's history: what changed in its folder, and what it ran. */
+export function workRecord(changed: string[], actions: string[]): string | undefined {
+  const parts = [
+    changed.length ? `changed: ${[...new Set(changed)].slice(0, 15).join(", ")}${changed.length > 15 ? ", …" : ""}` : "",
+    actions.length ? `did: ${[...new Set(actions)].slice(0, 12).join("; ")}${actions.length > 12 ? "; …" : ""}` : "",
+  ].filter(Boolean);
+  return parts.length ? `[${parts.join(" · ")}]`.slice(0, 1_200) : undefined;
+}
+
 /** Files new or changed since `before`, as attachments; the ones that can't go are named instead. */
 export function changedFiles(dir: string, before: Map<string, string>): { files: BrainFile[]; skipped: string[] } {
   const files: BrainFile[] = [];
@@ -75,6 +98,26 @@ export function createHarnessBrain(spec: HarnessSpec, ctx: PluginContext, deps: 
   if (!chats) throw new Error(`${spec.label} needs Choomfie's chat store (ctx.chats)`);
   const spawn = deps.spawn ?? spawnCli;
   const active = new Map<string, AbortController>();
+  const useAcp = !!spec.acp && deps.acp !== false;
+  /** Permission cards waiting for the owner, by approval id. */
+  const asks = new Map<string, { chatKey: string; answer(allow: boolean): void }>();
+
+  /** Post an Allow / Deny card mid-run and wait for the owner's click. */
+  const askOwner = (chatKey: string, ask: PermissionAsk) =>
+    new Promise<boolean>((resolve) => {
+      const id = `perm-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      const timer = setTimeout(() => answer(false), PERMISSION_WAIT_MS);
+      const answer = (allow: boolean) => {
+        clearTimeout(timer);
+        asks.delete(id);
+        resolve(allow);
+      };
+      asks.set(id, { chatKey, answer });
+      pushBrainReply(spec.id, chatKey, {
+        text: "",
+        approvals: [{ id, title: `${spec.label} wants to: ${ask.title}`.slice(0, 200), detail: ask.detail, approveLabel: "Allow", declineLabel: "Deny" }],
+      }).catch(() => answer(false));
+    });
   const queue = new Map<string, Promise<unknown>>();
 
   /** One turn at a time per chat: the CLI's conversation can't take two. */
@@ -110,6 +153,13 @@ export function createHarnessBrain(spec: HarnessSpec, ctx: PluginContext, deps: 
     const before = snapshot(cwd);
     const abort = new AbortController();
     active.set(message.chatKey, abort);
+    if (useAcp) {
+      try {
+        return await acpRun(message, chat, prompt, mode, cwd, before, abort, owner);
+      } finally {
+        if (active.get(message.chatKey) === abort) active.delete(message.chatKey);
+      }
+    }
     let out;
     try {
       out = await spawn([deps.binPath, ...spec.args({ prompt, ref: chat.backendRef ?? undefined, model: chat.model ?? undefined, mode, cwd })], {
@@ -134,7 +184,66 @@ export function createHarnessBrain(spec: HarnessSpec, ctx: PluginContext, deps: 
     }
     const { files, skipped } = changedFiles(cwd, before);
     const more = skipped.length ? `\n-# also changed (too many or too big to attach): ${skipped.slice(0, 10).join(", ")}${skipped.length > 10 ? ", …" : ""}` : "";
-    return { text: (r.text.trim() || `(${spec.label} sent an empty reply)`) + more, ...(files.length ? { files } : {}) };
+    const record = workRecord([...files.map((f) => f.name), ...skipped], r.actions ?? []);
+    return { text: unlinkLocalFiles(r.text.trim() || `(${spec.label} sent an empty reply)`) + more, ...(files.length ? { files } : {}), ...(record ? { record } : {}) };
+  }
+
+  /** One turn over ACP: progress on a status line, permission as a card, the rest as print mode's reply. */
+  async function acpRun(
+    message: BrainMessage,
+    chat: { id: string; backendRef: string | null; model: string | null },
+    prompt: string,
+    mode: string,
+    cwd: string,
+    before: Map<string, string>,
+    abort: AbortController,
+    owner: boolean
+  ): Promise<BrainReply> {
+    const status = await statusLine(ctx, message.chatKey, message.progress);
+    status.begin();
+    const timeoutMs = spec.timeoutMs ?? 20 * 60_000;
+    let r;
+    try {
+      r = await acpTurn(
+        {
+          cmd: [deps.binPath, ...spec.acp!.args],
+          cwd,
+          prompt,
+          ref: chat.backendRef ?? undefined,
+          mode: spec.acp!.modes[mode],
+          model: chat.model ?? undefined,
+          signal: abort.signal,
+          timeoutMs,
+          progress: (line) => status.progress(`${line} (${spec.label})`),
+          // Only the owner can allow anything; a read-only turn is refused whatever it asks.
+          ...(owner && mode !== spec.readOnlyMode ? { permission: (ask: PermissionAsk) => askOwner(message.chatKey, ask) } : {}),
+        },
+        deps.acpSpawn
+      );
+    } finally {
+      await status.close();
+    }
+    if (r.ref && r.ref !== chat.backendRef) chats!.setBackendRef(chat.id, r.ref);
+    chats!.touch(chat.id);
+    if (r.stopped) return { text: r.text ? `${r.text}\n-# stopped` : `${spec.label} stopped.`, stopped: true };
+    if (r.timedOut) throw new Error(`${spec.label} took longer than ${Math.round(timeoutMs / 60_000)} min and was stopped`);
+    if (r.failed && !r.text) {
+      const said = `${r.failed}\n${r.stderr}`;
+      if ((spec.quota ?? QUOTA_PATTERN).test(said)) throw new QuotaReachedError(spec.label, parseResetAt(said), lastLine(r.failed));
+      throw new Error(`${spec.label}: ${r.failed}`);
+    }
+    const { files, skipped } = changedFiles(cwd, before);
+    const notes = [
+      r.restarted ? `-# ${spec.label} couldn't reopen this chat's conversation, so it started a new one` : "",
+      r.toolErrors.length ? `-# failed: ${[...new Set(r.toolErrors)].join(", ")}` : "",
+      skipped.length ? `-# also changed (too many or too big to attach): ${skipped.slice(0, 10).join(", ")}${skipped.length > 10 ? ", …" : ""}` : "",
+    ].filter(Boolean);
+    const record = workRecord([...files.map((f) => f.name), ...skipped], r.actions);
+    return {
+      text: [unlinkLocalFiles(r.text.trim() || `(${spec.label} sent an empty reply)`), ...notes].join("\n"),
+      ...(files.length ? { files } : {}),
+      ...(record ? { record } : {}),
+    };
   }
 
   return {
@@ -150,10 +259,18 @@ export function createHarnessBrain(spec: HarnessSpec, ctx: PluginContext, deps: 
       const a = active.get(chatKey);
       if (!a) return false;
       a.abort();
+      // A card still waiting is moot now.
+      for (const ask of [...asks.values()]) if (ask.chatKey === chatKey) ask.answer(false);
       return true;
     },
     async status() {
-      return [`**${spec.label}** — \`${deps.binPath}\`${spec.note ? ` · ${spec.note}` : ""}`];
+      return [`**${spec.label}** — \`${deps.binPath}\`${useAcp ? " · ACP" : ""}${spec.note ? ` · ${spec.note}` : ""}`];
+    },
+    async resolveApproval(_chatKey, approvalId, approve) {
+      const ask = asks.get(approvalId);
+      if (!ask) return "That request has expired (the run moved on or was stopped).";
+      ask.answer(approve);
+      return approve ? "Allowed." : "Denied.";
     },
     ...(deps.models?.length ? { models: () => deps.models!.map((id) => ({ id })) } : {}),
   };

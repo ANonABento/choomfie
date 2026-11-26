@@ -187,7 +187,7 @@ Different from routing: routing picks **who answers the user**; delegation is **
 **Stage 2 — Web brains.** Exit: adding a site and keeping it logged in is as easy as `apibrain keys`, and Waymond answers.
 - [x] Waymond: "the message box never appeared" was a signed-out profile. Signed out, Ambition's `/chat` shows a public landing at the same URL instead of redirecting, so the URL check passed. The adapter now spots the landing (`loggedIn`, under a second) and says to log in; the composer selector also follows Ambition's redesign. Verified by the owner Nov 24.
 - [x] `webbrain sites` / `webbrain setup`: every site, logged in or not (headless check, sends nothing), then `login` for the ones that aren't.
-- [ ] Multi-profile web brains (several logged-in profiles per site, each its own capacity unit).
+- [x] Multi-profile web brains (several logged-in profiles per site, each its own capacity unit). Nov 25: `webbrain login <id> --profile 2`; a browser per account, chats stay on theirs, quota (or one kind of it) moves new work to the next account.
 
 **Stage 2b — Groundwork for media and more sites** (before the second web brain, so each new site is one adapter and a bucket line):
 - [x] A `media` bucket (make an image, music, a video, a voice clip) beside `agentic`, its members the sites and Spaces that generate them; a reply's files come back as attachments (Waymond's path already does this). Nov 25: Waymond is its member until Gemini lands; a keyword rule backs the classifier.
@@ -219,8 +219,8 @@ Different from routing: routing picks **who answers the user**; delegation is **
 - [x] Harness kit (`@choomfie/harness`, plugin `harnesses`, Nov 24): one print-mode run per message, the CLI's conversation id resumed per chat, a folder per chat, attachments in, changed files back, `/stop`, read-only mode for anyone but the owner. First harness: Antigravity `agy` (free, weekly quota). See [harness.md](harness.md).
 - [x] OpenCode as the second harness (Nov 25): Zen's free models, no account; `run --format json` events, `--session` resumes, `plan` agent read-only.
 - [x] Harnesses as free members (Nov 25): a `local` bucket (work on this computer) → antigravity, opencode; offered / held like Waymond, and a **Back to auto** button under every holding member's reply.
-- [ ] Harness reports what changed (files, commands) into free's transcript on handback, not only its replies.
-- [ ] ACP (Agent Client Protocol) driver instead of print mode: streaming progress, tool approvals as Discord buttons, one protocol for agy, OpenCode, Gemini CLI, Goose.
+- [x] Harness reports what changed (files, commands) into free's transcript on handback, not only its replies. Nov 25: `BrainReply.record`, from the folder diff and the agent's own tool events.
+- [x] ACP (Agent Client Protocol) driver instead of print mode: streaming progress, tool approvals as Discord buttons, one protocol for agy, OpenCode, Gemini CLI, Goose. Nov 25: `packages/harness/acp.ts`, verified on both CLIs (session resumed, work recorded); print mode stays as `acp: false`.
 - Researched Nov 24: Cursor CLI's free plan runs out almost at once; Gemini CLI's free serving ended (June 2026) and Qwen Code's free tier ended (April 2026); Codex needs a paid plan or key.
 
 **Stage 4 — Agents talking to agents.** Exit: any brain can hand work to the right other brain mid-task and get the result back, and the user can hand a chat to any capable brain. (See "Delegation" and "hand off to any agent" above.)
@@ -240,6 +240,7 @@ Different from routing: routing picks **who answers the user**; delegation is **
 - [ ] Ranking from evidence: probe benchmark with checkable answers (`doctor --rank`), implicit signals (retries, hand-offs, rephrasing), bandit ordering.
 - [ ] `Try a bigger model` button.
 - [ ] More providers: LM Studio (local), GitHub Models (its catalog isn't at `/models`).
+- [x] Nov 25: a model failing in a row (busy, 5xx, timeout) ranks a point lower per failure, up to three, until it answers (in memory); OVHcloud opt-in (1 answer in 45).
 - [ ] **Reinvestigate probing.** Today: every new candidate gets one "Reply with the word: ok" at worker start and every 24h; answers are kept for good, refusals for 7 days, but busy / rate-limited / timed-out results aren't recorded, so every restart probes those again (Gemini's gemma-4 503'd four times in one day). Cheap in tokens (104 probes ≈ 1.6k tokens by Nov 24) but it spends daily request caps and fills the log. Questions: remember a transient failure for hours across restarts; probe lazily (only when a bucket would pick the model) instead of sweeping everything; merge with the probe benchmark above so one call both checks a model answers and scores it; skip non-chat models (PII, safety, embedding) by listing traits before spending a call.
 - [ ] Compaction: big-context models get the original turns instead of the summary; structured summary (goals, decisions, facts, open questions, code and numbers verbatim); a real token count.
 

@@ -12,7 +12,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SiteAdapter, SiteTerms } from "./adapter.ts";
 import { engineFor, launchContext, profileName } from "./engine/launch.ts";
-import { profileInUse } from "./paths.ts";
+import { listProfiles, profileInUse } from "./paths.ts";
 
 export type SiteState = "logged-in" | "logged-out" | "never" | "busy" | "unknown";
 
@@ -70,6 +70,13 @@ export function landedInChat(adapter: Pick<SiteAdapter, "chatUrl">, url: string)
 }
 
 export async function siteStatus(dataDir: string, adapter: SiteAdapter, opts: { check?: boolean } = {}): Promise<SiteStatus> {
+  const s = await profileStatus(dataDir, adapter, opts);
+  // More accounts (`login <id> --profile 2`): listed, not each checked (that'd open every browser).
+  const more = listProfiles(dataDir, adapter.id, engineFor(dataDir, adapter)).filter((n) => n > 1);
+  return more.length ? { ...s, detail: [s.detail, `accounts 1, ${more.join(", ")}`].filter(Boolean).join(" · ") } : s;
+}
+
+async function profileStatus(dataDir: string, adapter: SiteAdapter, opts: { check?: boolean }): Promise<SiteStatus> {
   const base = { id: adapter.id, label: adapter.label, ...(adapter.terms ? { terms: adapter.terms } : {}) };
   const dir = profilePath(dataDir, adapter);
   if (!existsSync(join(dir, "Default"))) return { ...base, state: "never" };
