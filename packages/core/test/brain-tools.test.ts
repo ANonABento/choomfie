@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pushBrainReply, registerBrain, unregisterBrain, type BrainMessage, type BrainReply } from "@choomfie/shared";
 import { brainTools } from "../lib/tools/brain-tools.ts";
-import { delegate } from "../lib/delegate.ts";
+import { delegate, stopDelegations } from "../lib/delegate.ts";
 import { inConversation } from "../lib/brain-router.ts";
 import { _resetTurns, callerIsOwner, recordTurn } from "../lib/caller.ts";
 import type { AppContext } from "../lib/types.ts";
@@ -134,6 +134,19 @@ describe("delegate()", () => {
     release();
     await Promise.all([busy, asked]);
     expect(order).toEqual(["message", "ask"]);
+  });
+
+  test("/stop in the chat that asked stops the task, and only while it runs", async () => {
+    const stopped: string[] = [];
+    let finish!: (r: BrainReply) => void;
+    registerBrain({ id: "fake", label: "Fake", send: () => new Promise((r) => (finish = r)), stop: async (k) => (stopped.push(k), finish({ text: "half", stopped: true }), true) });
+    const asked = delegate({ ...req, waitMs: 1000, askedFrom: "c1" }, ctx);
+    await Bun.sleep(5);
+    expect(await stopDelegations("other")).toEqual([]);
+    expect(await stopDelegations("c1")).toEqual(["Fake"]);
+    expect(stopped).toEqual(["t1"]);
+    expect((await asked).stopped).toBe(true);
+    expect(await stopDelegations("c1")).toEqual([]);
   });
 });
 

@@ -74,6 +74,7 @@ import { tmpdir } from "node:os";
 import { requireOwner } from "./shared.ts";
 import { carryContext } from "../handoff.ts";
 import { chatStateLines } from "../chats/here.ts";
+import { stopDelegations } from "../delegate.ts";
 
 function label(id: string): string {
   return isBrainId(id) ? brainLabel(id) : `${id} (not loaded)`;
@@ -236,12 +237,15 @@ registerCommand("stop", {
       ctx.config.getChannelBrain(id), ctx.config.getDefaultBrain()
     );
     if (current === CLAUDE_BRAIN) {
+      // Work Claude handed to another brain (the delegate tool) stops in either mode.
+      const handed = await stopDelegations(channelId);
+      const handedNote = handed.length ? `\n-# Also stopped the work it handed to ${handed.map((l) => `**${l}**`).join(", ")}.` : "";
       // Only the daemon owns a Claude session it can interrupt. In foreground
       // the session is a terminal Claude Code window, which nothing outside it
       // can press Esc in.
       if (!(await isDaemonMode(ctx.DATA_DIR))) {
         await interaction.reply({
-          content: "Claude can only be interrupted from Discord in daemon mode (`choomfie --daemon`). In the terminal, press Esc.",
+          content: "Claude can only be interrupted from Discord in daemon mode (`choomfie --daemon`). In the terminal, press Esc." + handedNote,
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -250,10 +254,10 @@ registerCommand("stop", {
       await requestDaemonControl(ctx.DATA_DIR, "stop", { requestedBy: interaction.user.id, location: channelId });
       onReplySent(channelId); // the interrupted turn won't reply, so stop typing now
       await settleAskRelays(channelId, "⏹️ Stopped.");
-      await interaction.reply({ content: "Stopping **Claude**…", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "Stopping **Claude**…" + handedNote, flags: MessageFlags.Ephemeral });
       const idle = await waitForClaudeIdle(ctx.DATA_DIR, channelId, asked);
       await interaction
-        .editReply(idle ? "⏹️ **Claude** stopped." : "Asked **Claude** to stop — it hasn't confirmed yet; `/status` shows whether it's still busy.")
+        .editReply((idle ? "⏹️ **Claude** stopped." : "Asked **Claude** to stop — it hasn't confirmed yet; `/status` shows whether it's still busy.") + handedNote)
         .catch(() => {});
       return;
     }

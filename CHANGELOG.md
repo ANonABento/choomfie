@@ -47,6 +47,8 @@
 
 ### Fixed
 
+- **`/stop` gaps.** On a web brain, `/stop` sent before the site opened the conversation said "nothing running"; now the turn stops as soon as it has an id, and a message still waiting for its tab is never sent. On Claude, `/stop` also stops work it handed to another brain with `delegate` (in foreground too, where Claude itself still needs Esc).
+
 - **Gemini web: a picture-only answer hung for 15 minutes.** "Make me an image of a tabby cat" gets a picture and no text, and the wait only ended on text. `waitForSettledText` takes `hasContent`, and a reply can be files alone.
 - **Gemini web: songs came through as "0:00 / 2:35".** A track (or video) is now attached as an .mp4, and the player's text is left out. One over Discord's 10 MB limit gets a line saying so.
 - **"Hand back to free models" under Gemini web's reply.** Gemini web is free too: the button is **Back to auto** (as `/model auto`), and the failure button **Answer with another model**. A member's files are noted in free's transcript, so the next model knows a picture was sent.

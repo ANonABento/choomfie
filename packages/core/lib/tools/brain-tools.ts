@@ -79,6 +79,7 @@ export const brainTools: ToolDef[] = [
               ? String(args.save_to)
               : join(ctx.DATA_DIR, "brain-files", to, new Date().toISOString().replace(/[:.]/g, "-")),
             from: "Claude (delegate)",
+            askedFrom: chatId,
             waitMs: DELEGATE_WAIT_MS,
             ...(args.model ? { model: String(args.model) } : {}),
           },

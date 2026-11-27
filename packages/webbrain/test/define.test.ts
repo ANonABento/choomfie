@@ -85,6 +85,52 @@ describe("defineWebBrain", () => {
     }
   });
 
+  test("/stop before the site has a conversation id: stops it the moment it has one", async () => {
+    const asked = gate();
+    const stops: string[] = [];
+    const { brain, destroy } = await setup(
+      async (_i, t) => {
+        await asked.promise;
+        t.started("conv-early");
+        return { text: "", ref: "conv-early", stopped: t.stopRequested() };
+      },
+      { stop: async (_page, ref) => (stops.push(ref), true) }
+    );
+    try {
+      const reply = brain.send(msg("chan1"), {} as never);
+      for (let i = 0; i < 5; i++) await tick();
+      expect(await brain.stop!("chan1")).toBe(true);
+      asked.open();
+      expect((await reply).stopped).toBe(true);
+      expect(stops).toEqual(["conv-early"]);
+    } finally {
+      await destroy();
+    }
+  });
+
+  test("/stop cancels a message still waiting for its tab: it's never sent", async () => {
+    const first = gate();
+    const sent: string[] = [];
+    const { brain, destroy } = await setup(async (i) => {
+      sent.push(i.text);
+      if (sent.length === 1) await first.promise;
+      return { text: "ok", ref: "conv-q" };
+    });
+    try {
+      const one = brain.send(msg("chan1", "one"), {} as never);
+      for (let i = 0; i < 5; i++) await tick();
+      const two = brain.send(msg("chan1", "two"), {} as never);
+      for (let i = 0; i < 5; i++) await tick();
+      expect(await brain.stop!("chan1")).toBe(true);
+      first.open();
+      expect((await one).stopped).toBe(true);
+      expect((await two).stopped).toBe(true);
+      expect(sent.some((t) => t.includes("two"))).toBe(false);
+    } finally {
+      await destroy();
+    }
+  });
+
   test("/stop reaches the turn in flight, which ends as stopped", async () => {
     const started = gate();
     const stops: string[] = [];

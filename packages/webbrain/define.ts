@@ -159,6 +159,8 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
     /** Continues sent for late answers, per chat, since the owner last wrote: bounded like the in-turn ones. */
     const lateContinues = new Map<string, number>();
     const active = new Map<string, ActiveTurn>();
+    /** Turns sent but not yet on a tab (the browser is opening, or an earlier turn has it): `/stop` cancels them too. */
+    const waiting = new Map<string, Set<ActiveTurn>>();
     /**
      * `/compact` summaries waiting for the chat's next message, which opens a
      * fresh site conversation seeded with them. In memory: a restart before
@@ -286,9 +288,14 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
           await getBrain(turn.asking.brain)?.stop?.(turn.asking.chatKey).catch(() => false);
           return true;
         }
-        const page = poolFor(profileOf(chatKey)).peek(chatKey);
-        if (!turn?.ref || !page || !adapter.stop) return false;
+        const queued = [...(waiting.get(chatKey) ?? [])].filter((t) => !t.stop);
+        for (const t of queued) t.stop = true;
+        if (!turn) return queued.length > 0;
         turn.stop = true;
+        const page = poolFor(profileOf(chatKey)).peek(chatKey);
+        // Not on the site yet (still typing, or the conversation has no id yet): the turn checks
+        // `stop` before sending, and `started()` stops the conversation the moment it has an id.
+        if (!turn.ref || !page || !adapter.stop) return true;
         return adapter.stop(page, turn.ref);
       },
 
@@ -336,6 +343,8 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
         const seed = message.meta?.[LATE_CONTINUE] ? undefined : compacted.get(message.chatKey);
         const stored = splitRef(chat.backendRef);
         const turn: ActiveTurn = { ref: seed ? undefined : stored.ref, stop: false };
+        const queue = waiting.get(message.chatKey) ?? new Set<ActiveTurn>();
+        waiting.set(message.chatKey, queue.add(turn));
         // Which account: the conversation's own, unless that one is out of what this asks for and another isn't.
         const kind = mediaKindOf(message.content);
         let profile = stored.profile;
@@ -377,13 +386,18 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
           const { mode } = build();
           const runTurn = (prompt: string, attach: string[]) =>
             onTab(message.chatKey, (page) => {
-              status.begin();
+              queue.delete(turn);
               active.set(message.chatKey, turn);
+              // Stopped before anything was sent: don't send it.
+              if (turn.stop) return Promise.resolve<TurnResult>({ text: "", ref: turn.ref ?? "", stopped: true });
+              status.begin();
               const tctx: TurnContext = {
                 ref: turn.ref,
                 started(ref) {
                   turn.ref = ref;
                   chats.setBackendRef(chat.id, joinRef(profile, ref));
+                  // `/stop` came before the conversation had an id: stop it now.
+                  if (turn.stop) adapter.stop?.(page, ref).catch(() => false);
                 },
                 stopRequested: () => turn.stop,
                 progress,
@@ -535,7 +549,7 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
           if (fromOthers.length) result = { ...result, files: [...(result.files ?? []), ...fromOthers] };
           if (waiting) result = { ...result, approvals: [...(result.approvals ?? []), waiting] };
 
-          chats.setBackendRef(chat.id, joinRef(profile, result.ref));
+          if (result.ref) chats.setBackendRef(chat.id, joinRef(profile, result.ref));
           startedOn.delete(message.chatKey);
           if (seed) {
             compacted.delete(message.chatKey);
@@ -559,6 +573,8 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
           };
         } finally {
           if (active.get(message.chatKey) === turn) active.delete(message.chatKey);
+          queue.delete(turn);
+          if (!queue.size && waiting.get(message.chatKey) === queue) waiting.delete(message.chatKey);
           await status.close();
           rmSync(batch, { recursive: true, force: true });
         }

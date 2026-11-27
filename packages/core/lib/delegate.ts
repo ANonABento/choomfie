@@ -57,6 +57,8 @@ export interface DelegateRequest {
   model?: string;
   /** Asks deep this already is: Claude's or the owner's is 0. Past MAX_DELEGATION_DEPTH it's refused (no loops). */
   depth?: number;
+  /** The chat the delegator is answering in: `/stop` there stops this task too. */
+  askedFrom?: string;
 }
 
 export interface DelegateResult {
@@ -103,6 +105,22 @@ export function saveFiles(files: BrainFile[], dir: string): string[] {
   });
 }
 
+/** Tasks in flight, by the chat that asked: `/stop` there reaches them. */
+const running = new Map<string, Set<{ to: string; conversation: string }>>();
+
+/** Stop every task delegated from `chatId` that is still running. Returns the labels of the brains asked to stop. */
+export async function stopDelegations(chatId: string): Promise<string[]> {
+  const tasks = [...(running.get(chatId) ?? [])];
+  const stopped = await Promise.all(
+    tasks.map(async (t) => {
+      const brain = getBrain(t.to);
+      const ok = await brain?.stop?.(t.conversation).catch(() => false);
+      return ok ? brain!.label : null;
+    })
+  );
+  return [...new Set(stopped.filter((l): l is string => !!l))];
+}
+
 /** Who can take a task and what each does, for errors. */
 const targetsLine = () => `brains: ${brainDirectory() || "none loaded"}`;
 
@@ -119,43 +137,57 @@ export async function delegate(req: DelegateRequest, ctx: AppContext): Promise<D
   }
   if (!isAbsolute(req.saveTo)) throw new DelegateError("saveTo must be an absolute path");
 
-  return inConversation(req.conversation, async () => {
-    const deadline = Date.now() + req.waitMs;
-    const replies: BrainReply[] = [
-      await brain.send(
-        {
-          chatKey: req.conversation,
-          content: req.task,
-          filePaths: req.files ?? [],
-          meta: {
-            chat_id: req.conversation,
-            user: req.from,
-            role: "owner",
-            // Whoever answers this can't hand it on past the limit.
-            [DELEGATION_DEPTH]: String(depth + 1),
-            ...(req.model ? { model: req.model } : {}),
-          },
-        },
-        ctx
-      ),
-    ];
-    // Background work: wait here (holding the conversation) for each late result, until the deadline.
-    while (replies.at(-1)!.background && !replies.at(-1)!.stopped) {
-      const late = await awaitLateReply(brain.id, req.conversation, deadline - Date.now());
-      if (!late) break;
-      replies.push(late);
+  const task = { to: brain.id, conversation: req.conversation };
+  const mine = req.askedFrom ? (running.get(req.askedFrom) ?? new Set()) : null;
+  if (mine) running.set(req.askedFrom!, mine.add(task));
+  try {
+    return await run();
+  } finally {
+    if (mine) {
+      mine.delete(task);
+      if (!mine.size && running.get(req.askedFrom!) === mine) running.delete(req.askedFrom!);
     }
-    const last = replies.at(-1)!;
-    return {
-      label: brain.label,
-      text: replies.map((r) => r.text).filter(Boolean).join("\n\n"),
-      files: saveFiles(replies.flatMap((r) => r.files ?? []), req.saveTo),
-      choices: last.choices ?? [],
-      approvals: replies.flatMap((r) => r.approvals ?? []).map((a) => a.title),
-      stillWorking: !!last.background && !last.stopped,
-      stopped: !!last.stopped,
-    };
-  });
+  }
+
+  function run() {
+    return inConversation(req.conversation, async () => {
+      const deadline = Date.now() + req.waitMs;
+      const replies: BrainReply[] = [
+        await brain.send(
+          {
+            chatKey: req.conversation,
+            content: req.task,
+            filePaths: req.files ?? [],
+            meta: {
+              chat_id: req.conversation,
+              user: req.from,
+              role: "owner",
+              // Whoever answers this can't hand it on past the limit.
+              [DELEGATION_DEPTH]: String(depth + 1),
+              ...(req.model ? { model: req.model } : {}),
+            },
+          },
+          ctx
+        ),
+      ];
+      // Background work: wait here (holding the conversation) for each late result, until the deadline.
+      while (replies.at(-1)!.background && !replies.at(-1)!.stopped) {
+        const late = await awaitLateReply(brain.id, req.conversation, deadline - Date.now());
+        if (!late) break;
+        replies.push(late);
+      }
+      const last = replies.at(-1)!;
+      return {
+        label: brain.label,
+        text: replies.map((r) => r.text).filter(Boolean).join("\n\n"),
+        files: saveFiles(replies.flatMap((r) => r.files ?? []), req.saveTo),
+        choices: last.choices ?? [],
+        approvals: replies.flatMap((r) => r.approvals ?? []).map((a) => a.title),
+        stillWorking: !!last.background && !last.stopped,
+        stopped: !!last.stopped,
+      };
+    });
+  }
 }
 
 /**
