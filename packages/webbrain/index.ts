@@ -6,7 +6,7 @@
  * See docs/webbrain.md.
  */
 
-export { defineWebBrain, defineWebBrains, framePrompt, modePrompt, originalName, answerText, type WebBrainOptions } from "./define.ts";
+export { defineWebBrain, defineWebBrains, framePrompt, modePrompt, originalName, attachmentNames, answerText, type WebBrainOptions } from "./define.ts";
 export {
   LoginRequiredError,
   LayoutChangedError,

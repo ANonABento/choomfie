@@ -78,6 +78,25 @@ export function originalName(inboxPath: string): string {
   return basename(inboxPath).replace(/^\d+_[a-z0-9]+_/, "") || basename(inboxPath);
 }
 
+/**
+ * Original names for one message's attachments, made distinct. Discord often
+ * gives every photo in a message the same name (`image.png`); copied into one
+ * folder under that name, each would overwrite the last, and the site would
+ * get the last photo N times. Repeats become `image (2).png`, `image (3).png`.
+ */
+export function attachmentNames(inboxPaths: string[]): string[] {
+  const taken = new Set<string>();
+  return inboxPaths.map((p) => {
+    const name = originalName(p);
+    const dot = name.lastIndexOf(".");
+    const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ""];
+    let out = name;
+    for (let n = 2; taken.has(out.toLowerCase()); n++) out = `${stem} (${n})${ext}`;
+    taken.add(out.toLowerCase());
+    return out;
+  });
+}
+
 /** What the Discord answer says beyond the site's own text. */
 export function answerText(result: Pick<TurnResult, "text" | "stopped" | "background" | "files">, label: string): string {
   if (result.stopped) return `${result.text ? `${result.text}\n\n` : ""}⏹️ Stopped.`;
@@ -332,9 +351,10 @@ function webBrainRuntime(adapter: SiteAdapter, opts: WebBrainOptions = {}): WebB
 
         // Copy attachments under their original names so the site sees "photo.png".
         const batch = join(outbox, `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
-        const files = message.filePaths.map((p) => {
+        const names = attachmentNames(message.filePaths);
+        const files = message.filePaths.map((p, i) => {
           mkdirSync(batch, { recursive: true });
-          const dest = join(batch, originalName(p));
+          const dest = join(batch, names[i]!);
           copyFileSync(p, dest);
           return dest;
         });

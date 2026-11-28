@@ -28,6 +28,7 @@ import { withFiles } from "../../../plugins/waymond/adapter.ts";
 import { continueAfterToolCap, planContext, stripNarration, TOOLS_REF, toolUrl, WAYMOND_MODES } from "../../../plugins/waymond/modes.ts";
 import type { Page } from "@choomfie/webbrain";
 import { framePrompt, originalName, toApproval } from "../../../plugins/waymond/index.ts";
+import { attachmentNames } from "@choomfie/webbrain";
 
 // Shapes as observed from app.ambition.inc on 2026-11-04.
 const turn = (over: Record<string, unknown> = {}) => ({
@@ -165,6 +166,11 @@ describe("framePrompt", () => {
   test("inbox prefixes are stripped from attachment names", () => {
     expect(originalName("/x/inbox/1793824118401_ab12cd_photo.png")).toBe("photo.png");
     expect(originalName("/x/inbox/plain.txt")).toBe("plain.txt");
+  });
+
+  test("same-named attachments in one message stay separate files", () => {
+    const paths = ["1_aa_image.png", "2_bb_image.png", "3_cc_IMAGE.png", "4_dd_notes", "5_ee_notes", "6_ff_photo.jpg"].map((n) => `/x/inbox/${n}`);
+    expect(attachmentNames(paths)).toEqual(["image.png", "image (2).png", "IMAGE (3).png", "notes", "notes (2)", "photo.jpg"]);
   });
 });
 
